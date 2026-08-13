@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head><meta charset="utf-8"><title>多区块表单测试页</title></head>
+<body>
+  <h1>职位申请表</h1>
+  <ul class="steps">
+    <li class="step-item done">基本信息</li>
+    <li class="step-item active">教育经历</li>
+    <li class="step-item">确认提交</li>
+  </ul>
+
+  <fieldset>
+    <legend>基本信息</legend>
+    <label for="name">姓名</label>
+    <input type="text" id="name" name="name" required value="张三">
+    <label for="phone">手机号码</label>
+    <input type="tel" id="phone" name="phone" required>
+    <label for="email">电子邮箱</label>
+    <input type="email" id="email" name="email" value="zhangsan@example.com">
+  </fieldset>
+
+  <h2>教育经历</h2>
+  <div class="card education-card">
+    <div class="card-title">教育经历 1</div>
+    <label for="school">学校名称</label>
+    <input type="text" id="school" name="school">
+    <label for="major">专业</label>
+    <input type="text" id="major" name="major">
+    <button type="button" class="add-btn">添加教育经历</button>
+  </div>
+
+  <div>
+    <span class="row-label">自我评价</span>
+    <textarea id="eval" name="eval" rows="4" placeholder="请简要介绍自己"></textarea>
+  </div>
+
+  <button type="button" id="next-step">下一步</button>
+</body>
+</html>

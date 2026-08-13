@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<!-- 基准表单 demo-1（docs/01 §6.3）：简单单页表单。
+     覆盖：原生 label+input、radio、原生 select、date input、textarea、必填标记。
+     data-field 属性是评测锚点（供评测脚本断言用，智能体不得依赖）。 -->
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>星辰科技 - 校园招聘简历登记</title>
+<style>
+  body { font-family: "Microsoft YaHei", sans-serif; background: #f5f6fa; margin: 0; }
+  .container { max-width: 720px; margin: 24px auto; background: #fff; padding: 32px 40px;
+               border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,.08); }
+  h1 { font-size: 20px; border-left: 4px solid #2f54eb; padding-left: 10px; }
+  .row { margin: 18px 0; }
+  label.field { display: inline-block; width: 110px; color: #333; vertical-align: top; }
+  input[type=text], input[type=tel], input[type=email], input[type=date], select, textarea {
+    width: 320px; padding: 6px 8px; border: 1px solid #d9d9d9; border-radius: 4px; }
+  textarea { width: 480px; }
+  .required::after { content: " *"; color: #f5222d; }
+  .radio-group label { margin-right: 16px; }
+  button { background: #2f54eb; color: #fff; border: 0; padding: 8px 28px;
+           border-radius: 4px; cursor: pointer; }
+</style>
+</head>
+<body>
+<div class="container">
+  <h1>校园招聘 - 简历信息登记表</h1>
+  <form id="apply-form">
+    <div class="row">
+      <label class="field required" for="name">姓名</label>
+      <input type="text" id="name" name="name" data-field="name" required>
+    </div>
+    <div class="row radio-group">
+      <label class="field">性别</label>
+      <label><input type="radio" name="gender" value="男" data-field="gender-male"> 男</label>
+      <label><input type="radio" name="gender" value="女" data-field="gender-female"> 女</label>
+    </div>
+    <div class="row">
+      <label class="field required" for="birth">出生日期</label>
+      <input type="date" id="birth" name="birth" data-field="birth" required>
+    </div>
+    <div class="row">
+      <label class="field required" for="phone">手机号码</label>
+      <input type="tel" id="phone" name="phone" data-field="phone" required>
+    </div>
+    <div class="row">
+      <label class="field required" for="email">电子邮箱</label>
+      <input type="email" id="email" name="email" data-field="email" required>
+    </div>
+    <div class="row">
+      <label class="field" for="native">籍贯</label>
+      <input type="text" id="native" name="native" data-field="native">
+    </div>
+    <div class="row">
+      <label class="field" for="city">现居城市</label>
+      <input type="text" id="city" name="city" data-field="city">
+    </div>
+    <div class="row">
+      <label class="field required" for="degree">最高学历</label>
+      <select id="degree" name="degree" data-field="degree" required>
+        <option value="">请选择</option>
+        <option>大专</option>
+        <option>本科</option>
+        <option>硕士</option>
+        <option>博士</option>
+      </select>
+    </div>
+    <div class="row">
+      <label class="field" for="school">毕业院校</label>
+      <input type="text" id="school" name="school" data-field="school">
+    </div>
+    <div class="row">
+      <label class="field" for="major">专业</label>
+      <input type="text" id="major" name="major" data-field="major">
+    </div>
+    <div class="row">
+      <label class="field" for="position">应聘岗位</label>
+      <input type="text" id="position" name="position" data-field="position">
+    </div>
+    <div class="row">
+      <label class="field" for="salary">期望薪资</label>
+      <input type="text" id="salary" name="salary" data-field="salary" placeholder="如 15-20K">
+    </div>
+    <div class="row">
+      <label class="field" for="intro">自我评价</label>
+      <textarea id="intro" name="intro" rows="4" data-field="intro"></textarea>
+    </div>
+    <div class="row">
+      <button type="submit" id="submit-btn">提交申请</button>
+    </div>
+  </form>
+</div>
+<script>
+  document.getElementById("apply-form").addEventListener("submit", (e) => {
+    e.preventDefault();
+    alert("（演示页）已拦截提交");
+  });
+</script>
+</body>
+</html>

@@ -1,0 +1,32 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+htmlcov/
+.coverage*
+
+# 构建产物
+build/
+dist/
+*.spec
+
+# 前端
+node_modules/
+frontend/dist/
+
+# 本地数据与密钥（绝不入库）
+config.yaml
+*.local.yaml
+runs/
+logs/
+browser_profiles/
+*.db
+
+# IDE / 系统
+.idea/
+.vscode/
+Thumbs.db

@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<!-- 覆盖场景：长页面滚动分段感知 + 元素去重合并（40 个字段，页面高度远超视口） -->
+<html lang="zh">
+<head><meta charset="utf-8"><title>长表单</title>
+<style>
+  body { font-family: sans-serif; }
+  .row { margin: 28px 0; }
+  label { display: inline-block; width: 120px; }
+</style>
+</head>
+<body>
+<h2>超长信息登记表</h2>
+<form>
+  <script>
+    for (let i = 1; i <= 40; i++) {
+      const n = String(i).padStart(2, "0");
+      document.write(
+        '<div class="row"><label for="f' + n + '">字段' + n + '</label>' +
+        '<input id="f' + n + '" name="f' + n + '" type="text"></div>'
+      );
+    }
+  </script>
+  <button type="submit">保存</button>
+</form>
+</body>
+</html>

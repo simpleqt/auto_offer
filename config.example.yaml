@@ -1,0 +1,24 @@
+# AutoOffer 模型端点配置样例。
+# 复制为 config.yaml 后填入真实值；config.yaml 已被 .gitignore 排除，不会入库。
+# 正式软件形态中，该配置由界面「模型配置」页管理（存 SQLite + 密钥走系统加密），
+# 本文件仅供 CLI / 开发调试使用。
+
+default_endpoint: qwen-local
+
+endpoints:
+  - id: qwen-local
+    name: "Qwen3.5-35B（自建 vLLM）"
+    base_url: "http://202.115.138.32:8011/v1"
+    api_key: "sk-xxxxxxxxxxxxxxxxxxxx"   # 填入真实 key
+    model: "qwen3.5-35b"
+    temperature: 0.1
+    max_tokens: 32768
+    timeout_s: 600
+    max_concurrency: 4
+    extra_body:
+      chat_template_kwargs:
+        enable_thinking: false
+
+# 角色路由（可选）：planner / actor / validator / profile_parser / writer
+# 未配置的角色使用 default_endpoint。
+routing: {}

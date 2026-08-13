@@ -1,0 +1,13 @@
+<!DOCTYPE html>
+<!-- 覆盖场景：同源 iframe 内表单的递归提取 -->
+<html lang="zh">
+<head><meta charset="utf-8"><title>宿主页面</title></head>
+<body>
+<h2>报名页（表单在 iframe 中）</h2>
+<div>
+  <label for="host-remark">宿主备注</label>
+  <input id="host-remark" type="text">
+</div>
+<iframe id="form-frame" src="iframe_child.html" style="width: 600px; height: 300px;"></iframe>
+</body>
+</html>
