@@ -1,0 +1,10 @@
+# 统一行尾：仓库内一律 LF，检出时按平台处理，避免跨平台提交出现全文件差异。
+* text=auto eol=lf
+
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.pdf binary
+*.docx binary
+*.ico binary

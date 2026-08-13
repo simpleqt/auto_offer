@@ -10,6 +10,7 @@ selector，经 Driver 执行；click 执行前先过敏感动作门禁（FR-A11�
 from __future__ import annotations
 
 from collections.abc import Mapping
+from pathlib import Path
 from typing import Literal
 
 import structlog
@@ -20,6 +21,7 @@ from autooffer_core.actions.models import Action, ActionBatch
 from autooffer_core.drivers.base import Driver
 from autooffer_core.errors import ActionError
 from autooffer_core.perception.models import PageObservation, UIElement
+from autooffer_core.profile.schema import AttachmentSpec
 from autooffer_core.widgets.base import ExecContext, FillResult
 from autooffer_core.widgets.daterange import DateRangeHandler
 from autooffer_core.widgets.registry import WidgetRegistry, default_registry
@@ -28,6 +30,21 @@ from autooffer_core.widgets.upload import UploadHandler, UploadTask, parse_attac
 log = structlog.get_logger(__name__)
 
 ExecStatus = Literal["ok", "needs_human", "skipped", "delegated"]
+
+# 站点 accept 与实际扩展名的等价写法
+_EXT_ALIASES = {"jpg": {"jpg", "jpeg"}, "jpeg": {"jpg", "jpeg"}, "doc": {"doc", "docx"}}
+
+
+def _ext_allowed(path: str, formats: list[str]) -> bool:
+    """文件扩展名是否满足站点接受的格式列表（空列表表示不限制）。"""
+    if not formats:
+        return True
+    ext = Path(path).suffix.lower().lstrip(".")
+    allowed: set[str] = set()
+    for f in formats:
+        f = f.lower().lstrip(".")
+        allowed |= _EXT_ALIASES.get(f, {f})
+    return ext in allowed
 
 
 class ExecResult(BaseModel):
@@ -55,6 +72,7 @@ class ActionExecutor:
         guard: SensitiveActionGuard | None = None,
         attachments: Mapping[str, str] | None = None,
         humanize: bool = True,
+        upload: UploadHandler | None = None,
     ) -> None:
         self._driver = driver
         self._registry = registry or default_registry()
@@ -62,7 +80,7 @@ class ActionExecutor:
         self._attachments = dict(attachments or {})
         self._humanize = humanize
         self._date_range = DateRangeHandler()
-        self._upload = UploadHandler()
+        self._upload = upload or UploadHandler()
 
     # ---------- 入口 ----------
 
@@ -160,8 +178,8 @@ class ActionExecutor:
             return self._from_fill(t, el, res)
 
         if t == "upload_file":
-            path = self._resolve_attachment(action)
             spec = parse_attachment_spec(el.accept, el.label)
+            path = self._resolve_attachment(action, spec)
             res = await self._upload.fill(el, UploadTask(path=path, spec=spec), ctx)
             return self._from_fill(t, el, res)
 
@@ -182,7 +200,12 @@ class ActionExecutor:
             f"（共 {len(observation.elements)} 个元素，动作 {action.type}: {action.reason}）"
         )
 
-    def _resolve_attachment(self, action: Action) -> str:
+    def _resolve_attachment(self, action: Action, spec: AttachmentSpec) -> str:
+        """按标签取附件，并按站点接受的格式做匹配（FR-A13）。
+
+        标签命中的文件格式不符时，改选档案中格式符合的其它附件；
+        全都不符则报出可操作的提示（提示用户补充对应格式的文件）。
+        """
         label = action.attachment_label
         if not label:
             raise ActionError("upload_file 缺少 attachment_label")
@@ -191,7 +214,21 @@ class ActionExecutor:
             raise ActionError(
                 f"档案中未找到附件标签: {label}（可用: {sorted(self._attachments)}）"
             )
-        return path
+        if _ext_allowed(path, spec.formats):
+            return path
+
+        for alt_label, alt_path in self._attachments.items():
+            if alt_label != label and _ext_allowed(alt_path, spec.formats):
+                log.info(
+                    "upload.format_fallback",
+                    requested=label, chosen=alt_label, accept=spec.formats,
+                )
+                return alt_path
+        raise ActionError(
+            f"站点只接受 {'/'.join(spec.formats)} 格式，档案中的『{label}』是 "
+            f"{Path(path).suffix.lstrip('.') or '未知'} 格式，且无其它符合格式的附件；"
+            "请在档案中补充对应格式的文件"
+        )
 
     async def _via_handler(
         self, el: UIElement, target: object, ctx: ExecContext, action_type: str

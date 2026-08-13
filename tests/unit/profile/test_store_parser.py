@@ -73,6 +73,10 @@ async def test_parse_resume_with_fake_llm(tmp_path: Path) -> None:
     assert profile.id.startswith("profile-")  # auto 被替换为真实 id
     assert profile.basic.name == "张三"
     assert low_conf == ["basic.birth_date"]
+    # 来源简历自动登记为附件，供"上传简历"字段直接使用
+    resumes = [a for a in profile.attachments if a.kind == "resume"]
+    assert resumes
+    assert any(str(f) in a.path or a.path.endswith(f.name) for a in resumes)
     # LLM 收到的提示词包含简历全文与 schema
     sent = llm.messages_seen[0][0].content
     assert "示例大学计算机专业" in sent

@@ -15,10 +15,23 @@ AutoOffer 是一款基于多智能体（Multi-Agent）架构的**桌面软件**�
 | 复杂控件处理 | 原生与自定义下拉、日历式日期选择器、日期区间（实习/项目起止）、级联省市区、单选/复选、富文本 |
 | 附件自动上传 | 简历/证件照/成绩单自动上传（隐藏 input、文件选择器、拖拽区三种形态），按站点格式与大小要求自动匹配附件、超限图片自动压缩 |
 | 官网场景适配 | 登录墙/隐私弹窗/职位列表入口/多步向导/草稿保存/会话超时/重复投递等场景库；对"上传简历自动解析回填"类官网自动进入核对修正模式 |
-| 档案中心 | 上传简历 PDF/Word 自动解析为结构化档案，或手动填写模板；扩展信息体系覆盖性格、爱好、语言等级、获奖、家庭成员等官网常问字段，**按需注入**——表单不问就不提供；开放性问题由 LLM 基于档案生成回答 |
-| 应用端模型配置 | Web 界面管理多个 OpenAI 兼容模型端点，自动探测连通性与视觉能力，不同智能体角色可绑定不同模型 |
+| 档案中心 | 上传简历 PDF/Word 自动解析为结构化档案（来源文件自动登记为可上传附件），或手动填写模板；扩展信息体系覆盖性格、爱好、语言等级、获奖、家庭成员等官网常问字段，**按需注入**——表单不问就不提供；开放性问题由 LLM 基于档案生成回答 |
+| 投递列表 | 填写完成自动登记投递记录（公司/岗位自动识别、同 URL 去重），支持状态跟踪：已填写 / 已提交 / 面试中 / 已拒 / 放弃 |
+| 应用端模型配置 | 界面管理多个 OpenAI 兼容模型端点，自动探测连通性与视觉能力，不同智能体角色可绑定不同模型 |
 | 任务管理 | 任务队列、多任务并行、暂停/恢复/人工接管、WebSocket 实时进度与截图流 |
 | 安全与审计 | 默认不自动提交、敏感动作人工确认、API Key 加密存储、全程动作留痕可回放 |
+
+## 当前进度
+
+Agent Core 已可用（CLI 形态），服务层与图形界面在建设中。基准表单集（`tests/demo_forms/`）真实模型端到端验收情况：
+
+| 基准页 | 覆盖场景 | 状态 |
+| --- | --- | --- |
+| demo-1 简单单页 | 基础控件、原生下拉、日期、必填校验 | 通过（13/13 字段） |
+| demo-2 复杂控件 | 自定义下拉、三级级联、日历式日期区间、富文本 | 通过 |
+| demo-3 多步向导 | 步骤条、步间校验、动态添加经历、预览页 | 通过 |
+| demo-4 简历优先 | 文件上传 + 站点解析回填 → 核对修正模式 | 通过 |
+| demo-5 中文官网 | 隐私弹窗、政治面貌/入党时间、家庭成员表格、证件照上传 | 通过 |
 
 ## 软件形态
 
@@ -47,9 +60,35 @@ AutoOffer 是一款基于多智能体（Multi-Agent）架构的**桌面软件**�
 4. 在「任务」页粘贴目标简历页 URL，点击开始；软件弹出受控浏览器窗口自动填写，界面实时显示进度与截图。
 5. 遇到登录/验证码时软件暂停并提醒你手动处理；填写完成后生成填写报告，你检查无误后手动点击提交。
 
+## 现在就能用（CLI）
+
+图形界面完成前，Agent Core 已可通过命令行完整使用：
+
+```bash
+pip install -e ".[dev]"
+playwright install chromium
+cp config.example.yaml config.yaml       # 填入你的模型端点与 api_key
+
+# 1. 检查模型端点（连通性 + 是否支持视觉输入）
+python -m cli.main probe
+
+# 2. 建立个人档案：解析简历，或生成模板手填
+python -m cli.main parse-resume 我的简历.pdf --out profile.yaml
+python -m cli.main profile-template --out profile.yaml
+
+# 3. 自动填写目标表单（省略 --headless 会弹出浏览器窗口实时观看）
+python -m cli.main fill "https://example.com/apply" --profile profile.yaml
+
+# 4. 查看投递列表 / 标记已提交
+python -m cli.main apps
+python -m cli.main apps --mark app-1a2b3c4d --status submitted
+```
+
+填写完成后浏览器窗口保留、**不会自动提交**，请自行检查填写报告后手动提交。
+
 ## 开发者快速开始
 
-> 项目处于设计与开发阶段，以下为目标开发方式。
+> 服务层与界面处于建设中，以下为目标开发方式。
 
 ```bash
 # 后端 + Agent Core
@@ -66,8 +105,14 @@ python -m autooffer app
 # 打包 Windows 安装程序
 python scripts/build_installer.py
 
-# 也支持纯 CLI 模式（供高级用户 / 调试）
-python -m autooffer fill "https://example.com/apply" --profile profiles/me.yaml
+```
+
+## 测试
+
+```bash
+python -m pytest tests/unit -q                      # 单元测试（离线，无需模型）
+python -m pytest tests/integration -q               # 感知/控件集成测试（需 Chromium）
+python scripts/make_test_resume_pdf.py              # 重新生成测试简历 PDF 资产
 ```
 
 ## 文档索引

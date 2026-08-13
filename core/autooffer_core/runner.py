@@ -231,6 +231,11 @@ class AgentRunner:
             if not exec_actions:
                 if batch.section_complete:
                     return
+                # 全是 skip_field（档案无数据）→ 重试无意义，直接结束该区块
+                if batch.actions and all(a.type == "skip_field" for a in batch.actions):
+                    log.info("runner.section_unfillable", section=section_title)
+                    self._history.add(f"区块「{section_title}」档案缺失，已记入待确认")
+                    return
                 retry_advice = "上一轮没有可执行动作，请重新审视区块元素与目标。"
                 continue
 

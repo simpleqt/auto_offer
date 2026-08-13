@@ -2,8 +2,11 @@
 
 命令：
 - autooffer version                     版本信息
-- autooffer probe --config config.yaml  探测配置中的模型端点（连通性 + 视觉能力）
-- autooffer fill <url> ...              自动填写（I1 集成阶段接入 Runner 后可用）
+- autooffer probe                       探测模型端点（连通性 + 视觉能力）
+- autooffer parse-resume <file>          简历 PDF/Word → 结构化档案 YAML（FR-P1）
+- autooffer profile-template <out>       生成可手填的档案模板（FR-P2）
+- autooffer fill <url>                   自动填写目标表单
+- autooffer apps                         投递列表：查看 / 更新状态
 """
 
 from __future__ import annotations
@@ -42,16 +45,11 @@ def _endpoint_from_config(cfg: dict[str, Any], endpoint_id: str | None) -> dict[
     raise SystemExit(2)
 
 
-async def _probe(ep_cfg: dict[str, Any]) -> int:
-    # 延迟导入：探测实现由 W4 提供（llm.probe）。尚未合入时给出提示。
-    try:
-        from autooffer_core.llm.interfaces import ModelEndpoint
-        from autooffer_core.llm.probe import probe_endpoint  # type: ignore[import-not-found]
-    except ImportError:
-        print("探测实现尚未集成（W4 llm.probe），请先完成集成阶段 I1。", file=sys.stderr)
-        return 1
+def _build_endpoint(ep_cfg: dict[str, Any]) -> Any:
+    """配置字典 → ModelEndpoint。"""
+    from autooffer_core.llm.interfaces import ModelEndpoint
 
-    ep = ModelEndpoint(
+    return ModelEndpoint(
         id=str(ep_cfg.get("id", "cli")),
         name=str(ep_cfg.get("name", ep_cfg.get("id", "cli"))),
         base_url=str(ep_cfg["base_url"]),
@@ -63,9 +61,61 @@ async def _probe(ep_cfg: dict[str, Any]) -> int:
         max_concurrency=int(ep_cfg.get("max_concurrency", 4)),
         extra_body=dict(ep_cfg.get("extra_body", {})),
     )
-    result = await probe_endpoint(ep)
+
+
+async def _probe(ep_cfg: dict[str, Any]) -> int:
+    from autooffer_core.llm.probe import probe_endpoint
+
+    result = await probe_endpoint(_build_endpoint(ep_cfg))
     print(json.dumps(result.model_dump(), ensure_ascii=False, indent=2))
     return 0 if result.reachable else 1
+
+
+async def _parse_resume(ep_cfg: dict[str, Any], file_path: str, out_path: str) -> int:
+    """简历文件 → 结构化档案 YAML（FR-P1）。"""
+    from autooffer_core.errors import AutoOfferError
+    from autooffer_core.llm.client import ChatOpenAIClient
+    from autooffer_core.profile.parser import parse_resume
+    from autooffer_core.profile.store import save_profile
+
+    llm = ChatOpenAIClient(_build_endpoint(ep_cfg))
+    print(f"正在解析简历: {file_path}")
+    try:
+        profile, low_conf = await parse_resume(file_path, llm)
+    except AutoOfferError as exc:
+        print(f"解析失败: {exc}", file=sys.stderr)
+        return 1
+
+    save_profile(profile, out_path)
+    print(f"\n已生成档案: {out_path}")
+    print(
+        f"姓名={profile.basic.name} 教育={len(profile.education)}条 "
+        f"经历={len(profile.experiences)}条 技能={len(profile.skills)}项"
+    )
+    if low_conf:
+        print("\n以下字段置信度较低，请打开档案文件确认后再使用：")
+        for path in low_conf:
+            print(f"  - {path}")
+    print("\n下一步: autooffer fill <表单URL> --profile " + out_path)
+    return 0
+
+
+def _profile_template(out_path: str) -> int:
+    """生成可手填的档案模板（FR-P2）：以示例档案为骨架，清空个人数据。"""
+    from autooffer_core.profile.store import profile_to_yaml
+    from autooffer_core.testing import build_sample_profile
+
+    sample = build_sample_profile()
+    text = profile_to_yaml(sample)
+    header = (
+        "# AutoOffer 档案模板：按注释替换为你自己的信息后保存。\n"
+        "# 用法: autooffer fill <表单URL> --profile 本文件路径\n"
+        "# 说明: 扩展信息(extended)按需填写——表单问到才会用到，没填的字段会记入待确认清单。\n"
+        "# 敏感字段(身份证号/家庭成员电话)使用时会单独请求授权。\n\n"
+    )
+    Path(out_path).write_text(header + text, encoding="utf-8")
+    print(f"已生成档案模板: {out_path}（内含示例数据，请替换为你自己的信息）")
+    return 0
 
 
 def app(argv: list[str] | None = None) -> int:
@@ -77,6 +127,14 @@ def app(argv: list[str] | None = None) -> int:
     p_probe = sub.add_parser("probe", help="探测模型端点连通性与视觉能力")
     p_probe.add_argument("--config", default="config.yaml", help="配置文件路径")
     p_probe.add_argument("--endpoint", default=None, help="端点 id（默认取 default_endpoint）")
+
+    p_parse = sub.add_parser("parse-resume", help="简历 PDF/Word → 结构化档案 YAML")
+    p_parse.add_argument("file", help="简历文件路径（pdf/docx/txt）")
+    p_parse.add_argument("--config", default="config.yaml")
+    p_parse.add_argument("--out", default="profile.yaml", help="输出档案路径")
+
+    p_tpl = sub.add_parser("profile-template", help="生成可手填的档案模板")
+    p_tpl.add_argument("--out", default="profile.yaml", help="输出档案路径")
 
     p_fill = sub.add_parser("fill", help="自动填写简历表单")
     p_fill.add_argument("url", help="目标简历表单 URL")
@@ -102,6 +160,12 @@ def app(argv: list[str] | None = None) -> int:
         cfg = _load_config(args.config)
         ep = _endpoint_from_config(cfg, args.endpoint)
         return asyncio.run(_probe(ep))
+    if args.command == "parse-resume":
+        cfg = _load_config(args.config)
+        ep_cfg = _endpoint_from_config(cfg, None)
+        return asyncio.run(_parse_resume(ep_cfg, args.file, args.out))
+    if args.command == "profile-template":
+        return _profile_template(args.out)
     if args.command == "fill":
         cfg = _load_config(args.config)
         ep_cfg = _endpoint_from_config(cfg, None)

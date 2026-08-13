@@ -27,6 +27,23 @@ _SPLIT_RE = re.compile(r"[/,，、\-—\s]+")
 # 单串按行政后缀切段："四川省成都市武侯区" → [四川省, 成都市, 武侯区]
 _CHAIN_RE = re.compile(r"[^省市县区州盟旗]+(?:省|市|县区|区县|县|区|州|盟|旗)")
 
+# 省级前缀（含简称与全称），按长度降序以保证最长匹配（"黑龙江" 先于 "黑"）
+_PROVINCE_PREFIXES: tuple[str, ...] = tuple(
+    sorted(
+        {*_PROVINCES, *_PROVINCES.values(), *_MUNICIPALITIES},
+        key=len,
+        reverse=True,
+    )
+)
+
+
+def _split_by_province_prefix(text: str) -> list[str] | None:
+    """无行政后缀的连写地名按省级前缀切分："四川成都" → ["四川", "成都"]。"""
+    for prefix in _PROVINCE_PREFIXES:
+        if text.startswith(prefix) and len(text) > len(prefix):
+            return [prefix, text[len(prefix) :]]
+    return None
+
 
 def standardize_region(name: str) -> str:
     """单个地名补全标准后缀："四川" → "四川省"，"成都" → "成都市"。"""
@@ -67,4 +84,9 @@ def split_region_chain(text: str) -> list[str]:
         if rest:
             out.append(standardize_region(rest))
         return out
+    # 无后缀连写（如"四川成都"）：按省级前缀拆分
+    if not chain:
+        by_prefix = _split_by_province_prefix(text)
+        if by_prefix is not None:
+            return [standardize_region(p) for p in by_prefix]
     return [standardize_region(text)]

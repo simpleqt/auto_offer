@@ -16,7 +16,7 @@ from pydantic import BaseModel, Field
 
 from autooffer_core.errors import ProfileError
 from autooffer_core.llm.interfaces import ChatMessage, LLMClient
-from autooffer_core.profile.schema import Profile
+from autooffer_core.profile.schema import Attachment, Profile
 
 log = structlog.get_logger(__name__)
 
@@ -92,8 +92,23 @@ JSON Schema：
 只输出一个 JSON 对象：{{"profile": {{...}}, "low_confidence_paths": [...]}}"""
 
 
+def _resume_attachment(file_path: str, text: str) -> Attachment:
+    """把来源简历文件登记为档案附件，供表单的"上传简历"字段直接使用。"""
+    is_zh = any("\u4e00" <= ch <= "\u9fff" for ch in text[:2000])
+    return Attachment(
+        kind="resume",
+        label="中文简历" if is_zh else "英文简历",
+        path=str(Path(file_path).resolve()),
+        language="zh" if is_zh else "en",
+    )
+
+
 async def parse_resume(file_path: str, llm: LLMClient) -> tuple[Profile, list[str]]:
-    """解析简历文件 → (Profile, 低置信字段路径)。"""
+    """解析简历文件 → (Profile, 低置信字段路径)。
+
+    来源简历文件会自动登记为档案附件（kind=resume），
+    这样"上传简历"类字段无需用户再手工配置附件路径。
+    """
     text = await asyncio.to_thread(extract_text, file_path)
     schema_json = json.dumps(Profile.model_json_schema(), ensure_ascii=False)
     prompt = _PARSE_PROMPT.format(schema=schema_json, resume_text=text)
@@ -104,6 +119,10 @@ async def parse_resume(file_path: str, llm: LLMClient) -> tuple[Profile, list[st
     profile = result.profile
     if not profile.id or profile.id == "auto":
         profile = profile.model_copy(update={"id": f"profile-{uuid.uuid4().hex[:8]}"})
+    # 来源文件是确定事实：按路径判重后登记（不因模型臆造的附件项而跳过）
+    source = _resume_attachment(file_path, text)
+    if not any(Path(a.path) == Path(source.path) for a in profile.attachments):
+        profile.attachments.append(source)
     log.info(
         "resume.parsed",
         file=Path(file_path).name,
