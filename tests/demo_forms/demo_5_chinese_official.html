@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<!-- 基准表单 demo-5（docs/01 §6.3）：中文官网风格页。
+     覆盖：隐私协议弹窗（需同意）、政治面貌/入党时间/生源地/户口、家庭成员动态表格、
+     语言能力、获奖经历、证件照上传（像素 295x413、≤200KB 提示）、完善度提示。
+     data-field 为评测锚点。 -->
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>国盛集团人才招聘系统</title>
+<style>
+  body { font-family: "Microsoft YaHei", sans-serif; background: #f2f4f7; margin: 0; }
+  .card { max-width: 740px; margin: 18px auto; background: #fff; padding: 24px 36px; border-radius: 8px; }
+  .row { margin: 13px 0; }
+  label.f { display: inline-block; width: 120px; }
+  input[type=text], input[type=month], select { width: 240px; padding: 6px 8px;
+    border: 1px solid #ccc; border-radius: 4px; }
+  .progress { background: #fff7e6; border: 1px solid #ffd591; padding: 8px 14px;
+              border-radius: 4px; margin-bottom: 14px; }
+  table { border-collapse: collapse; }
+  td, th { border: 1px solid #e5e5e5; padding: 6px 10px; }
+  td input { width: 130px; }
+  .mask { position: fixed; inset: 0; background: rgba(0,0,0,.45); z-index: 999;
+          display: flex; align-items: center; justify-content: center; }
+  .dialog { background: #fff; border-radius: 8px; padding: 26px 32px; width: 420px; }
+  button { padding: 6px 20px; border-radius: 4px; border: 1px solid #2f54eb;
+           background: #2f54eb; color: #fff; cursor: pointer; }
+  h4 { margin: 18px 0 8px; border-left: 3px solid #2f54eb; padding-left: 8px; }
+</style>
+</head>
+<body>
+<div class="mask" id="privacy-mask">
+  <div class="dialog" role="dialog">
+    <h3>个人信息保护提示</h3>
+    <p>我们将依据《个人信息保护法》处理您填写的信息，仅用于本次招聘流程。请阅读并同意《隐私政策》后继续。</p>
+    <button id="agree-btn" data-field="agree">同意并继续</button>
+  </div>
+</div>
+
+<div class="card">
+  <h2>国盛集团 - 校园招聘报名表</h2>
+  <div class="progress">当前简历完整度：<b id="pct">30%</b>（完整度达到 80% 方可投递）</div>
+
+  <h4>基本信息</h4>
+  <div class="row"><label class="f">姓名</label><input type="text" id="name" data-field="name"></div>
+  <div class="row"><label class="f">政治面貌</label>
+    <select id="political" data-field="political">
+      <option value="">请选择</option><option>群众</option><option>共青团员</option>
+      <option>中共党员</option><option>民主党派</option>
+    </select></div>
+  <div class="row"><label class="f">入党/入团时间</label>
+    <input type="month" id="party-date" data-field="party-date"></div>
+  <div class="row"><label class="f">生源地</label>
+    <input type="text" id="origin" data-field="origin"></div>
+  <div class="row"><label class="f">户口所在地</label>
+    <input type="text" id="hukou" data-field="hukou"></div>
+
+  <h4>语言能力</h4>
+  <div class="row"><label class="f">外语语种</label>
+    <select id="lang" data-field="lang">
+      <option value="">请选择</option><option>英语</option><option>日语</option><option>德语</option>
+    </select>
+    <select id="lang-level" data-field="lang-level" style="width:160px">
+      <option value="">等级</option><option>CET-4</option><option>CET-6</option>
+      <option>专业八级</option><option>N2</option><option>N1</option>
+    </select></div>
+
+  <h4>获奖经历</h4>
+  <div class="row"><label class="f">主要获奖</label>
+    <input type="text" id="award" data-field="award" placeholder="如：国家级竞赛奖项"></div>
+
+  <h4>家庭成员</h4>
+  <table id="family">
+    <tr><th>关系</th><th>姓名</th><th>工作单位</th></tr>
+    <tr>
+      <td><input type="text" data-field="fam1-rel"></td>
+      <td><input type="text" data-field="fam1-name"></td>
+      <td><input type="text" data-field="fam1-org"></td>
+    </tr>
+  </table>
+  <div class="row"><button type="button" id="add-fam" style="background:#fff;color:#2f54eb">+ 添加家庭成员</button></div>
+
+  <h4>证件照</h4>
+  <div class="row">
+    <label class="f" for="photo">上传证件照</label>
+    <input type="file" id="photo" data-field="photo" accept="image/jpeg,image/png">
+    <div style="color:#999;font-size:12px;margin-left:120px">要求：295x413 像素以内，大小不超过 200KB</div>
+  </div>
+  <div class="row"><button type="button" id="save-all">保存报名表</button></div>
+</div>
+
+<script>
+  document.getElementById("agree-btn").addEventListener("click", () => {
+    document.getElementById("privacy-mask").style.display = "none";
+  });
+  let famCount = 1;
+  document.getElementById("add-fam").addEventListener("click", () => {
+    famCount++;
+    const tr = document.createElement("tr");
+    tr.innerHTML =
+      '<td><input type="text" data-field="fam' + famCount + '-rel"></td>' +
+      '<td><input type="text" data-field="fam' + famCount + '-name"></td>' +
+      '<td><input type="text" data-field="fam' + famCount + '-org"></td>';
+    document.getElementById("family").appendChild(tr);
+  });
+  // 简易完整度计算
+  setInterval(() => {
+    const inputs = [...document.querySelectorAll("input[type=text], input[type=month], select")];
+    const filled = inputs.filter(i => i.value).length;
+    document.getElementById("pct").textContent =
+      Math.min(100, Math.round(30 + 70 * filled / inputs.length)) + "%";
+  }, 800);
+</script>
+</body>
+</html>

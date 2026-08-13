@@ -220,7 +220,7 @@ class AgentRunner:
             self._emit("step", "actor", batch.summary or f"输出 {len(batch.actions)} 个动作")
 
             # 特殊动作前置处理
-            extra_profile = await self._handle_meta_actions(batch, section_title)
+            extra_profile = await self._handle_meta_actions(batch, section_title, observation)
             if any(a.type == "ask_user" for a in batch.actions):
                 reason = next(a.reason for a in batch.actions if a.type == "ask_user")
                 await self._wait_human(reason or "Actor 请求人工介入")
@@ -279,8 +279,9 @@ class AgentRunner:
         )
 
     async def _handle_meta_actions(
-        self, batch: ActionBatch, section_title: str
+        self, batch: ActionBatch, section_title: str, obs: PageObservation
     ) -> dict[str, Any] | None:
+        by_index = {e.index: e for e in obs.elements}
         extra: dict[str, Any] | None = None
         for action in batch.actions:
             if action.type == "request_profile" and action.profile_paths:
@@ -294,8 +295,11 @@ class AgentRunner:
                         + ", ".join(restricted)
                     )
             elif action.type == "skip_field":
+                # 用元素 label 做键，避免每轮 reason 措辞不同导致重复记录
+                el = by_index.get(action.element_index) if action.element_index else None
+                label = (el.label if el else "") or (action.reason or "未知字段")[:24]
                 self._checklist.upsert(
-                    action.reason or "未知字段",
+                    label,
                     section_title=section_title,
                     status="pending_confirm",
                     note="档案缺失，待用户补充",

@@ -49,10 +49,13 @@ _CATALOG_SPEC: list[tuple[str, str]] = [
     ("extended.relocation_willingness", "工作地点调剂意愿"),
 ]
 
-# 通用简历表单（整页单区块）预取的核心全集
+# 通用简历表单（整页单区块）预取的核心全集。
+# 含附件与非敏感常问扩展字段；sensitive 级（家庭成员等）仍靠标题命中或 request_profile 补取。
 _CORE_PATHS: list[str] = [
     "basic", "intention", "education", "experiences",
-    "skills", "certificates", "self_evaluation",
+    "skills", "certificates", "self_evaluation", "attachments",
+    "extended.languages", "extended.awards", "extended.origin_place",
+    "extended.party_join_date", "extended.personality.hobbies",
 ]
 
 # 区块标题关键词 → 预取的字段路径组
