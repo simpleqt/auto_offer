@@ -30,6 +30,8 @@ _PREV_HINTS = ("‹", "«", "<", "prev", "上一", "上年", "上一月")
 _NEXT_HINTS = ("›", "»", ">", "next", "下一", "下年", "下一月")
 # 面板当前年月标题，如 "2026年8月" / "2026-08" / "August 2026"
 _TITLE_YM_RE = re.compile(r"(\d{4})\s*[年\-/.]?\s*(\d{1,2})\s*月?")
+# 纯年份标题（年-月面板），如 "2024" / "2024年"
+_TITLE_Y_RE = re.compile(r"^(\d{4})\s*年?$")
 
 _MAX_NAV_STEPS = 48  # 防止导航死循环
 
@@ -119,7 +121,10 @@ class DatePickerHandler:
             obs = await ctx.driver.observe(with_screenshot=False)
             visible = [e for e in obs.elements if e.visible and e.label]
 
+            # 面板形态 A：标题=年月，格子=日；形态 B：标题=纯年份，格子=月（年-月面板）
             current = self._panel_ym(visible)
+            year_only = self._panel_year(visible) if current is None else None
+
             if current is not None and target.month is not None:
                 cur_y, cur_m = current
                 if (cur_y, cur_m) < (target.year, target.month):
@@ -128,6 +133,19 @@ class DatePickerHandler:
                 if (cur_y, cur_m) > (target.year, target.month):
                     await self._click_nav(visible, _PREV_HINTS, ctx)
                     continue
+            elif year_only is not None:
+                if year_only < target.year:
+                    await self._click_nav(visible, _NEXT_HINTS, ctx)
+                    continue
+                if year_only > target.year:
+                    await self._click_nav(visible, _PREV_HINTS, ctx)
+                    continue
+                # 年份到位：点击月份格子（如"7月"），精确匹配防止 6/7 混淆
+                if target.month is not None:
+                    month_el = self._find_month(visible, target.month)
+                    if month_el is not None:
+                        await ctx.driver.click(month_el)
+                        return FillResult(ok=True, strategy="panel_nav", detail=_iso(target))
 
             # 到位（或面板无年月标题）：点击目标日
             if target.day is not None:
@@ -152,6 +170,24 @@ class DatePickerHandler:
                 y, mo = int(m.group(1)), int(m.group(2))
                 if 1 <= mo <= 12:
                     return y, mo
+        return None
+
+    @staticmethod
+    def _panel_year(visible: list[UIElement]) -> int | None:
+        """解析纯年份标题（年-月面板，如日历头只显示 "2024"）。"""
+        for e in visible:
+            m = _TITLE_Y_RE.match(e.label.strip())
+            if m is not None:
+                return int(m.group(1))
+        return None
+
+    @staticmethod
+    def _find_month(visible: list[UIElement], month: int) -> UIElement | None:
+        """精确匹配月份格子："7月"/"07月"/"Jul" 不与 "6月" 混淆。"""
+        wants = {f"{month}月", f"{month:02d}月", str(month), f"{month:02d}"}
+        for e in visible:
+            if e.role in ("custom", "button") and e.label.strip() in wants:
+                return e
         return None
 
     @staticmethod
