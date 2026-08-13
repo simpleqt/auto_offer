@@ -48,7 +48,7 @@ class PlannerOutput(BaseModel):
     next_section_id: str | None = None
     """decision=dispatch_section 时要执行的区块 id。"""
 
-    subtask_goal: str = ""
+    subtask_goal: str | None = None
     """派给 Actor 的子任务目标（一句话，含填写范围与注意事项）。"""
 
     strategy: FlowStrategy = "fill"

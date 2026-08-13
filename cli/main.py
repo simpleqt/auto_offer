@@ -84,6 +84,15 @@ def app(argv: list[str] | None = None) -> int:
     p_fill.add_argument("--profile", required=False, help="档案 YAML 路径（缺省用示例档案）")
     p_fill.add_argument("--headless", action="store_true", help="无头模式（默认弹出浏览器窗口）")
 
+    p_apps = sub.add_parser("apps", help="投递列表：查看/更新状态")
+    p_apps.add_argument("--mark", help="要更新状态的记录 id")
+    p_apps.add_argument("--status", default="submitted",
+                        choices=["filled", "submitted", "interview", "rejected", "abandoned"],
+                        help="目标状态（配合 --mark）或过滤状态（配合 --filter-status）")
+    p_apps.add_argument("--filter-status", action="store_true", help="按 --status 过滤列表")
+    p_apps.add_argument("--note", help="备注")
+    p_apps.add_argument("--store", help="自定义存储文件路径（默认 %%APPDATA%%/AutoOffer）")
+
     args = parser.parse_args(argv)
 
     if args.command == "version":
@@ -97,6 +106,8 @@ def app(argv: list[str] | None = None) -> int:
         cfg = _load_config(args.config)
         ep_cfg = _endpoint_from_config(cfg, None)
         return asyncio.run(_fill(args.url, ep_cfg, args.profile, headless=args.headless))
+    if args.command == "apps":
+        return _apps(args)
 
     parser.print_help()
     return 0
@@ -172,6 +183,40 @@ async def _fill(
     )
     for f in report.fields:
         print(f"  - {f.label}: {f.status}" + (f"（{f.note}）" if f.note else ""))
+
+    # 自动登记投递列表（FR：填写过的岗位加入投递管理）
+    from autooffer_core.applications import ApplicationStore
+
+    record = ApplicationStore().add_from_report(report, page_title=report.page_title)
+    print(
+        f"\n已登记投递列表: [{record.id}] {record.company or '(公司待补)'} / "
+        f"{record.position or '(岗位待补)'} 状态={record.status}"
+    )
+    print("提交后可执行: autooffer apps --mark " + record.id + " submitted")
+    return 0
+
+
+def _apps(args: argparse.Namespace) -> int:
+    from autooffer_core.applications import ApplicationStore
+
+    store = ApplicationStore(args.store) if args.store else ApplicationStore()
+    if args.mark:
+        record = store.update_status(args.mark, args.status, note=args.note)
+        if record is None:
+            print(f"未找到记录: {args.mark}", file=sys.stderr)
+            return 1
+        print(f"已更新 [{record.id}] -> {record.status}")
+        return 0
+    records = store.list(status=args.status if args.filter_status else None)
+    if not records:
+        print("投递列表为空。完成一次 fill 后会自动登记。")
+        return 0
+    print(f"{'ID':<14} {'状态':<10} {'公司':<16} {'岗位':<14} {'填写':<4} {'时间'}")
+    for r in records:
+        print(
+            f"{r.id:<14} {r.status:<10} {(r.company or '-'):<16} "
+            f"{(r.position or '-'):<14} {r.fields_filled:<4} {r.filled_at}"
+        )
     return 0
 
 

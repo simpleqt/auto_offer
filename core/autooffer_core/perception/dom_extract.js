@@ -522,6 +522,25 @@
       if (!isCssVisible(el)) return;
       candidates.push(el);
     });
+    // 已展开弹层内的选项项（自定义下拉/日历面板的叶子短文本，供选项点击与面板导航）
+    const PANEL_SELECTOR =
+      '[class*="panel"], [class*="dropdown"], [class*="menu"], ' +
+      '[class*="popover"], [class*="picker"], [role="listbox"]';
+    let panelCount = 0;
+    doc.querySelectorAll(PANEL_SELECTOR).forEach((panel) => {
+      if (!isCssVisible(panel) || panelCount >= 60) return;
+      panel.querySelectorAll("*").forEach((item) => {
+        if (panelCount >= 60 || candidates.length >= opts.maxElements) return;
+        if (item.children.length > 0) return;
+        if (item.matches(INTERACTIVE_SELECTOR)) return;
+        if (candidates.includes(item)) return;
+        const t = (item.innerText || "").trim();
+        if (!t || t.length > 40) return;
+        if (!isCssVisible(item)) return;
+        candidates.push(item);
+        panelCount += 1;
+      });
+    });
 
     const seen = new Set();
     for (const el of candidates) {
@@ -537,8 +556,12 @@
         const own = cleanLabel(el.innerText || el.value || "");
         if (own) labelInfo = { text: own, raw: own, source: "self-text" };
       }
-      // 自定义勾选控件（div[role=checkbox/radio]）的文字通常写在元素内部
-      if (!labelInfo.text && (role === "checkbox" || role === "radio") && tag !== "input") {
+      // 自定义勾选控件与弹层选项（div 叶子）的文字通常写在元素内部
+      if (
+        !labelInfo.text &&
+        (role === "checkbox" || role === "radio" || role === "custom" || role === "combobox") &&
+        tag !== "input" && tag !== "select"
+      ) {
         const own = cleanLabel(el.innerText || "");
         if (own) labelInfo = { text: own, raw: own, source: "self-text" };
       }

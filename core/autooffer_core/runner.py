@@ -101,6 +101,7 @@ class AgentRunner:
         self._history = HistoryLog()
         self._catalog = self._resolver.catalog(profile)
         self._seq = 0
+        self._last_title = ""
         self.state: RunState = "RUNNING"
 
     # ---------- 事件 ----------
@@ -149,6 +150,7 @@ class AgentRunner:
         while steps < self._config.max_steps:
             steps += 1
             obs = await self._driver.observe()
+            self._last_title = obs.title or self._last_title
             if initial_prefill is None:
                 # 只按首轮观察判定核对模式：智能体自己填的字段不算"站点预填"
                 initial_prefill = obs.scenario.prefilled_ratio
@@ -353,6 +355,7 @@ class AgentRunner:
         return FillReport(
             task_id=self._task_id,
             url=url,
+            page_title=self._last_title,
             profile_id=self._profile.id,
             fields=self._checklist.to_report_fields(),
             started_at=started_at,

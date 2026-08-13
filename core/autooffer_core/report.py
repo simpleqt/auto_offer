@@ -33,6 +33,7 @@ class FillReport(BaseModel):
 
     task_id: str
     url: str
+    page_title: str = ""
     profile_id: str
     fields: list[FieldRecord] = []
     started_at: str = ""

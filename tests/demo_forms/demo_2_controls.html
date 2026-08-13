@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<!-- 基准表单 demo-2（docs/01 §6.3）：复杂控件页。
+     覆盖：div 模拟自定义下拉、日历式日期区间（年月导航）、三级级联、单选复选组、contenteditable 富文本。
+     data-field 为评测锚点。 -->
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>云帆网络 - 社会招聘信息填写</title>
+<style>
+  body { font-family: "Microsoft YaHei", sans-serif; background: #f0f2f5; margin: 0; }
+  .card { max-width: 760px; margin: 20px auto; background: #fff; padding: 28px 36px; border-radius: 8px; }
+  .row { margin: 16px 0; position: relative; }
+  label.f { display: inline-block; width: 110px; vertical-align: top; }
+  .sel { display: inline-block; width: 240px; padding: 6px 10px; border: 1px solid #ccc;
+         border-radius: 4px; cursor: pointer; background: #fff; user-select: none; }
+  .panel { position: absolute; left: 118px; top: 36px; width: 240px; border: 1px solid #ddd;
+           background: #fff; z-index: 50; display: none; box-shadow: 0 2px 10px rgba(0,0,0,.15); }
+  .panel.open { display: block; }
+  .opt { padding: 6px 10px; cursor: pointer; }
+  .opt:hover { background: #e6f4ff; }
+  input[type=text] { width: 240px; padding: 6px 10px; border: 1px solid #ccc; border-radius: 4px; }
+  .cal { width: 224px; padding: 8px; }
+  .cal-head { display: flex; justify-content: space-between; margin-bottom: 6px; }
+  .cal-head button { border: 0; background: #f0f0f0; cursor: pointer; padding: 2px 8px; }
+  .cal-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; }
+  .cal-grid .m { text-align: center; padding: 6px 0; cursor: pointer; border-radius: 4px; }
+  .cal-grid .m:hover { background: #e6f4ff; }
+  .rt { width: 480px; min-height: 80px; border: 1px solid #ccc; border-radius: 4px; padding: 8px; }
+  .chk label { margin-right: 14px; }
+</style>
+</head>
+<body>
+<div class="card">
+  <h2>社会招聘 - 应聘信息</h2>
+
+  <div class="row">
+    <label class="f">姓名</label>
+    <input type="text" id="name" data-field="name">
+  </div>
+
+  <div class="row">
+    <label class="f">最高学历</label>
+    <div class="sel" id="degree-sel" data-field="degree" role="combobox" aria-haspopup="listbox">请选择学历</div>
+    <div class="panel" id="degree-panel">
+      <div class="opt">大专</div><div class="opt">本科</div>
+      <div class="opt">硕士</div><div class="opt">博士</div>
+    </div>
+  </div>
+
+  <div class="row">
+    <label class="f">工作城市</label>
+    <select id="prov" data-field="prov"><option value="">省份</option></select>
+    <select id="city" data-field="city" disabled><option value="">城市</option></select>
+    <select id="dist" data-field="dist" disabled><option value="">区县</option></select>
+  </div>
+
+  <div class="row">
+    <label class="f">实习起止</label>
+    <input type="text" id="range-start" data-field="range-start" readonly
+           class="date-picker-input" placeholder="开始月份">
+    <input type="text" id="range-end" data-field="range-end" readonly
+           class="date-picker-input" placeholder="结束月份" style="margin-left:8px">
+    <div class="panel cal" id="cal-panel">
+      <div class="cal-head">
+        <button type="button" id="cal-prev">«</button>
+        <span id="cal-year">2024</span>
+        <button type="button" id="cal-next">»</button>
+      </div>
+      <div class="cal-grid" id="cal-grid"></div>
+    </div>
+  </div>
+
+  <div class="row chk">
+    <label class="f">到岗时间</label>
+    <label><input type="radio" name="arrive" value="一周内" data-field="arrive-1"> 一周内</label>
+    <label><input type="radio" name="arrive" value="一个月内" data-field="arrive-2"> 一个月内</label>
+    <label><input type="radio" name="arrive" value="三个月内" data-field="arrive-3"> 三个月内</label>
+  </div>
+
+  <div class="row chk">
+    <label class="f">技能标签</label>
+    <label><input type="checkbox" value="Python" data-field="skill-py"> Python</label>
+    <label><input type="checkbox" value="SQL" data-field="skill-sql"> SQL</label>
+    <label><input type="checkbox" value="Java" data-field="skill-java"> Java</label>
+    <label><input type="checkbox" value="Go" data-field="skill-go"> Go</label>
+  </div>
+
+  <div class="row">
+    <label class="f">项目介绍</label>
+    <div class="rt" id="intro" data-field="intro" contenteditable="true" data-placeholder="请介绍一个代表项目"></div>
+  </div>
+
+  <div class="row"><button type="button" id="save-btn">保存</button></div>
+</div>
+
+<script>
+  // 自定义下拉
+  const dsel = document.getElementById("degree-sel");
+  const dpanel = document.getElementById("degree-panel");
+  dsel.addEventListener("click", () => dpanel.classList.toggle("open"));
+  dpanel.querySelectorAll(".opt").forEach(o => o.addEventListener("click", () => {
+    dsel.textContent = o.textContent; dpanel.classList.remove("open");
+  }));
+
+  // 三级级联
+  const AREA = { "四川省": { "成都市": ["武侯区", "锦江区", "高新区"], "绵阳市": ["涪城区"] },
+                 "北京市": { "北京市": ["海淀区", "朝阳区"] } };
+  const prov = document.getElementById("prov"), city = document.getElementById("city"),
+        dist = document.getElementById("dist");
+  Object.keys(AREA).forEach(p => prov.add(new Option(p, p)));
+  prov.addEventListener("change", () => {
+    city.length = 1; dist.length = 1; dist.disabled = true;
+    if (!prov.value) { city.disabled = true; return; }
+    Object.keys(AREA[prov.value]).forEach(c => city.add(new Option(c, c)));
+    city.disabled = false;
+  });
+  city.addEventListener("change", () => {
+    dist.length = 1;
+    if (!city.value) { dist.disabled = true; return; }
+    AREA[prov.value][city.value].forEach(d => dist.add(new Option(d, d)));
+    dist.disabled = false;
+  });
+
+  // 日历式年月选择（起止共用一个面板）
+  const cal = document.getElementById("cal-panel"), grid = document.getElementById("cal-grid"),
+        yearEl = document.getElementById("cal-year");
+  let calYear = 2024, target = null;
+  function renderCal() {
+    yearEl.textContent = calYear; grid.innerHTML = "";
+    for (let m = 1; m <= 12; m++) {
+      const d = document.createElement("div");
+      d.className = "m"; d.textContent = m + "月";
+      d.addEventListener("click", () => {
+        if (target) target.value = calYear + "-" + String(m).padStart(2, "0");
+        cal.classList.remove("open");
+      });
+      grid.appendChild(d);
+    }
+  }
+  document.getElementById("cal-prev").addEventListener("click", () => { calYear--; renderCal(); });
+  document.getElementById("cal-next").addEventListener("click", () => { calYear++; renderCal(); });
+  ["range-start", "range-end"].forEach(id => {
+    const el = document.getElementById(id);
+    el.addEventListener("click", () => {
+      target = el;
+      const r = el.getBoundingClientRect(), card = el.closest(".row");
+      cal.style.top = "36px"; cal.style.left = (el.offsetLeft) + "px";
+      cal.classList.add("open"); renderCal();
+    });
+  });
+  renderCal();
+</script>
+</body>
+</html>
