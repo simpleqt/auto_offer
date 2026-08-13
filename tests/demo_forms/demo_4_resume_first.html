@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<!-- 基准表单 demo-4（docs/01 §6.3）：简历优先流程。
+     覆盖：文件上传（可见 input + 拖拽区）→ 模拟站点解析回填（故意 2 处错误 + 2 处空缺）→ 核对修正。
+     正确答案以示例档案为准：学校=示例大学(回填故意写"示范大学")、实习开始=2023-07(故意回填 2023-08)、
+     邮箱与专业留空待补。data-field 为评测锚点。 -->
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>青云科技 - 人才招聘</title>
+<style>
+  body { font-family: "Microsoft YaHei", sans-serif; background: #f4f6f8; margin: 0; }
+  .card { max-width: 700px; margin: 20px auto; background: #fff; padding: 26px 36px; border-radius: 8px; }
+  .drop { border: 2px dashed #91caff; border-radius: 8px; padding: 26px; text-align: center;
+          color: #666; background: #f0f8ff; margin-bottom: 8px; }
+  .row { margin: 14px 0; }
+  label.f { display: inline-block; width: 110px; }
+  input[type=text], input[type=month] { width: 280px; padding: 6px 8px;
+    border: 1px solid #ccc; border-radius: 4px; }
+  #status { color: #1677ff; margin: 8px 0; min-height: 20px; }
+  #form-area { display: none; }
+</style>
+</head>
+<body>
+<div class="card">
+  <h2>加入青云 - 上传简历快速申请</h2>
+  <div class="drop" id="dropzone">将简历拖拽到此处，或使用下方按钮选择文件（支持 PDF/DOCX，≤5MB）</div>
+  <div class="row">
+    <label class="f" for="resume-file">上传简历</label>
+    <input type="file" id="resume-file" data-field="resume-file" accept=".pdf,.docx">
+  </div>
+  <div id="status"></div>
+
+  <div id="form-area">
+    <h3>请核对解析结果</h3>
+    <div class="row"><label class="f">姓名</label>
+      <input type="text" id="name" data-field="name"></div>
+    <div class="row"><label class="f">手机号码</label>
+      <input type="text" id="phone" data-field="phone"></div>
+    <div class="row"><label class="f">电子邮箱</label>
+      <input type="text" id="email" data-field="email"></div>
+    <div class="row"><label class="f">毕业院校</label>
+      <input type="text" id="school" data-field="school"></div>
+    <div class="row"><label class="f">专业</label>
+      <input type="text" id="major" data-field="major"></div>
+    <div class="row"><label class="f">实习开始月份</label>
+      <input type="month" id="int-start" data-field="int-start"></div>
+    <div class="row"><label class="f">实习结束月份</label>
+      <input type="month" id="int-end" data-field="int-end"></div>
+    <div class="row"><button type="button" id="save">保存信息</button></div>
+  </div>
+</div>
+
+<script>
+  const status = document.getElementById("status");
+  function parseResume(fileName) {
+    status.textContent = "简历解析中…";
+    setTimeout(() => {
+      // 模拟解析回填：2 处故意错误（school/int-start）、2 处空缺（email/major）
+      document.getElementById("name").value = "张三";
+      document.getElementById("phone").value = "13800001111";
+      document.getElementById("school").value = "示范大学";      // 错：应为 示例大学
+      document.getElementById("int-start").value = "2023-08";    // 错：应为 2023-07
+      document.getElementById("int-end").value = "2023-09";
+      document.getElementById("form-area").style.display = "block";
+      status.textContent = "解析完成（" + fileName + "），请核对以下信息";
+    }, 800);
+  }
+  document.getElementById("resume-file").addEventListener("change", (e) => {
+    if (e.target.files.length) parseResume(e.target.files[0].name);
+  });
+  const dz = document.getElementById("dropzone");
+  dz.addEventListener("dragover", (e) => e.preventDefault());
+  dz.addEventListener("drop", (e) => {
+    e.preventDefault();
+    if (e.dataTransfer.files.length) parseResume(e.dataTransfer.files[0].name);
+  });
+</script>
+</body>
+</html>

@@ -145,6 +145,12 @@ async def _fill(
     print(f"端点就绪: {ep.model} 视觉={probe.supports_vision} 时延={probe.latency_ms}ms")
 
     profile = load_profile(profile_path) if profile_path else build_sample_profile()
+    # 示例档案的附件路径指向仓库内测试资产（存在才替换），保证上传链路可用
+    assets = Path("tests/demo_forms/assets")
+    for att in profile.attachments:
+        cand = assets / Path(att.path).name
+        if cand.exists():
+            att.path = str(cand.resolve())
     print(f"档案: {profile.label}（{profile.basic.name}）")
 
     async def gate(reason: str) -> None:
