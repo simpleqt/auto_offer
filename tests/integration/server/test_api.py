@@ -1,0 +1,261 @@
+"""REST API 集成测试：档案 / 模型端点 / 任务 / 投递列表全流程（离线）。"""
+
+from __future__ import annotations
+
+import time
+from typing import Any
+
+from fastapi.testclient import TestClient
+from tests.integration.server.conftest import sample_profile_payload
+
+
+def wait_state(client: TestClient, task_id: str, target: str, timeout: float = 15.0) -> str:
+    """轮询任务状态直到命中目标或超时。"""
+    deadline = time.time() + timeout
+    state = ""
+    while time.time() < deadline:
+        state = client.get(f"/api/v1/tasks/{task_id}").json()["state"]
+        if state == target:
+            return state
+        time.sleep(0.05)
+    return state
+
+
+def wait_events(
+    client: TestClient, task_id: str, predicate: Any, timeout: float = 10.0
+) -> list[dict[str, Any]]:
+    """轮询审计事件直到满足条件。
+
+    审计写入是有意的最终一致（单写入者队列，不阻塞智能体循环），
+    因此任务已进入终态时事件可能尚未全部落库，测试需轮询而非即时断言。
+    """
+    deadline = time.time() + timeout
+    events: list[dict[str, Any]] = []
+    while time.time() < deadline:
+        events = client.get(f"/api/v1/tasks/{task_id}/events").json()
+        if predicate(events):
+            return events
+        time.sleep(0.05)
+    return events
+
+
+# ---------- 系统 ----------
+
+
+def test_health(client: TestClient) -> None:
+    r = client.get("/api/v1/system/health")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["status"] == "ok"
+    assert body["version"]
+
+
+# ---------- 模型端点：api_key 脱敏 ----------
+
+
+def test_endpoint_crud_masks_api_key(client: TestClient) -> None:
+    payload = {
+        "id": "ep1",
+        "name": "本地 Qwen",
+        "base_url": "http://127.0.0.1:8011/v1",
+        "model": "qwen3.5-35b",
+        "api_key": "sk-supersecret-abcd1234",
+        "is_default": True,
+        "extra_body": {"chat_template_kwargs": {"enable_thinking": False}},
+    }
+    r = client.put("/api/v1/models", json=payload)
+    assert r.status_code == 200
+    body = r.json()
+    # 关键安全断言：响应中不含明文 key
+    assert "sk-supersecret-abcd1234" not in r.text
+    assert body["key_hint"].startswith("sk-") and "***" in body["key_hint"]
+    assert body["supports_vision"] is None  # 未探测
+    assert body["extra_body"]["chat_template_kwargs"]["enable_thinking"] is False
+
+    listed = client.get("/api/v1/models").json()
+    assert len(listed) == 1
+    assert "sk-supersecret" not in client.get("/api/v1/models").text
+
+
+def test_endpoint_update_keeps_key_when_omitted(client: TestClient) -> None:
+    base = {
+        "id": "ep1", "base_url": "http://x/v1", "model": "m", "api_key": "sk-aaaa1111bbbb",
+    }
+    client.put("/api/v1/models", json=base)
+    hint1 = client.get("/api/v1/models").json()[0]["key_hint"]
+    # 不传 api_key 的更新：保留原 key 提示
+    client.put("/api/v1/models", json={"id": "ep1", "base_url": "http://x/v1", "model": "m2"})
+    row = client.get("/api/v1/models").json()[0]
+    assert row["model"] == "m2"
+    assert row["key_hint"] == hint1
+
+
+def test_new_endpoint_requires_api_key(client: TestClient) -> None:
+    r = client.put("/api/v1/models", json={"id": "nokey", "base_url": "u", "model": "m"})
+    assert r.status_code == 400
+
+
+def test_endpoint_delete(client: TestClient) -> None:
+    client.put(
+        "/api/v1/models",
+        json={"id": "ep1", "base_url": "u", "model": "m", "api_key": "sk-1234567890"},
+    )
+    assert client.delete("/api/v1/models/ep1").json()["deleted"] is True
+    assert client.get("/api/v1/models").json() == []
+
+
+def test_routing_roundtrip(client: TestClient) -> None:
+    r = client.put("/api/v1/models/routing", json={"mapping": {"validator": "ep-small"}})
+    assert r.json() == {"validator": "ep-small"}
+    assert client.get("/api/v1/models/routing").json() == {"validator": "ep-small"}
+
+
+# ---------- 档案 ----------
+
+
+def test_profile_crud(client: TestClient) -> None:
+    payload = sample_profile_payload()
+    r = client.put("/api/v1/profiles/p1", json={"payload": payload})
+    assert r.status_code == 200
+    assert r.json()["basic"]["name"] == "张三"
+
+    summaries = client.get("/api/v1/profiles").json()
+    assert len(summaries) == 1
+    assert summaries[0]["name"] == "张三"
+    assert summaries[0]["attachments"] == 3
+
+    assert client.get("/api/v1/profiles/p1").json()["basic"]["phone"] == "13800001111"
+    assert client.get("/api/v1/profiles/missing").status_code == 404
+    assert client.delete("/api/v1/profiles/p1").json()["deleted"] is True
+
+
+def test_profile_validation_error(client: TestClient) -> None:
+    r = client.put("/api/v1/profiles/bad", json={"payload": {"basic": {"name": "缺电话"}}})
+    assert r.status_code == 422
+
+
+# ---------- 任务全流程 ----------
+
+
+def test_task_lifecycle_to_awaiting_review(client: TestClient) -> None:
+    client.put("/api/v1/profiles/p1", json={"payload": sample_profile_payload()})
+    r = client.post("/api/v1/tasks", json={"url": "https://example.com/apply", "profile_id": "p1"})
+    assert r.status_code == 200
+    task_id = r.json()["id"]
+    assert r.json()["state"] in ("QUEUED", "RUNNING")
+
+    assert wait_state(client, task_id, "AWAITING_REVIEW") == "AWAITING_REVIEW"
+
+    detail = client.get(f"/api/v1/tasks/{task_id}").json()
+    assert detail["page_title"] == "示例公司 - 招聘"
+    report = detail["report"]
+    assert report is not None
+    assert any(f["label"] == "姓名" and f["status"] == "filled" for f in report["fields"])
+
+    # 审计事件已入库（最终一致，需轮询）
+    events = wait_events(client, task_id, lambda evs: any(e["kind"] == "report" for e in evs))
+    assert any(e["agent"] == "planner" for e in events)
+    assert any(e["kind"] == "report" for e in events)
+
+
+def test_task_requires_existing_profile(client: TestClient) -> None:
+    r = client.post("/api/v1/tasks", json={"url": "u", "profile_id": "nope"})
+    assert r.status_code == 404
+
+
+def test_task_list_and_404(client: TestClient) -> None:
+    client.put("/api/v1/profiles/p1", json={"payload": sample_profile_payload()})
+    client.post("/api/v1/tasks", json={"url": "https://a.com", "profile_id": "p1"})
+    assert len(client.get("/api/v1/tasks").json()) == 1
+    assert client.get("/api/v1/tasks/none").status_code == 404
+
+
+def test_task_waiting_human_then_resume(ctx_factory: Any) -> None:
+    """登录墙类场景：任务挂起 WAITING_HUMAN，resume 后继续到 AWAITING_REVIEW。"""
+    from tests.integration.server.conftest import FakeRunner
+
+    from autooffer_server.main import create_app
+
+    runner = FakeRunner(pause_reason="检测到登录页，请手动登录")
+    with TestClient(create_app(ctx=ctx_factory(runner))) as c:
+        c.put("/api/v1/profiles/p1", json={"payload": sample_profile_payload()})
+        task_id = c.post(
+            "/api/v1/tasks", json={"url": "https://example.com/login", "profile_id": "p1"}
+        ).json()["id"]
+
+        assert wait_state(c, task_id, "WAITING_HUMAN") == "WAITING_HUMAN"
+        assert "登录" in c.get(f"/api/v1/tasks/{task_id}").json()["wait_reason"]
+
+        assert c.post(f"/api/v1/tasks/{task_id}/resume").json()["resumed"] is True
+        assert wait_state(c, task_id, "AWAITING_REVIEW") == "AWAITING_REVIEW"
+
+
+def test_task_failure_recorded(ctx_factory: Any) -> None:
+    from tests.integration.server.conftest import FakeRunner
+
+    from autooffer_server.main import create_app
+
+    with TestClient(create_app(ctx=ctx_factory(FakeRunner(fail=True)))) as c:
+        c.put("/api/v1/profiles/p1", json={"payload": sample_profile_payload()})
+        task_id = c.post(
+            "/api/v1/tasks", json={"url": "https://x.com", "profile_id": "p1"}
+        ).json()["id"]
+        assert wait_state(c, task_id, "FAILED") == "FAILED"
+        assert "模拟执行失败" in c.get(f"/api/v1/tasks/{task_id}").json()["wait_reason"]
+
+
+def test_task_cancel(ctx_factory: Any) -> None:
+    from tests.integration.server.conftest import FakeRunner
+
+    from autooffer_server.main import create_app
+
+    runner = FakeRunner(pause_reason="等待人工")
+    with TestClient(create_app(ctx=ctx_factory(runner))) as c:
+        c.put("/api/v1/profiles/p1", json={"payload": sample_profile_payload()})
+        task_id = c.post(
+            "/api/v1/tasks", json={"url": "https://x.com", "profile_id": "p1"}
+        ).json()["id"]
+        wait_state(c, task_id, "WAITING_HUMAN")
+        assert c.post(f"/api/v1/tasks/{task_id}/cancel").json()["cancelled"] is True
+        assert c.get(f"/api/v1/tasks/{task_id}").json()["state"] == "CANCELLED"
+
+
+# ---------- 投递列表 ----------
+
+
+def test_applications_auto_recorded_and_status_update(client: TestClient) -> None:
+    """填写完成后（真实执行体会登记）——此处直接验证接口的读写能力。"""
+    from autooffer_core.applications import ApplicationStore
+
+    ctx = client.app.state.ctx  # type: ignore[attr-defined]
+    store = ApplicationStore(ctx.config.data_dir / "applications.json")
+    from autooffer_core.report import FieldRecord, FillReport
+
+    record = store.add_from_report(
+        FillReport(
+            task_id="t1", url="https://example.com/apply", page_title="星辰科技 - 招聘",
+            profile_id="p1",
+            fields=[FieldRecord(label="应聘岗位", status="filled", value="算法工程师")],
+        ),
+        page_title="星辰科技 - 招聘",
+    )
+
+    rows = client.get("/api/v1/applications").json()
+    assert len(rows) == 1
+    assert rows[0]["company"] == "星辰科技"
+    assert rows[0]["position"] == "算法工程师"
+    assert rows[0]["status"] == "filled"
+
+    r = client.put(
+        f"/api/v1/applications/{record.id}",
+        json={"status": "submitted", "note": "已人工提交"},
+    )
+    assert r.status_code == 200
+    assert r.json()["status"] == "submitted"
+
+    assert client.get("/api/v1/applications?status=submitted").json()[0]["id"] == record.id
+    assert client.delete(f"/api/v1/applications/{record.id}").json()["deleted"] is True
+
+
+def test_application_404(client: TestClient) -> None:
+    assert client.put("/api/v1/applications/none", json={"status": "submitted"}).status_code == 404

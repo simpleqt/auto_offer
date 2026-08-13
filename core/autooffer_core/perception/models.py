@@ -29,6 +29,9 @@ class UIElement(BaseModel):
     accept: str | None = None
     """file 控件的 accept 属性，供附件匹配。"""
 
+    input_type: str | None = None
+    """input 元素的原生 type（date/month/tel/email...），供控件处理器选择填值精度。"""
+
 
 class SectionInfo(BaseModel):
     id: str

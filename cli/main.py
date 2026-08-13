@@ -7,6 +7,7 @@
 - autooffer profile-template <out>       生成可手填的档案模板（FR-P2）
 - autooffer fill <url>                   自动填写目标表单
 - autooffer apps                         投递列表：查看 / 更新状态
+- autooffer serve                        启动本地服务（REST + WebSocket，仅监听 127.0.0.1）
 """
 
 from __future__ import annotations
@@ -142,6 +143,11 @@ def app(argv: list[str] | None = None) -> int:
     p_fill.add_argument("--profile", required=False, help="档案 YAML 路径（缺省用示例档案）")
     p_fill.add_argument("--headless", action="store_true", help="无头模式（默认弹出浏览器窗口）")
 
+    p_serve = sub.add_parser("serve", help="启动本地服务（供桌面界面调用）")
+    p_serve.add_argument("--port", type=int, default=8765)
+    p_serve.add_argument("--data-dir", default=None, help="数据目录（默认 %%APPDATA%%/AutoOffer）")
+    p_serve.add_argument("--headless", action="store_true", help="任务浏览器无头运行")
+
     p_apps = sub.add_parser("apps", help="投递列表：查看/更新状态")
     p_apps.add_argument("--mark", help="要更新状态的记录 id")
     p_apps.add_argument("--status", default="submitted",
@@ -170,6 +176,12 @@ def app(argv: list[str] | None = None) -> int:
         cfg = _load_config(args.config)
         ep_cfg = _endpoint_from_config(cfg, None)
         return asyncio.run(_fill(args.url, ep_cfg, args.profile, headless=args.headless))
+    if args.command == "serve":
+        from autooffer_server.main import run as run_server
+
+        print(f"本地服务启动中: http://127.0.0.1:{args.port}  (API 文档 /docs)")
+        run_server(data_dir=args.data_dir, port=args.port, headless=args.headless)
+        return 0
     if args.command == "apps":
         return _apps(args)
 

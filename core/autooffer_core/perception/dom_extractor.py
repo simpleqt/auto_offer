@@ -141,6 +141,7 @@ class DomExtractor:
                     frame_path=raw.get("frame_path"),
                     placeholder=raw.get("placeholder"),
                     accept=raw.get("accept"),
+                    input_type=raw.get("input_type"),
                 )
             )
         sections = self._build_sections(meta.get("sections", []), elements)

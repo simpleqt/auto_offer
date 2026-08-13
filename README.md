@@ -23,7 +23,15 @@ AutoOffer 是一款基于多智能体（Multi-Agent）架构的**桌面软件**�
 
 ## 当前进度
 
-Agent Core 已可用（CLI 形态），服务层与图形界面在建设中。基准表单集（`tests/demo_forms/`）真实模型端到端验收情况：
+Agent Core 与本地服务已可用（CLI + REST/WebSocket），图形界面在建设中。
+
+| 层 | 状态 |
+| --- | --- |
+| Agent Core（感知/多智能体/控件/档案/LLM 接入） | 已完成，五个基准页端到端通过 |
+| 本地服务（REST + WebSocket + 任务队列 + 审计） | 已完成，19 项集成测试通过 |
+| 桌面界面（React）与安装包 | 待建设 |
+
+基准表单集（`tests/demo_forms/`）真实模型端到端验收情况：
 
 | 基准页 | 覆盖场景 | 状态 |
 | --- | --- | --- |
@@ -86,6 +94,30 @@ python -m cli.main apps --mark app-1a2b3c4d --status submitted
 
 填写完成后浏览器窗口保留、**不会自动提交**，请自行检查填写报告后手动提交。
 
+## 本地服务（供界面/脚本调用）
+
+```bash
+python -m cli.main serve --port 8765        # 仅监听 127.0.0.1
+# 打开 http://127.0.0.1:8765/docs 查看交互式 API 文档
+```
+
+主要接口（前缀 `/api/v1`）：
+
+| 接口 | 说明 |
+| --- | --- |
+| `GET /system/health` | 健康检查与数据目录 |
+| `PUT /models`、`POST /models/{id}/probe` | 模型端点管理与能力探测（响应中 api_key 恒为掩码） |
+| `GET/PUT /models/routing` | 智能体角色 → 端点路由 |
+| `POST /profiles/parse-resume` | 上传简历文件解析入库 |
+| `GET/PUT/DELETE /profiles[/{id}]` | 档案管理 |
+| `POST /tasks`、`GET /tasks[/{id}]` | 创建与查询填写任务 |
+| `POST /tasks/{id}/resume`、`/cancel` | 人工处理完成后继续、取消任务 |
+| `GET /tasks/{id}/events` | 审计事件（回放数据源） |
+| `WS /ws/tasks/{id}` | 实时事件流（含历史回放） |
+| `GET/PUT/DELETE /applications[/{id}]` | 投递列表与状态更新 |
+
+api_key 存入系统凭据管理器（Windows DPAPI），数据库只保存掩码提示；任务浏览器默认可见以便人工接管，遇登录/验证码时任务转入 `WAITING_HUMAN` 等待 `resume`。
+
 ## 开发者快速开始
 
 > 服务层与界面处于建设中，以下为目标开发方式。
@@ -110,10 +142,12 @@ python scripts/build_installer.py
 ## 测试
 
 ```bash
-python -m pytest tests/unit -q                      # 单元测试（离线，无需模型）
-python -m pytest tests/integration -q               # 感知/控件集成测试（需 Chromium）
-python scripts/make_test_resume_pdf.py              # 重新生成测试简历 PDF 资产
+python -m pytest tests/unit -q            # 单元测试（离线，无需模型）
+python -m pytest tests/integration -q     # 感知/服务集成测试（需 Chromium，服务测试用假执行体）
+python scripts/make_test_resume_pdf.py    # 重新生成测试简历 PDF 资产
 ```
+
+当前：128 项测试通过，ruff 与 mypy strict 零问题。
 
 ## 文档索引
 

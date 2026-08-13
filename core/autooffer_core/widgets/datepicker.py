@@ -72,6 +72,22 @@ def format_date(d: DateYM, fmt: str) -> str:
     return sep.join(out)
 
 
+def _iso_for_input(d: DateYM, input_type: str | None) -> str | None:
+    """按原生 input type 选择 ISO 精度。
+
+    - month：yyyy-mm（有 day 也截断）
+    - date/datetime-local：必须 yyyy-mm-dd，缺 day 返回 None（无法填写）
+    - 其它（text 等）：按档案已有精度输出
+    """
+    if input_type == "month":
+        return f"{d.year:04d}-{d.month:02d}" if d.month else f"{d.year:04d}"
+    if input_type in ("date", "datetime-local"):
+        if d.month is None or d.day is None:
+            return None
+        return f"{d.year:04d}-{d.month:02d}-{d.day:02d}"
+    return _iso(d)
+
+
 def _iso(d: DateYM) -> str:
     if d.month is None:
         return f"{d.year:04d}"
@@ -102,13 +118,25 @@ class DatePickerHandler:
             except Exception as exc:
                 log.info("datepicker.type_failed", label=el.label, error=str(exc))
 
-        # 策略 2：原生 date/month input 直接填 ISO 值
+        # 策略 2：原生 date/month input 直接填 ISO 值（按控件类型选择精度）
         if el.tag == "input":
+            value = _iso_for_input(target, el.input_type)
+            if value is None:
+                # date 控件要求完整年月日，档案只有年月：说清原因由上层转待确认，
+                # 而不是填入不完整值被站点静默丢弃
+                return FillResult(
+                    ok=False,
+                    strategy="native_precision",
+                    detail=(
+                        f"控件需要完整年月日，档案中的日期只有 {target.year} 年"
+                        f"{target.month or ''} 月，缺少具体日期，请补充档案"
+                    ),
+                )
             try:
-                await ctx.driver.input_text(el, _iso(target), humanize=False)
+                await ctx.driver.input_text(el, value, humanize=False)
                 got = await ctx.driver.element_value(el)
                 if got:
-                    return FillResult(ok=True, strategy="native_fill", detail=_iso(target))
+                    return FillResult(ok=True, strategy="native_fill", detail=value)
             except Exception as exc:
                 log.info("datepicker.native_failed", label=el.label, error=str(exc))
 

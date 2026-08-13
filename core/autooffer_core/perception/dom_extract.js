@@ -595,6 +595,7 @@
         frame_path: framePath || null,
         placeholder: el.getAttribute("placeholder") || el.getAttribute("data-placeholder") || null,
         accept: el.type === "file" ? el.getAttribute("accept") || null : null,
+        input_type: tag === "input" ? (el.getAttribute("type") || "text").toLowerCase() : null,
       };
       collected.push({ el, rec });
       out.elements.push(rec);
