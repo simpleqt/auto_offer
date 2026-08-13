@@ -335,9 +335,21 @@ class AgentRunner:
 
     async def _advance_page(self, obs: PageObservation, plan: PlannerOutput) -> None:
         idx = obs.pagination.next_button_index
-        if idx is None:
-            raise AutoOfferError("Planner 要求翻页但未识别到下一步按钮")
-        action = Action(type="click", element_index=idx, reason="进入下一步")
+        by_index = {e.index: e for e in obs.elements}
+        target = by_index.get(idx) if idx is not None else None
+        if target is None or not target.visible:
+            # 兜底：在可见按钮/链接中按文本重新定位（多步表单隐藏步骤按钮仍在 DOM）
+            target = next(
+                (
+                    e for e in obs.elements
+                    if e.visible and e.role in ("button", "link")
+                    and any(k in (e.label or e.value) for k in ("下一步", "继续", "保存并", "next"))
+                ),
+                None,
+            )
+        if target is None:
+            raise AutoOfferError("Planner 要求翻页但未识别到可见的下一步按钮")
+        action = Action(type="click", element_index=target.index, reason="进入下一步")
         await self._executor.execute_batch(ActionBatch(actions=[action]), obs)
         await self._driver.wait(1.0)
         self._history.add("已点击下一步进入新页面")

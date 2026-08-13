@@ -450,7 +450,8 @@
     }
     let nextIdx = null;
     for (const rec of collected) {
-      if (rec.role === "button" || rec.role === "link") {
+      // 多步表单每步各有一个"下一步"，隐藏步骤的按钮仍在 DOM，必须只认可见的
+      if ((rec.role === "button" || rec.role === "link") && rec.visible) {
         const t = rec.label || rec.value || "";
         if (NEXT_BUTTON_RE.test(t)) {
           nextIdx = rec.index;
@@ -556,14 +557,19 @@
         const own = cleanLabel(el.innerText || el.value || "");
         if (own) labelInfo = { text: own, raw: own, source: "self-text" };
       }
-      // 自定义勾选控件与弹层选项（div 叶子）的文字通常写在元素内部
-      if (
-        !labelInfo.text &&
-        (role === "checkbox" || role === "radio" || role === "custom" || role === "combobox") &&
-        tag !== "input" && tag !== "select"
-      ) {
+      // 自定义勾选控件与弹层选项（div 叶子）的文字写在元素内部：
+      // - custom/checkbox/radio：自身文本优先于 nearby 归因（相邻格子文本会串位）
+      // - combobox 展示框：自身文本是"当前值"而非标签，仅在无归因时兜底
+      if (tag !== "input" && tag !== "select") {
         const own = cleanLabel(el.innerText || "");
-        if (own) labelInfo = { text: own, raw: own, source: "self-text" };
+        if (own) {
+          const weak = !labelInfo.text || labelInfo.source === "nearby";
+          if ((role === "custom" || role === "checkbox" || role === "radio") && weak) {
+            labelInfo = { text: own, raw: own, source: "self-text" };
+          } else if (role === "combobox" && !labelInfo.text) {
+            labelInfo = { text: own, raw: own, source: "self-text" };
+          }
+        }
       }
       const { options, truncated } = extractOptions(el, role, opts.maxOptions);
       const r = el.getBoundingClientRect();

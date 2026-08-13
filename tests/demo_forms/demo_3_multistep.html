@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<!-- 基准表单 demo-3（docs/01 §6.3）：多步向导 + 动态条目。
+     覆盖：步骤条、步间必填校验（不过则报错停留）、"添加一段实习经历"动态字段组、预览页。
+     data-field 为评测锚点。 -->
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>启航集团 - 校招网申系统</title>
+<style>
+  body { font-family: "Microsoft YaHei", sans-serif; background: #eef1f6; margin: 0; }
+  .card { max-width: 720px; margin: 20px auto; background: #fff; padding: 26px 36px; border-radius: 8px; }
+  .steps { display: flex; gap: 8px; margin-bottom: 22px; }
+  .step-item { flex: 1; text-align: center; padding: 8px 0; background: #f0f0f0; border-radius: 4px; }
+  .step-item.active { background: #2f54eb; color: #fff; }
+  .step-item.done { background: #b7c8ff; }
+  .row { margin: 14px 0; }
+  label.f { display: inline-block; width: 110px; }
+  input[type=text], input[type=month], select { width: 260px; padding: 6px 8px;
+    border: 1px solid #ccc; border-radius: 4px; }
+  .exp { border: 1px dashed #bbb; border-radius: 6px; padding: 10px 14px; margin: 10px 0; }
+  .err { color: #f5222d; margin: 8px 0; display: none; }
+  .nav { margin-top: 18px; }
+  button { padding: 7px 22px; border-radius: 4px; border: 1px solid #2f54eb;
+           background: #fff; color: #2f54eb; cursor: pointer; margin-right: 10px; }
+  button.primary { background: #2f54eb; color: #fff; }
+  .page { display: none; }
+  .page.on { display: block; }
+  #preview td { border: 1px solid #eee; padding: 6px 10px; }
+</style>
+</head>
+<body>
+<div class="card">
+  <h2>校园招聘网申</h2>
+  <div class="steps">
+    <div class="step-item active" id="st1">基本信息</div>
+    <div class="step-item" id="st2">实习经历</div>
+    <div class="step-item" id="st3">确认预览</div>
+  </div>
+  <div class="err" id="err"></div>
+
+  <div class="page on" id="page1">
+    <div class="row"><label class="f">姓名</label>
+      <input type="text" id="name" data-field="name"></div>
+    <div class="row"><label class="f">手机号码</label>
+      <input type="text" id="phone" data-field="phone"></div>
+    <div class="row"><label class="f">电子邮箱</label>
+      <input type="text" id="email" data-field="email"></div>
+    <div class="row"><label class="f">最高学历</label>
+      <select id="degree" data-field="degree">
+        <option value="">请选择</option><option>本科</option><option>硕士</option>
+      </select></div>
+    <div class="nav"><button class="primary" id="next1">下一步</button></div>
+  </div>
+
+  <div class="page" id="page2">
+    <div id="exp-list"></div>
+    <button id="add-exp" type="button">+ 添加一段实习经历</button>
+    <div class="nav">
+      <button id="prev2">上一步</button>
+      <button class="primary" id="next2">下一步</button>
+    </div>
+  </div>
+
+  <div class="page" id="page3">
+    <h3>信息确认</h3>
+    <table id="preview"></table>
+    <div class="nav">
+      <button id="prev3">上一步</button>
+      <button class="primary" id="submit">确认提交</button>
+    </div>
+  </div>
+</div>
+
+<script>
+  let expCount = 0;
+  const err = document.getElementById("err");
+  function showErr(msg) { err.textContent = msg; err.style.display = "block"; }
+  function hideErr() { err.style.display = "none"; }
+  function go(from, to) {
+    document.getElementById("page" + from).classList.remove("on");
+    document.getElementById("page" + to).classList.add("on");
+    for (let i = 1; i <= 3; i++) {
+      const st = document.getElementById("st" + i);
+      st.className = "step-item" + (i < to ? " done" : i === to ? " active" : "");
+    }
+    hideErr();
+  }
+  function addExp() {
+    expCount++;
+    const div = document.createElement("div");
+    div.className = "exp";
+    div.innerHTML =
+      '<div class="row"><label class="f">公司名称</label>' +
+      '<input type="text" data-field="exp' + expCount + '-org"></div>' +
+      '<div class="row"><label class="f">职位</label>' +
+      '<input type="text" data-field="exp' + expCount + '-title"></div>' +
+      '<div class="row"><label class="f">开始月份</label>' +
+      '<input type="month" data-field="exp' + expCount + '-start"></div>' +
+      '<div class="row"><label class="f">结束月份</label>' +
+      '<input type="month" data-field="exp' + expCount + '-end"></div>';
+    document.getElementById("exp-list").appendChild(div);
+  }
+  document.getElementById("add-exp").addEventListener("click", addExp);
+
+  document.getElementById("next1").addEventListener("click", () => {
+    const need = [["name", "姓名"], ["phone", "手机号码"], ["email", "电子邮箱"], ["degree", "最高学历"]];
+    for (const [id, label] of need) {
+      if (!document.getElementById(id).value) { showErr("请填写必填项：" + label); return; }
+    }
+    go(1, 2);
+    if (expCount === 0) addExp();
+  });
+  document.getElementById("prev2").addEventListener("click", () => go(2, 1));
+  document.getElementById("next2").addEventListener("click", () => {
+    const first = document.querySelector('[data-field="exp1-org"]');
+    if (!first || !first.value) { showErr("请至少填写一段实习经历的公司名称"); return; }
+    // 生成预览
+    const tbl = document.getElementById("preview");
+    tbl.innerHTML = "";
+    [["姓名", "name"], ["手机", "phone"], ["邮箱", "email"], ["学历", "degree"]].forEach(([k, id]) => {
+      const v = document.getElementById(id).value;
+      tbl.innerHTML += "<tr><td>" + k + "</td><td data-preview='" + id + "'>" + v + "</td></tr>";
+    });
+    go(2, 3);
+  });
+  document.getElementById("prev3").addEventListener("click", () => go(3, 2));
+  document.getElementById("submit").addEventListener("click", () => {
+    alert("（演示页）已拦截提交");
+  });
+</script>
+</body>
+</html>
