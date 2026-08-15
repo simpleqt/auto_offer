@@ -14,8 +14,9 @@ import {
   Tag,
   Timeline,
   Typography,
+  message,
 } from 'antd';
-import { CheckCircleOutlined, CloseCircleOutlined } from '@ant-design/icons';
+import { CheckCircleOutlined, CloseCircleOutlined, CopyOutlined } from '@ant-design/icons';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { getTask } from '../api/client';
 import type { FieldStatus, TaskOut } from '../api/types';
@@ -80,6 +81,32 @@ export default function TaskDetail({
 
   const stepEvents = useMemo(() => events.filter((e) => e.type === 'step'), [events]);
 
+  function copyEvents() {
+    if (stepEvents.length === 0) {
+      message.info('暂无动作流水可复制');
+      return;
+    }
+    const text = stepEvents.map((e) => `[${e.seq}] ${e.agent}: ${e.summary}`).join('\n');
+    navigator.clipboard
+      .writeText(text)
+      .then(() => message.success('动作流水已复制'))
+      .catch(() => {
+        // 非 https 或剪贴板受限时兜底
+        const ta = document.createElement('textarea');
+        ta.value = text;
+        document.body.appendChild(ta);
+        ta.select();
+        try {
+          document.execCommand('copy');
+          message.success('动作流水已复制');
+        } catch {
+          message.error('复制失败，请手动选择文本');
+        } finally {
+          document.body.removeChild(ta);
+        }
+      });
+  }
+
   return (
     <Space direction="vertical" size={16} style={{ width: '100%' }}>
       <Card
@@ -134,7 +161,15 @@ export default function TaskDetail({
 
       <Row gutter={16}>
         <Col span={12}>
-          <Card title="动作流水" styles={{ body: { height: 360, overflow: 'auto' } }}>
+          <Card
+            title="动作流水"
+            extra={
+              <Button size="small" icon={<CopyOutlined />} onClick={copyEvents}>
+                复制
+              </Button>
+            }
+            styles={{ body: { height: 360, overflow: 'auto' } }}
+          >
             <div ref={listRef}>
               <Timeline
                 items={stepEvents.map((e) => ({
