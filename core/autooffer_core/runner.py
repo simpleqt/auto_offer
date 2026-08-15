@@ -102,6 +102,10 @@ class AgentRunner:
         self._catalog = self._resolver.catalog(profile)
         self._seq = 0
         self._last_title = ""
+        self._done_sections: set[str] = set()
+        """已完成的区块标题，防止 Planner 反复重派同一区块（死循环保护）。"""
+        self._field_failures: dict[str, int] = {}
+        """字段级失败计数：连续失败达到阈值后放弃该字段，不再反复重试。"""
         self.state: RunState = "RUNNING"
 
     # ---------- 事件 ----------
@@ -186,6 +190,11 @@ class AgentRunner:
                 await self._advance_page(obs, plan)
                 continue
             if plan.decision == "dispatch_section":
+                title = self._section_title(obs, plan)
+                if title in self._done_sections:
+                    self._emit("step", "runner", f"跳过已完成区块「{title}」")
+                    self._history.add(f"跳过已完成区块「{title}」")
+                    continue
                 await self._run_section(obs, plan)
                 continue
             raise AutoOfferError(f"未知的 Planner 决策: {plan.decision}")
@@ -193,6 +202,18 @@ class AgentRunner:
         self._emit("step", "runner", f"达到最大步数护栏({self._config.max_steps})，安全终止")
 
     # ---------- 区块子任务 ----------
+
+    def _section_title(self, obs: PageObservation, plan: PlannerOutput) -> str:
+        sec = next((s for s in obs.sections if s.id == plan.next_section_id), None)
+        return sec.title if sec else (plan.next_section_id or "全部字段")
+
+    def _mark_section_done(self, section_title: str) -> None:
+        """区块完成时写入 done 集合，供 Planner 派发前硬跳过（防死循环）。
+
+        只维护进程内集合，不写 checklist——checklist 是字段级报告数据源，
+        混入区块标记会污染 filled/failed 统计。
+        """
+        self._done_sections.add(section_title)
 
     def _section_elements(
         self, obs: PageObservation, section_id: str | None
@@ -206,8 +227,7 @@ class AgentRunner:
         ]
 
     async def _run_section(self, obs: PageObservation, plan: PlannerOutput) -> None:
-        sec = next((s for s in obs.sections if s.id == plan.next_section_id), None)
-        section_title = sec.title if sec else (plan.next_section_id or "全部字段")
+        section_title = self._section_title(obs, plan)
         goal = plan.subtask_goal or f"填写区块「{section_title}」"
         slice_values = self._resolver.slice_for_section(self._profile, section_title)
         extra_profile: dict[str, Any] | None = None
@@ -241,11 +261,13 @@ class AgentRunner:
                             if a.type not in ("request_profile", "skip_field", "done")]
             if not exec_actions:
                 if batch.section_complete:
+                    self._mark_section_done(section_title)
                     return
                 # 全是 skip_field（档案无数据）→ 重试无意义，直接结束该区块
                 if batch.actions and all(a.type == "skip_field" for a in batch.actions):
                     log.info("runner.section_unfillable", section=section_title)
                     self._history.add(f"区块「{section_title}」档案缺失，已记入待确认")
+                    self._mark_section_done(section_title)
                     return
                 retry_advice = "上一轮没有可执行动作，请重新审视区块元素与目标。"
                 continue
@@ -285,14 +307,31 @@ class AgentRunner:
                 {"label": fr.label, "expected": fr.expected, "actual": fr.actual, "note": fr.note}
                 for fr in failed_fields
             ])
+
+            # 更新字段失败计数并写 checklist；连续失败达到阈值 → 放弃（记待确认，不再重试）
+            abandoned_this_round: set[str] = set()
             for fr in val.field_results:
-                self._checklist.upsert(
-                    fr.label,
-                    section_title=section_title,
-                    status="filled" if fr.passed else "failed",
-                    value=fr.actual,
-                    note=fr.note,
-                )
+                if fr.passed:
+                    self._field_failures.pop(fr.label, None)
+                    self._checklist.upsert(
+                        fr.label, section_title=section_title,
+                        status="filled", value=fr.actual, note=fr.note,
+                    )
+                else:
+                    self._field_failures[fr.label] = self._field_failures.get(fr.label, 0) + 1
+                    if self._field_failures[fr.label] >= 2:
+                        abandoned_this_round.add(fr.label)
+                        self._checklist.upsert(
+                            fr.label, section_title=section_title,
+                            status="pending_confirm", value=fr.actual,
+                            note="多次尝试失败，已放弃",
+                        )
+                    else:
+                        self._checklist.upsert(
+                            fr.label, section_title=section_title,
+                            status="failed", value=fr.actual, note=fr.note,
+                        )
+
             self._history.add(
                 f"区块「{section_title}」第{attempt}次: "
                 f"{'通过' if val.passed else '未通过'} {batch.summary}"
@@ -302,13 +341,33 @@ class AgentRunner:
                 await self._wait_human(f"敏感操作需确认: {needs_human[0].detail}")
                 continue
             if val.passed and (val.section_complete or batch.section_complete):
+                self._mark_section_done(section_title)
                 return
-            retry_advice = val.retry_advice or "部分字段未通过校验，请修正后重试。"
+
+            # 若本轮失败字段已全部放弃（无新失败项），不再空转重试，直接结束该区块
+            if abandoned_this_round and not (failed_fields and any(
+                fr.label not in abandoned_this_round for fr in failed_fields
+            )):
+                self._emit(
+                    "step", "runner",
+                    f"区块「{section_title}」部分字段已放弃，结束本区块继续后续",
+                )
+                self._mark_section_done(section_title)
+                return
+
+            if abandoned_this_round:
+                retry_advice = (
+                    f"以下字段已多次尝试失败，请改用 skip_field 跳过、不要再填写："
+                    f"{'、'.join(sorted(abandoned_this_round))}。继续填写其余字段。"
+                )
+            else:
+                retry_advice = val.retry_advice or "部分字段未通过校验，请修正后重试。"
         log.warning("runner.section_exhausted", section=section_title)
         self._checklist.upsert(
             f"区块:{section_title}", section_title=section_title,
             status="failed", note="重试次数用尽",
         )
+        self._done_sections.add(section_title)
 
     async def _handle_meta_actions(
         self, batch: ActionBatch, section_title: str, obs: PageObservation

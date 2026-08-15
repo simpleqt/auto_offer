@@ -176,10 +176,11 @@ async def test_runner_section_retry_then_fail_recorded() -> None:
         config=RunnerConfig(max_section_retries=2),
     )
     report = await runner.run("https://example.com/apply")
-    # 区块重试用尽后记入失败清单，任务不中断
+    # 字段连续失败达到阈值后放弃（记待确认），任务不中断、不空转
     labels = [f.label for f in report.fields]
-    assert any("区块:基本信息" in label for label in labels)
-    assert report.counts()["failed"] >= 1
+    assert any("姓名" in label for label in labels)
+    assert report.counts()["pending_confirm"] >= 1
+    assert runner.state == "AWAITING_REVIEW"
 
 
 @pytest.mark.asyncio
