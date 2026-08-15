@@ -83,7 +83,7 @@ export default function ProfilesPage() {
           extra={
             <Space>
               <Upload
-                accept=".pdf,.docx,.doc,.txt"
+                accept=".pdf,.docx,.doc,.txt,.md"
                 showUploadList={false}
                 beforeUpload={handleParse}
               >

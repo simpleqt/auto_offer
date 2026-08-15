@@ -63,7 +63,7 @@ def extract_text(file_path: str) -> str:
     elif suffix in (".txt", ".md"):
         text = p.read_text(encoding="utf-8", errors="ignore")
     else:
-        raise ProfileError(f"不支持的简历格式: {suffix}（支持 pdf/docx/txt）")
+        raise ProfileError(f"不支持的简历格式: {suffix}（支持 pdf/docx/txt/md）")
     text = text.strip()
     if not text:
         raise ProfileError("简历文本抽取为空（可能是扫描件，请提供文字版）")

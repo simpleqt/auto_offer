@@ -36,6 +36,15 @@ def test_extract_text_txt(tmp_path: Path) -> None:
     assert "13800001111" in extract_text(str(f))
 
 
+def test_extract_text_md(tmp_path: Path) -> None:
+    f = tmp_path / "resume.md"
+    f.write_text("# 张三\n\n- 电话：13800001111\n- 邮箱：zhangsan@example.com\n", encoding="utf-8")
+    text = extract_text(str(f))
+    assert "张三" in text
+    assert "13800001111" in text
+    assert "zhangsan@example.com" in text
+
+
 def test_extract_text_docx(tmp_path: Path) -> None:
     import docx
 

@@ -130,7 +130,7 @@ def app(argv: list[str] | None = None) -> int:
     p_probe.add_argument("--endpoint", default=None, help="端点 id（默认取 default_endpoint）")
 
     p_parse = sub.add_parser("parse-resume", help="简历 PDF/Word → 结构化档案 YAML")
-    p_parse.add_argument("file", help="简历文件路径（pdf/docx/txt）")
+    p_parse.add_argument("file", help="简历文件路径（pdf/docx/txt/md）")
     p_parse.add_argument("--config", default="config.yaml")
     p_parse.add_argument("--out", default="profile.yaml", help="输出档案路径")
 
