@@ -23,6 +23,7 @@ from autooffer_server.api.schemas import (
     RoutingIn,
     TaskIn,
     TaskOut,
+    UsageReport,
 )
 from autooffer_server.services.keystore import mask_key
 
@@ -57,6 +58,12 @@ async def health(request: Request) -> dict[str, Any]:
 @router.get("/system/version")
 async def version() -> dict[str, str]:
     return {"version": __version__}
+
+
+@router.get("/usage", response_model=UsageReport)
+async def usage_report(request: Request) -> dict[str, Any]:
+    """模型调用统计（FR-M5）：按模型与按任务聚合 token 用量/时延/失败率。"""
+    return await _ctx(request).repo.aggregate_llm_usage()
 
 
 # ---------- 模型端点 ----------

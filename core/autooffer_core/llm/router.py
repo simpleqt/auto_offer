@@ -9,7 +9,7 @@ from __future__ import annotations
 import structlog
 
 from autooffer_core.llm.client import ChatOpenAIClient
-from autooffer_core.llm.interfaces import LLMClient, ModelEndpoint, Role
+from autooffer_core.llm.interfaces import LLMClient, ModelEndpoint, Role, UsageSink
 
 log = structlog.get_logger(__name__)
 
@@ -21,15 +21,18 @@ class ModelRouterImpl:
         self,
         default_endpoint: ModelEndpoint,
         role_endpoints: dict[Role, ModelEndpoint] | None = None,
+        *,
+        usage_sink: UsageSink | None = None,
     ) -> None:
         self._default_ep = default_endpoint
         self._role_eps: dict[Role, ModelEndpoint] = dict(role_endpoints or {})
+        self._usage_sink = usage_sink
         self._clients: dict[str, LLMClient] = {}
 
     def _client_for(self, ep: ModelEndpoint) -> LLMClient:
         client = self._clients.get(ep.id)
         if client is None:
-            client = ChatOpenAIClient(ep)
+            client = ChatOpenAIClient(ep, usage_sink=self._usage_sink)
             self._clients[ep.id] = client
             log.info("llm.client_created", endpoint=ep.id, model=ep.model)
         return client

@@ -28,6 +28,7 @@ import {
   probeModel,
   putRouting,
   upsertModel,
+  usageReport,
 } from '../api/client';
 import type { EndpointIn, EndpointOut, ProbeResult, RoleRouting } from '../api/types';
 import { ROLE_LABELS } from '../constants';
@@ -36,6 +37,7 @@ export default function ModelsPage() {
   const qc = useQueryClient();
   const { data: models, isLoading } = useQuery({ queryKey: ['models'], queryFn: listModels });
   const { data: routing } = useQuery({ queryKey: ['routing'], queryFn: getRouting });
+  const { data: usage } = useQuery({ queryKey: ['usage'], queryFn: usageReport });
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [editing, setEditing] = useState<EndpointOut | null>(null);
   const [probeResults, setProbeResults] = useState<Record<string, ProbeResult>>({});
@@ -208,6 +210,45 @@ export default function ModelsPage() {
               </Col>
             ))}
           </Row>
+        </Card>
+
+        <Card
+          title="模型调用统计"
+          extra={
+            <Typography.Text type="secondary">
+              按模型聚合 token 用量 / 时延 / 失败率
+            </Typography.Text>
+          }
+        >
+          <Table
+            rowKey="model"
+            size="small"
+            pagination={false}
+            dataSource={usage?.by_model ?? []}
+            locale={{ emptyText: '暂无调用记录（发起任务后自动统计）' }}
+            columns={[
+              { title: '模型', dataIndex: 'model' },
+              { title: '调用次数', dataIndex: 'calls' },
+              {
+                title: '失败',
+                dataIndex: 'failed',
+                render: (v: number) => (
+                  <Typography.Text type={v > 0 ? 'danger' : undefined}>{v}</Typography.Text>
+                ),
+              },
+              {
+                title: '失败率',
+                dataIndex: 'failure_rate',
+                render: (v: number) => `${(v * 100).toFixed(1)}%`,
+              },
+              { title: 'Tokens', dataIndex: 'total_tokens' },
+              {
+                title: '平均时延',
+                dataIndex: 'avg_latency_ms',
+                render: (v: number) => `${v} ms`,
+              },
+            ]}
+          />
         </Card>
       </Space>
 

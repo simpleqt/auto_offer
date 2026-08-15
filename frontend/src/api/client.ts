@@ -19,6 +19,7 @@ import type {
   TaskIn,
   TaskOut,
   AgentEvent,
+  UsageReport,
 } from './types';
 
 const BASE = '/api/v1';
@@ -58,6 +59,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 
 export const health = () => request<HealthInfo>('/system/health');
 export const version = () => request<{ version: string }>('/system/version');
+export const usageReport = () => request<UsageReport>('/usage');
 
 // ---------- 模型端点 ----------
 

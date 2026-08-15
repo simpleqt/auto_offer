@@ -17,6 +17,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from autooffer_server.db.models import (
     AgentEventRow,
     Base,
+    LLMUsageRow,
     ModelEndpointRow,
     ProfileRow,
     RoleRoutingRow,
@@ -261,6 +262,97 @@ class Repo:
             ]
 
         result: list[dict[str, Any]] = await asyncio.to_thread(self._run, work)
+        return result
+
+    # ---------- LLM 用量（FR-M5） ----------
+
+    async def add_llm_usage(self, record: dict[str, Any]) -> None:
+        """写入一条 LLM 调用记录（task_id / model / tokens / 时延 / 成败）。"""
+
+        def work(s: Session) -> None:
+            s.add(
+                LLMUsageRow(
+                    task_id=str(record.get("task_id", "")),
+                    model=str(record.get("model", "")),
+                    prompt_tokens=int(record.get("prompt_tokens", 0)),
+                    completion_tokens=int(record.get("completion_tokens", 0)),
+                    total_tokens=int(record.get("total_tokens", 0)),
+                    latency_ms=int(record.get("latency_ms", 0)),
+                    success=int(record.get("success", 1)),
+                    error=str(record.get("error", "")),
+                )
+            )
+
+        await asyncio.to_thread(self._run, work)
+
+    async def aggregate_llm_usage(self) -> dict[str, Any]:
+        """按模型与按任务聚合 token 用量、平均时延、失败率（FR-M5）。"""
+
+        def work(s: Session) -> dict[str, Any]:
+            rows = s.scalars(select(LLMUsageRow)).all()
+
+            by_model: dict[str, dict[str, Any]] = {}
+            by_task: dict[str, dict[str, Any]] = {}
+            for r in rows:
+                m = by_model.setdefault(
+                    r.model,
+                    {
+                        "model": r.model,
+                        "calls": 0,
+                        "failed": 0,
+                        "prompt_tokens": 0,
+                        "completion_tokens": 0,
+                        "total_tokens": 0,
+                        "total_latency_ms": 0,
+                    },
+                )
+                t = by_task.setdefault(
+                    r.task_id or "(非任务)",
+                    {
+                        "task_id": r.task_id,
+                        "calls": 0,
+                        "failed": 0,
+                        "prompt_tokens": 0,
+                        "completion_tokens": 0,
+                        "total_tokens": 0,
+                        "total_latency_ms": 0,
+                    },
+                )
+                for agg in (m, t):
+                    agg["calls"] += 1
+                    if not r.success:
+                        agg["failed"] += 1
+                    agg["prompt_tokens"] += r.prompt_tokens
+                    agg["completion_tokens"] += r.completion_tokens
+                    agg["total_tokens"] += r.total_tokens
+                    agg["total_latency_ms"] += r.latency_ms
+
+            def _finalize(rows_: dict[str, dict[str, Any]], key: str) -> list[dict[str, Any]]:
+                out: list[dict[str, Any]] = []
+                for agg in rows_.values():
+                    calls = agg["calls"]
+                    out.append(
+                        {
+                            key: agg[key],
+                            "calls": calls,
+                            "failed": agg["failed"],
+                            "failure_rate": round(agg["failed"] / calls, 4) if calls else 0.0,
+                            "prompt_tokens": agg["prompt_tokens"],
+                            "completion_tokens": agg["completion_tokens"],
+                            "total_tokens": agg["total_tokens"],
+                            "avg_latency_ms": (
+                                round(agg["total_latency_ms"] / calls) if calls else 0
+                            ),
+                        }
+                    )
+                return out
+
+            return {
+                "by_model": _finalize(by_model, "model"),
+                "by_task": _finalize(by_task, "task_id"),
+            }
+
+        result: dict[str, Any] = await asyncio.to_thread(self._run, work)
         return result
 
 

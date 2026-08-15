@@ -5,6 +5,7 @@ from __future__ import annotations
 import time
 from typing import Any
 
+import pytest
 from fastapi.testclient import TestClient
 from tests.integration.server.conftest import sample_profile_payload
 
@@ -259,3 +260,51 @@ def test_applications_auto_recorded_and_status_update(client: TestClient) -> Non
 
 def test_application_404(client: TestClient) -> None:
     assert client.put("/api/v1/applications/none", json={"status": "submitted"}).status_code == 404
+
+
+# ---------- 模型调用统计（FR-M5） ----------
+
+def test_usage_aggregation_by_model_and_task(client: TestClient) -> None:
+    """写入若干条用量记录后，/usage 返回按模型与按任务的聚合统计。"""
+    ctx = client.app.state.ctx  # type: ignore[attr-defined]
+    import asyncio
+
+    async def seed() -> None:
+        await ctx.repo.add_llm_usage(
+            {"task_id": "t1", "model": "qwen", "prompt_tokens": 100,
+             "completion_tokens": 50, "total_tokens": 150, "latency_ms": 200, "success": 1}
+        )
+        await ctx.repo.add_llm_usage(
+            {"task_id": "t1", "model": "qwen", "prompt_tokens": 200,
+             "completion_tokens": 100, "total_tokens": 300, "latency_ms": 300, "success": 1}
+        )
+        await ctx.repo.add_llm_usage(
+            {"task_id": "t2", "model": "qwen", "prompt_tokens": 0,
+             "completion_tokens": 0, "total_tokens": 0, "latency_ms": 100, "success": 0,
+             "error": "超时"}
+        )
+
+    asyncio.run(seed())
+
+    r = client.get("/api/v1/usage")
+    assert r.status_code == 200
+    body = r.json()
+
+    by_model = {m["model"]: m for m in body["by_model"]}
+    qwen = by_model["qwen"]
+    assert qwen["calls"] == 3
+    assert qwen["failed"] == 1
+    assert qwen["failure_rate"] == pytest.approx(1 / 3, abs=0.001)
+    assert qwen["total_tokens"] == 450
+    assert qwen["avg_latency_ms"] == 200  # (200+300+100)/3
+
+    by_task = {t["task_id"]: t for t in body["by_task"]}
+    assert by_task["t1"]["calls"] == 2
+    assert by_task["t1"]["total_tokens"] == 450
+    assert by_task["t2"]["failed"] == 1
+
+
+def test_usage_empty(client: TestClient) -> None:
+    r = client.get("/api/v1/usage")
+    assert r.status_code == 200
+    assert r.json() == {"by_model": [], "by_task": []}

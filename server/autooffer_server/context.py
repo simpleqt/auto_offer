@@ -75,8 +75,8 @@ class AppContext:
         ep = await self.build_endpoint(routing.get(role))
         return ChatOpenAIClient(ep)
 
-    async def build_router(self) -> Any:
-        """构造 ModelRouter（角色 → 端点覆写）。"""
+    async def build_router(self, *, usage_sink: Any = None) -> Any:
+        """构造 ModelRouter（角色 → 端点覆写）。usage_sink 用于落库 LLM 调用用量（FR-M5）。"""
         from autooffer_core.llm.router import ModelRouterImpl
 
         default_ep = await self.build_endpoint(None)
@@ -88,7 +88,7 @@ class AppContext:
                     overrides[role] = await self.build_endpoint(endpoint_id)  # type: ignore[index]
                 except LookupError:
                     log.warning("context.routing_endpoint_missing", role=role, id=endpoint_id)
-        return ModelRouterImpl(default_ep, overrides)
+        return ModelRouterImpl(default_ep, overrides, usage_sink=usage_sink)
 
     async def shutdown(self) -> None:
         await self.scheduler.shutdown()

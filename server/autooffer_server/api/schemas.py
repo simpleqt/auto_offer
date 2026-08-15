@@ -77,3 +77,30 @@ class TaskOut(BaseModel):
 class ApplicationStatusIn(BaseModel):
     status: str
     note: str | None = None
+
+
+class UsageAggregate(BaseModel):
+    """单条用量聚合（按模型或按任务）。"""
+
+    calls: int = 0
+    failed: int = 0
+    failure_rate: float = 0.0
+    prompt_tokens: int = 0
+    completion_tokens: int = 0
+    total_tokens: int = 0
+    avg_latency_ms: int = 0
+
+
+class ModelUsage(UsageAggregate):
+    model: str
+
+
+class TaskUsage(UsageAggregate):
+    task_id: str
+
+
+class UsageReport(BaseModel):
+    """模型调用统计（FR-M5）：按模型 + 按任务聚合。"""
+
+    by_model: list[ModelUsage] = []
+    by_task: list[TaskUsage] = []

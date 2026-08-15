@@ -300,6 +300,31 @@ export interface ParseResumeResult {
   low_confidence_paths: string[];
 }
 
+// ---------- 模型调用统计（FR-M5） ----------
+
+export interface UsageAggregate {
+  calls: number;
+  failed: number;
+  failure_rate: number;
+  prompt_tokens: number;
+  completion_tokens: number;
+  total_tokens: number;
+  avg_latency_ms: number;
+}
+
+export interface ModelUsage extends UsageAggregate {
+  model: string;
+}
+
+export interface TaskUsage extends UsageAggregate {
+  task_id: string;
+}
+
+export interface UsageReport {
+  by_model: ModelUsage[];
+  by_task: TaskUsage[];
+}
+
 // ---------- WebSocket 事件 ----------
 
 export type WsEvent =

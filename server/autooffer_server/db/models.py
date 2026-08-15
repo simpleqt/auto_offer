@@ -89,3 +89,20 @@ class AgentEventRow(Base):
     summary: Mapped[str] = mapped_column(Text, default="")
     data: Mapped[str] = mapped_column(Text, default="{}")
     created_at: Mapped[str] = mapped_column(String(32), default=_now)
+
+
+class LLMUsageRow(Base):
+    """LLM 调用用量记录（FR-M5 数据源，docs/03 §5.4）。"""
+
+    __tablename__ = "llm_usage"
+
+    seq_id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    task_id: Mapped[str] = mapped_column(String(64), default="", index=True)
+    model: Mapped[str] = mapped_column(String(128), default="")
+    prompt_tokens: Mapped[int] = mapped_column(Integer, default=0)
+    completion_tokens: Mapped[int] = mapped_column(Integer, default=0)
+    total_tokens: Mapped[int] = mapped_column(Integer, default=0)
+    latency_ms: Mapped[int] = mapped_column(Integer, default=0)
+    success: Mapped[int] = mapped_column(Integer, default=1)
+    error: Mapped[str] = mapped_column(Text, default="")
+    created_at: Mapped[str] = mapped_column(String(32), default=_now)

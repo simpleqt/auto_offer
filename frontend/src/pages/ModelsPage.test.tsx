@@ -10,16 +10,19 @@ vi.mock('../api/client', () => ({
   upsertModel: vi.fn(),
   deleteModel: vi.fn(),
   probeModel: vi.fn(),
+  usageReport: vi.fn(),
 }));
 
-import { getRouting, listModels } from '../api/client';
+import { getRouting, listModels, usageReport } from '../api/client';
 
 const listModelsMock = listModels as ReturnType<typeof vi.fn>;
 const getRoutingMock = getRouting as ReturnType<typeof vi.fn>;
+const usageReportMock = usageReport as ReturnType<typeof vi.fn>;
 
 describe('ModelsPage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    usageReportMock.mockResolvedValue({ by_model: [], by_task: [] });
   });
 
   it('渲染端点名称与默认徽标', async () => {

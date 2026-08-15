@@ -24,7 +24,9 @@ from autooffer_core.llm.interfaces import (
     ChatMessage,
     LLMResponse,
     LLMUsage,
+    LLMUsageRecord,
     ModelEndpoint,
+    UsageSink,
 )
 
 log = structlog.get_logger(__name__)
@@ -72,9 +74,15 @@ def extract_json_text(text: str) -> str:
 class ChatOpenAIClient:
     """基于 langchain_openai.ChatOpenAI 的 LLMClient 实现。"""
 
-    def __init__(self, endpoint: ModelEndpoint) -> None:
+    def __init__(
+        self,
+        endpoint: ModelEndpoint,
+        *,
+        usage_sink: UsageSink | None = None,
+    ) -> None:
         self.endpoint = endpoint
         self.supports_vision = bool(endpoint.supports_vision)
+        self._usage_sink = usage_sink
         self._sem = asyncio.Semaphore(max(1, endpoint.max_concurrency))
         self._chat = ChatOpenAI(
             model=endpoint.model,
@@ -109,17 +117,40 @@ class ChatOpenAIClient:
         result: BaseMessage = await self._chat.ainvoke(lc_messages, **kwargs)
         return result
 
+    async def _report_usage(
+        self, usage: LLMUsage, latency_ms: int, *, success: bool, error: str = ""
+    ) -> None:
+        """有 usage_sink 时把本次调用记录交给上层落库（FR-M5）。"""
+        if self._usage_sink is None:
+            return
+        await self._usage_sink(
+            LLMUsageRecord(
+                model=self.endpoint.model,
+                prompt_tokens=usage.prompt_tokens,
+                completion_tokens=usage.completion_tokens,
+                total_tokens=usage.total_tokens,
+                latency_ms=latency_ms,
+                success=success,
+                error=error,
+            )
+        )
+
     async def _invoke(self, messages: list[ChatMessage], **kwargs: Any) -> LLMResponse:
         lc_messages = _to_langchain_messages(messages)
         started = time.monotonic()
-        async with self._sem:
-            try:
+        try:
+            async with self._sem:
                 msg = await self._ainvoke_raw(lc_messages, **kwargs)
-            except Exception as exc:  # 网络/端点错误统一为 LLMError
-                raise LLMError(f"LLM 调用失败: {exc}", retryable=True) from exc
+        except Exception as exc:  # 网络/端点错误统一为 LLMError
+            latency_ms = int((time.monotonic() - started) * 1000)
+            await self._report_usage(
+                LLMUsage(), latency_ms, success=False, error=str(exc)[:500]
+            )
+            raise LLMError(f"LLM 调用失败: {exc}", retryable=True) from exc
         latency_ms = int((time.monotonic() - started) * 1000)
         text = msg.content if isinstance(msg.content, str) else json.dumps(msg.content)
         usage = self._record_usage(msg, latency_ms)
+        await self._report_usage(usage, latency_ms, success=True)
         log.debug(
             "llm.complete",
             model=self.endpoint.model,

@@ -40,7 +40,23 @@ class AgentTaskRunner:
         if payload is None:
             raise LookupError(f"档案不存在: {profile_id}")
         profile = Profile.model_validate(payload)
-        router = await self._ctx.build_router()
+
+        async def _record_usage(record: Any) -> None:
+            """把每次 LLM 调用写入 llm_usage 表（FR-M5 数据源）。"""
+            await self._ctx.repo.add_llm_usage(
+                {
+                    "task_id": task_id,
+                    "model": record.model,
+                    "prompt_tokens": record.prompt_tokens,
+                    "completion_tokens": record.completion_tokens,
+                    "total_tokens": record.total_tokens,
+                    "latency_ms": record.latency_ms,
+                    "success": int(record.success),
+                    "error": record.error,
+                }
+            )
+
+        router = await self._ctx.build_router(usage_sink=_record_usage)
 
         driver = PlaywrightDriver(headless=self._ctx.config.headless)
         attachments = {a.label: a.path for a in profile.attachments}

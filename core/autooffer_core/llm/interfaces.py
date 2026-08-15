@@ -9,6 +9,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Awaitable, Callable
 from typing import Any, Literal, Protocol, runtime_checkable
 
 from pydantic import BaseModel, SecretStr
@@ -57,6 +58,26 @@ class LLMResponse(BaseModel):
     text: str
     usage: LLMUsage = LLMUsage()
     model: str = ""
+
+
+class LLMUsageRecord(BaseModel):
+    """一次 LLM 调用的用量/时延/成败记录（FR-M5 数据源）。
+
+    由 LLM 客户端在每次调用后产出，经 UsageSink 回调交给上层落库。
+    核心层对任务/角色零感知：task_id 由服务层在回调闭包中补充。
+    """
+
+    model: str
+    prompt_tokens: int = 0
+    completion_tokens: int = 0
+    total_tokens: int = 0
+    latency_ms: int = 0
+    success: bool = True
+    error: str = ""
+
+
+UsageSink = Callable[[LLMUsageRecord], Awaitable[None]]
+"""用量回调：客户端每次调用（成功或失败）后调用一次；异步，由客户端 await。"""
 
 
 @runtime_checkable
