@@ -32,9 +32,15 @@ _LOCAL_ORIGINS = [
 
 
 def create_app(
-    config: ServerConfig | None = None, *, ctx: AppContext | None = None
+    config: ServerConfig | None = None,
+    *,
+    ctx: AppContext | None = None,
+    frontend_dir: Path | str | None = None,
 ) -> FastAPI:
-    """构造应用。传入 ctx 可注入测试替身（假 runner / 临时数据目录）。"""
+    """构造应用。传入 ctx 可注入测试替身（假 runner / 临时数据目录）。
+
+    frontend_dir 显式指定前端构建产物目录（测试用）；缺省时按仓库/打包布局自动探测。
+    """
     context = ctx or AppContext(config or ServerConfig.create())
 
     @contextlib.asynccontextmanager
@@ -65,7 +71,7 @@ def create_app(
     app.state.ctx = context
     app.include_router(router)
     app.include_router(ws_router)
-    _mount_frontend(app)
+    _mount_frontend(app, frontend_dir)
     return app
 
 
@@ -83,14 +89,16 @@ def _frontend_dist() -> Path | None:
     return None
 
 
-def _mount_frontend(app: FastAPI) -> None:
+def _mount_frontend(app: FastAPI, dist_dir: Path | str | None = None) -> None:
     """有前端构建产物时挂载 SPA；无则仅提供 API（开发模式由 Vite 独立服务）。"""
-    dist = _frontend_dist()
-    if dist is None:
+    dist = Path(dist_dir) if dist_dir is not None else _frontend_dist()
+    if dist is None or not (dist / "index.html").exists():
         log.info("server.frontend_missing", hint="开发模式请运行 `cd frontend && npm run dev`")
         return
 
-    app.mount("/assets", StaticFiles(directory=dist / "assets"), name="assets")
+    assets_dir = dist / "assets"
+    if assets_dir.is_dir():
+        app.mount("/assets", StaticFiles(directory=assets_dir), name="assets")
 
     @app.get("/{full_path:path}", include_in_schema=False)
     async def spa(full_path: str) -> FileResponse:
