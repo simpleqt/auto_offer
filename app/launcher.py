@@ -26,7 +26,7 @@ import uvicorn
 try:  # 桌面 GUI 依赖为可选，缺失时降级为无窗口模式
     import webview
 except ImportError:  # pragma: no cover - 取决于运行环境是否装了 pywebview
-    webview = None
+    webview = None  # type: ignore[assignment]
 
 # 仅 Windows 有命名互斥量；其它平台用进程锁文件兜底。
 try:
@@ -103,6 +103,16 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--data-dir", default=None, help="数据目录（默认 %%APPDATA%%/AutoOffer）")
     parser.add_argument("--headless", action="store_true", help="任务浏览器无头运行")
     parser.add_argument("--no-window", action="store_true", help="仅起服务不弹窗口（调试用）")
+    parser.add_argument(
+        "--cdp-endpoint",
+        default=None,
+        help="连接用户已有浏览器（CDP），如 http://127.0.0.1:9222；操作当前打开的页面",
+    )
+    parser.add_argument(
+        "--minimized",
+        action="store_true",
+        help="主窗口启动后最小化（静默待命，操作用户浏览器当前页面）",
+    )
     args = parser.parse_args(argv)
 
     single = _SingleInstance()
@@ -112,7 +122,9 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     try:
-        config = ServerConfig.create(data_dir=args.data_dir, headless=args.headless)
+        config = ServerConfig.create(
+            data_dir=args.data_dir, headless=args.headless, cdp_endpoint=args.cdp_endpoint
+        )
         app = create_app(config)
         port = _find_free_port()
         base_url = f"http://127.0.0.1:{port}"
@@ -154,7 +166,14 @@ def main(argv: list[str] | None = None) -> int:
             finally:
                 single.release()
 
-        webview.create_window("AutoOffer", base_url, width=1200, height=800)
+        window = webview.create_window("AutoOffer", base_url, width=1200, height=800)
+        if args.minimized and window is not None:
+
+            def _minimize_on_loaded() -> None:
+                with contextlib.suppress(Exception):
+                    window.minimize()
+
+            window.events.loaded += _minimize_on_loaded
         webview.start()
         log.info("app.window_closed")
         return 0

@@ -50,6 +50,7 @@ class PlaywrightDriver:
         viewport: tuple[int, int] = (1280, 900),
         user_data_dir: Path | str | None = None,
         existing_context: BrowserContext | None = None,
+        cdp_endpoint: str | None = None,
     ) -> None:
         self._headless = headless
         self._humanize = humanize
@@ -62,6 +63,8 @@ class PlaywrightDriver:
         self._user_data_dir = Path(user_data_dir) if user_data_dir else None
         # 复用外部持久上下文（桌面模式共享浏览器；此时 close 只关本页）
         self._existing_context = existing_context
+        # 连接用户已有的浏览器（CDP）：复用其当前打开的页面，不新建页面/窗口
+        self._cdp_endpoint = cdp_endpoint
         self._pw: Playwright | None = None
         self._browser: Browser | None = None
         self._context: BrowserContext | None = None
@@ -76,6 +79,21 @@ class PlaywrightDriver:
         if self._page is not None:
             return self._page
         try:
+            # 连接用户已有的浏览器：复用当前打开的页面（不新建）
+            if self._cdp_endpoint is not None:
+                self._pw = await async_playwright().start()
+                self._browser = await self._pw.chromium.connect_over_cdp(self._cdp_endpoint)
+                contexts = self._browser.contexts
+                if not contexts:
+                    raise DriverError("已连接的浏览器没有可用上下文")
+                self._context = contexts[0]
+                pages = self._context.pages
+                if not pages:
+                    self._page = await self._context.new_page()
+                else:
+                    self._page = pages[-1]  # 最近打开的标签页
+                return self._page
+
             # 复用外部持久上下文（桌面模式：跨任务共享登录态）
             if self._existing_context is not None:
                 self._context = self._existing_context
@@ -106,6 +124,10 @@ class PlaywrightDriver:
 
     async def open(self, url: str) -> None:
         page = await self._ensure_page()
+        # 连接用户浏览器时复用当前页面：若已在浏览某页面（可能已登录），不强制跳转
+        if self._cdp_endpoint is not None and page.url and not page.url.startswith("about:"):
+            log.info("driver.reuse_page", url=page.url)
+            return
         try:
             await page.goto(url, wait_until="domcontentloaded")
         except PlaywrightError as exc:
@@ -113,6 +135,15 @@ class PlaywrightDriver:
         log.info("driver.opened", url=url)
 
     async def close(self) -> None:
+        # 连接用户浏览器：只断开 Playwright，不关闭用户浏览器
+        if self._cdp_endpoint is not None:
+            if self._pw is not None:
+                await self._pw.stop()
+            self._page = None
+            self._context = None
+            self._browser = None
+            self._pw = None
+            return
         # 复用外部上下文时只关本页，保留共享浏览器与登录态
         if self._existing_context is not None:
             if self._page is not None:

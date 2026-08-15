@@ -28,6 +28,13 @@ class ServerConfig(BaseModel):
     headless: bool = False
     """默认弹出浏览器窗口，便于用户观察与人工接管。"""
 
+    cdp_endpoint: str | None = None
+    """连接用户已有浏览器的 CDP 端点（如 http://127.0.0.1:9222）。
+
+    设置后，任务直接操作该浏览器当前打开的页面，不新建页面/窗口；
+    关闭时只断开连接，不关闭用户浏览器。
+    """
+
     @classmethod
     def create(cls, data_dir: Path | str | None = None, **kwargs: object) -> ServerConfig:
         base = Path(data_dir) if data_dir else default_data_dir()

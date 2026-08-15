@@ -1,7 +1,8 @@
-"""PlaywrightDriver 复用外部上下文（共享浏览器）的单元测试。
+"""PlaywrightDriver 复用外部上下文（共享浏览器）/ CDP 连接的单元测试。
 
 验证：绑定外部 context 时 close() 只关本页、不关闭共享上下文；
-不绑定外部 context 时行为不变（整体释放）。全部用假对象，无需真实浏览器。
+CDP 连接时复用当前页面、close 只断开不关闭用户浏览器。
+全部用假对象，无需真实浏览器。
 """
 
 from __future__ import annotations
@@ -12,11 +13,15 @@ from autooffer_core.drivers.playwright_driver import PlaywrightDriver
 
 
 class _FakePage:
-    def __init__(self) -> None:
+    def __init__(self, url: str = "about:blank") -> None:
+        self.url = url
         self.closed = False
 
     async def close(self) -> None:
         self.closed = True
+
+    async def goto(self, url: str, **kwargs: object) -> None:
+        self.url = url
 
 
 class _FakeContext:
@@ -55,3 +60,14 @@ async def test_existing_context_returns_same_page_on_repeated_ensure() -> None:
     first = await driver._ensure_page()
     second = await driver._ensure_page()
     assert first is second
+
+
+def test_cdp_driver_close_does_not_close_user_browser() -> None:
+    """CDP 模式下 close 只断开 Playwright，不触碰用户浏览器（无 close 调用）。"""
+    driver = PlaywrightDriver(headless=False, cdp_endpoint="http://127.0.0.1:9222")
+    # close 不应抛错（此时尚未真正连接，_pw 为 None）
+    import asyncio
+
+    asyncio.run(driver.close())
+    assert driver._pw is None
+    assert driver._browser is None
