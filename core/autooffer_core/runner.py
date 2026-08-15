@@ -252,12 +252,28 @@ class AgentRunner:
 
             needs_human = [r for r in results if getattr(r, "status", "") == "needs_human"]
 
-            expected_text, readback_text = await self._readback(exec_actions, observation)
+            # 执行后重新感知（不滚动、不截图），读回真实页面状态。
+            # 若本批含"添加条目/展开"等结构变更，旧观察已过时，直接拿旧观察读回会失真。
+            after_obs = await self._driver.observe(with_screenshot=False, scroll_full=False)
+            expected_text, readback_text = await self._readback(
+                exec_actions, observation, after_obs
+            )
             val = await self._validator.validate(
                 goal=goal, expected_text=expected_text, readback_text=readback_text
             )
-            self._emit("step", "validator",
-                       f"passed={val.passed} complete={val.section_complete}")
+            failed_fields = [fr for fr in val.field_results if not fr.passed]
+            summary = f"passed={val.passed} complete={val.section_complete}"
+            if failed_fields:
+                detail = "；".join(
+                    f"{fr.label}: 期望'{fr.expected}' 实际'{fr.actual}'" for fr in failed_fields[:5]
+                )
+                summary += f" | 未通过: {detail}"
+            if val.retry_advice:
+                summary += f" | 建议: {val.retry_advice}"
+            self._emit("step", "validator", summary, failed_fields=[
+                {"label": fr.label, "expected": fr.expected, "actual": fr.actual, "note": fr.note}
+                for fr in failed_fields
+            ])
             for fr in val.field_results:
                 self._checklist.upsert(
                     fr.label,
@@ -312,9 +328,16 @@ class AgentRunner:
         return extra
 
     async def _readback(
-        self, actions: list[Action], obs: PageObservation
+        self, actions: list[Action], obs: PageObservation, after_obs: PageObservation
     ) -> tuple[str, str]:
+        """用执行后的观察（after_obs）回读。
+
+        actions 里的 element_index 是执行前 obs 的编号；执行可能改变页面结构
+        （新增条目导致 index 位移），因此先按 index 取 selector，再到 after_obs
+        中按 selector 找回执行后的同元素做回读。
+        """
         by_index = {e.index: e for e in obs.elements}
+        by_selector = {e.selector: e for e in after_obs.elements}
         expected_lines: list[str] = []
         readback_lines: list[str] = []
         for a in actions:
@@ -335,10 +358,15 @@ class AgentRunner:
             if target is None and a.type == "click":
                 target = "(点击)"
             expected_lines.append(f"{el.label}: {target}")
-            try:
-                actual = await self._driver.element_value(el)
-            except AutoOfferError:
-                actual = "(回读失败)"
+
+            after_el = by_selector.get(el.selector)
+            if after_el is None:
+                actual = "(执行后未找到元素)"
+            else:
+                try:
+                    actual = await self._driver.element_value(after_el)
+                except AutoOfferError:
+                    actual = "(回读失败)"
             readback_lines.append(f"{el.label}: {actual}")
         return "\n".join(expected_lines), "\n".join(readback_lines)
 
