@@ -12,9 +12,13 @@ export default function SettingsPage() {
           <Descriptions.Item label="版本">{data?.version ?? '—'}</Descriptions.Item>
           <Descriptions.Item label="状态">{data?.status ?? '—'}</Descriptions.Item>
           <Descriptions.Item label="数据目录" span={2}>
-            <Typography.Text copyable code>{data?.data_dir ?? '—'}</Typography.Text>
+            <Typography.Text copyable code>
+              {data?.data_dir ?? '—'}
+            </Typography.Text>
           </Descriptions.Item>
-          <Descriptions.Item label="任务浏览器">{data?.headless ? '无头模式' : '可见窗口'}</Descriptions.Item>
+          <Descriptions.Item label="任务浏览器">
+            {data?.headless ? '无头模式' : '可见窗口'}
+          </Descriptions.Item>
         </Descriptions>
       </Card>
       <Card title="关于">

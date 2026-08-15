@@ -5,19 +5,16 @@ import {
   Col,
   Descriptions,
   Empty,
-  List,
   Row,
   Select,
   Space,
   Steps,
   Tag,
-  Timeline,
   Typography,
 } from 'antd';
 import { LeftOutlined, RightOutlined } from '@ant-design/icons';
 import { useQuery } from '@tanstack/react-query';
 import { listTaskEvents, listTasks } from '../api/client';
-import type { AgentEvent, TaskOut } from '../api/types';
 import { TASK_STATE_COLORS, TASK_STATE_LABELS } from '../constants';
 import { fmtTime } from '../profile-utils';
 
@@ -59,7 +56,9 @@ export default function ReplayPage() {
           {task && (
             <Descriptions column={1} size="small" style={{ marginTop: 12 }}>
               <Descriptions.Item label="URL">
-                <Typography.Text copyable style={{ fontSize: 12 }}>{task.url}</Typography.Text>
+                <Typography.Text copyable style={{ fontSize: 12 }}>
+                  {task.url}
+                </Typography.Text>
               </Descriptions.Item>
               <Descriptions.Item label="状态">
                 <Tag color={TASK_STATE_COLORS[task.state]}>{TASK_STATE_LABELS[task.state]}</Tag>
@@ -99,7 +98,15 @@ export default function ReplayPage() {
               <Card size="small" title={`第 ${current.seq} 步 · ${current.agent || '—'}`}>
                 <Typography.Text>{current.summary}</Typography.Text>
                 {Object.keys(current.data ?? {}).length > 0 && (
-                  <pre style={{ marginTop: 12, fontSize: 12, background: '#fafafa', padding: 8, overflow: 'auto' }}>
+                  <pre
+                    style={{
+                      marginTop: 12,
+                      fontSize: 12,
+                      background: '#fafafa',
+                      padding: 8,
+                      overflow: 'auto',
+                    }}
+                  >
                     {JSON.stringify(current.data, null, 2)}
                   </pre>
                 )}

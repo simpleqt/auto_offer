@@ -41,7 +41,7 @@ describe('ModelsPage', () => {
     ]);
     getRoutingMock.mockResolvedValue({});
 
-    renderWithProviders(<ModelsPage goTo={() => {}} />);
+    renderWithProviders(<ModelsPage />);
 
     expect(await screen.findByText('本地 Qwen')).toBeInTheDocument();
     expect(screen.getByText('qwen3.5-35b')).toBeInTheDocument();
@@ -52,7 +52,7 @@ describe('ModelsPage', () => {
     listModelsMock.mockResolvedValue([]);
     getRoutingMock.mockResolvedValue({});
 
-    renderWithProviders(<ModelsPage goTo={() => {}} />);
+    renderWithProviders(<ModelsPage />);
 
     expect(await screen.findByText(/尚未配置模型端点/)).toBeInTheDocument();
   });

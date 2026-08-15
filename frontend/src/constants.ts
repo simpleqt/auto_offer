@@ -80,3 +80,11 @@ export const EXPERIENCE_KIND_LABELS: Record<string, string> = {
 
 export const DEGREE_OPTIONS = ['高中', '大专', '本科', '硕士', '博士', '其他'];
 export const GENDER_OPTIONS = ['男', '女', '其他'];
+
+/** 需要持续轮询的任务状态集合。 */
+export const ACTIVE_TASK_STATES = new Set<TaskState>([
+  'QUEUED',
+  'RUNNING',
+  'WAITING_HUMAN',
+  'AWAITING_REVIEW',
+]);

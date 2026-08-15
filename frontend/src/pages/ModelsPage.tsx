@@ -30,10 +30,9 @@ import {
   upsertModel,
 } from '../api/client';
 import type { EndpointIn, EndpointOut, ProbeResult, RoleRouting } from '../api/types';
-import { AGENT_ROLES, ROLE_LABELS } from '../constants';
-import type { PageKey } from '../App';
+import { ROLE_LABELS } from '../constants';
 
-export default function ModelsPage({ goTo }: { goTo: (p: PageKey) => void }) {
+export default function ModelsPage() {
   const qc = useQueryClient();
   const { data: models, isLoading } = useQuery({ queryKey: ['models'], queryFn: listModels });
   const { data: routing } = useQuery({ queryKey: ['routing'], queryFn: getRouting });
@@ -102,43 +101,65 @@ export default function ModelsPage({ goTo }: { goTo: (p: PageKey) => void }) {
   const routingMap = useMemo<Record<string, string>>(() => routing ?? {}, [routing]);
 
   const columns = [
-    { title: '名称', dataIndex: 'name', render: (v: string, r: EndpointOut) => (
-      <Space>
-        <Typography.Text strong>{v || r.id}</Typography.Text>
-        {r.is_default && <Tag color="blue">默认</Tag>}
-      </Space>
-    ) },
+    {
+      title: '名称',
+      dataIndex: 'name',
+      render: (v: string, r: EndpointOut) => (
+        <Space>
+          <Typography.Text strong>{v || r.id}</Typography.Text>
+          {r.is_default && <Tag color="blue">默认</Tag>}
+        </Space>
+      ),
+    },
     { title: '模型', dataIndex: 'model' },
     { title: 'Base URL', dataIndex: 'base_url', ellipsis: true },
-    { title: 'Key', dataIndex: 'key_hint', render: (v: string) => (
-      <Typography.Text code>{v || '—'}</Typography.Text>
-    ) },
-    { title: '连通性', dataIndex: 'id', render: (id: string) => {
-      const pr = probeResults[id];
-      const vision = models?.find((m) => m.id === id)?.supports_vision;
-      if (!pr && vision == null) return <Tag>未探测</Tag>;
-      const reachable = pr ? pr.reachable : true;
-      return (
+    {
+      title: 'Key',
+      dataIndex: 'key_hint',
+      render: (v: string) => <Typography.Text code>{v || '—'}</Typography.Text>,
+    },
+    {
+      title: '连通性',
+      dataIndex: 'id',
+      render: (id: string) => {
+        const pr = probeResults[id];
+        const vision = models?.find((m) => m.id === id)?.supports_vision;
+        if (!pr && vision == null) return <Tag>未探测</Tag>;
+        const reachable = pr ? pr.reachable : true;
+        return (
+          <Space>
+            <Tag color={reachable ? 'green' : 'red'}>{reachable ? '连通' : '失败'}</Tag>
+            {vision != null && (
+              <Tooltip title={pr?.latency_ms ? `${pr.latency_ms}ms` : ''}>
+                <Tag color={vision ? 'geekblue' : 'default'}>{vision ? '视觉' : '纯文本'}</Tag>
+              </Tooltip>
+            )}
+          </Space>
+        );
+      },
+    },
+    {
+      title: '操作',
+      dataIndex: 'id',
+      render: (id: string, r: EndpointOut) => (
         <Space>
-          <Tag color={reachable ? 'green' : 'red'}>{reachable ? '连通' : '失败'}</Tag>
-          {vision != null && (
-            <Tooltip title={pr?.latency_ms ? `${pr.latency_ms}ms` : ''}>
-              <Tag color={vision ? 'geekblue' : 'default'}>{vision ? '视觉' : '纯文本'}</Tag>
-            </Tooltip>
-          )}
+          <Button
+            size="small"
+            icon={<ThunderboltOutlined />}
+            loading={probing === id}
+            onClick={() => handleProbe(id)}
+          >
+            探测
+          </Button>
+          <Button size="small" icon={<EditOutlined />} onClick={() => openEdit(r)}>
+            编辑
+          </Button>
+          <Popconfirm title="删除该端点？" onConfirm={() => remove.mutate(id)}>
+            <Button size="small" danger icon={<DeleteOutlined />} />
+          </Popconfirm>
         </Space>
-      );
-    } },
-    { title: '操作', dataIndex: 'id', render: (id: string, r: EndpointOut) => (
-      <Space>
-        <Button size="small" icon={<ThunderboltOutlined />} loading={probing === id}
-          onClick={() => handleProbe(id)}>探测</Button>
-        <Button size="small" icon={<EditOutlined />} onClick={() => openEdit(r)}>编辑</Button>
-        <Popconfirm title="删除该端点？" onConfirm={() => remove.mutate(id)}>
-          <Button size="small" danger icon={<DeleteOutlined />} />
-        </Popconfirm>
-      </Space>
-    ) },
+      ),
+    },
   ];
 
   return (
@@ -146,21 +167,28 @@ export default function ModelsPage({ goTo }: { goTo: (p: PageKey) => void }) {
       <Space direction="vertical" size={16} style={{ width: '100%' }}>
         <Card
           title="模型端点"
-          extra={<Button type="primary" icon={<PlusOutlined />} onClick={openCreate}>添加端点</Button>}
+          extra={
+            <Button type="primary" icon={<PlusOutlined />} onClick={openCreate}>
+              添加端点
+            </Button>
+          }
         >
           {isLoading ? (
             <Spin />
           ) : models && models.length === 0 ? (
             <Typography.Paragraph type="secondary">
-              尚未配置模型端点。点击「添加端点」填入你的 OpenAI 兼容端点（base_url / api_key / 模型名），
-              软件会一键测试连通性与视觉能力。
+              尚未配置模型端点。点击「添加端点」填入你的 OpenAI 兼容端点（base_url / api_key /
+              模型名）， 软件会一键测试连通性与视觉能力。
             </Typography.Paragraph>
           ) : (
             <Table rowKey="id" columns={columns} dataSource={models} pagination={false} />
           )}
         </Card>
 
-        <Card title="角色路由" extra={<Typography.Text type="secondary">未配置的角色回落默认端点</Typography.Text>}>
+        <Card
+          title="角色路由"
+          extra={<Typography.Text type="secondary">未配置的角色回落默认端点</Typography.Text>}
+        >
           <Row gutter={[16, 16]}>
             {(Object.keys(ROLE_LABELS) as (keyof typeof ROLE_LABELS)[]).map((role) => (
               <Col span={8} key={role}>
@@ -174,9 +202,7 @@ export default function ModelsPage({ goTo }: { goTo: (p: PageKey) => void }) {
                     placeholder="默认端点"
                     value={routingMap[role]}
                     options={(models ?? []).map((m) => ({ value: m.id, label: m.name || m.id }))}
-                    onChange={(v) =>
-                      saveRouting.mutate({ ...routingMap, [role]: v ?? '' })
-                    }
+                    onChange={(v) => saveRouting.mutate({ ...routingMap, [role]: v ?? '' })}
                   />
                 </Space>
               </Col>
@@ -248,7 +274,10 @@ export default function ModelsPage({ goTo }: { goTo: (p: PageKey) => void }) {
             </Col>
           </Row>
           <Form.Item name="extra_body" label="extra_body（JSON）">
-            <Input.TextArea rows={3} placeholder='{"chat_template_kwargs": {"enable_thinking": false}}' />
+            <Input.TextArea
+              rows={3}
+              placeholder='{"chat_template_kwargs": {"enable_thinking": false}}'
+            />
           </Form.Item>
           <Form.Item name="is_default" label="设为默认端点" valuePropName="checked">
             <Switch />

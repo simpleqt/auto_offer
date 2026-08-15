@@ -53,12 +53,7 @@ export type DateRange = { start: DateYM; end: DateYM | null };
 export type Degree = '高中' | '大专' | '本科' | '硕士' | '博士' | '其他';
 export type ExperienceKind = 'internship' | 'work' | 'project';
 export type AttachmentKind =
-  | 'resume'
-  | 'photo'
-  | 'transcript'
-  | 'certificate'
-  | 'portfolio'
-  | 'other';
+  'resume' | 'photo' | 'transcript' | 'certificate' | 'portfolio' | 'other';
 export type AttachmentLanguage = 'zh' | 'en';
 
 export interface Education {
@@ -212,13 +207,7 @@ export interface ProfileListRow {
 // ---------- 任务 ----------
 
 export type TaskState =
-  | 'QUEUED'
-  | 'RUNNING'
-  | 'WAITING_HUMAN'
-  | 'AWAITING_REVIEW'
-  | 'DONE'
-  | 'FAILED'
-  | 'CANCELLED';
+  'QUEUED' | 'RUNNING' | 'WAITING_HUMAN' | 'AWAITING_REVIEW' | 'DONE' | 'FAILED' | 'CANCELLED';
 
 export type FieldStatus = 'filled' | 'failed' | 'skipped' | 'pending_confirm';
 
@@ -275,12 +264,7 @@ export interface AgentEvent {
 
 // ---------- 投递列表 ----------
 
-export type ApplicationStatus =
-  | 'filled'
-  | 'submitted'
-  | 'interview'
-  | 'rejected'
-  | 'abandoned';
+export type ApplicationStatus = 'filled' | 'submitted' | 'interview' | 'rejected' | 'abandoned';
 
 export interface ApplicationRecord {
   id: string;

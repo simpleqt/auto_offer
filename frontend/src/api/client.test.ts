@@ -54,9 +54,7 @@ describe('api client', () => {
 
   it('非 2xx 响应抛出带 detail 的 ApiError', async () => {
     mockFetch(422, { detail: '档案校验失败: xxx' });
-    await expect(upsertModel({ id: 'x', base_url: 'u', model: 'm' })).rejects.toThrow(
-      ApiError,
-    );
+    await expect(upsertModel({ id: 'x', base_url: 'u', model: 'm' })).rejects.toThrow(ApiError);
     await expect(upsertModel({ id: 'x', base_url: 'u', model: 'm' })).rejects.toMatchObject({
       status: 422,
       message: '档案校验失败: xxx',

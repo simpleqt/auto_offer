@@ -19,7 +19,12 @@ describe('profile-utils', () => {
   it('emptyProfile 每次返回独立的扩展信息对象（避免共享引用）', () => {
     const a = emptyProfile('a');
     const b = emptyProfile('b');
-    a.extended!.languages.push({ language: '英语', level: null, score: null, certificate_date: null });
+    a.extended!.languages.push({
+      language: '英语',
+      level: null,
+      score: null,
+      certificate_date: null,
+    });
     expect(b.extended!.languages).toEqual([]);
   });
 

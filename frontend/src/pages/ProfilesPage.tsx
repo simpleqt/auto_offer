@@ -13,20 +13,13 @@ import {
   Typography,
   Upload,
 } from 'antd';
-import {
-  DeleteOutlined,
-  FileTextOutlined,
-  PlusOutlined,
-  UploadOutlined,
-} from '@ant-design/icons';
+import { DeleteOutlined, FileTextOutlined, PlusOutlined, UploadOutlined } from '@ant-design/icons';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { deleteProfile, getProfile, listProfiles, parseResume, putProfile } from '../api/client';
-import type { Profile } from '../api/types';
 import { emptyProfile, fmtTime, newProfileId } from '../profile-utils';
 import ProfileEditor from './ProfileEditor';
-import type { PageKey } from '../App';
 
-export default function ProfilesPage({ goTo }: { goTo: (p: PageKey) => void }) {
+export default function ProfilesPage() {
   const qc = useQueryClient();
   const { data: profiles, isLoading } = useQuery({
     queryKey: ['profiles'],
@@ -34,7 +27,6 @@ export default function ProfilesPage({ goTo }: { goTo: (p: PageKey) => void }) {
   });
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
-  const [creating, setCreating] = useState(false);
 
   const { data: activeProfile, isLoading: profileLoading } = useQuery({
     queryKey: ['profile', selectedId],
@@ -95,12 +87,14 @@ export default function ProfilesPage({ goTo }: { goTo: (p: PageKey) => void }) {
                 showUploadList={false}
                 beforeUpload={handleParse}
               >
-                <Button icon={<UploadOutlined />} loading={uploading}>解析简历</Button>
+                <Button icon={<UploadOutlined />} loading={uploading}>
+                  解析简历
+                </Button>
               </Upload>
               <Button
                 type="primary"
                 icon={<PlusOutlined />}
-                loading={creating || create.isPending}
+                loading={create.isPending}
                 onClick={() => create.mutate()}
               >
                 新建
@@ -115,10 +109,17 @@ export default function ProfilesPage({ goTo }: { goTo: (p: PageKey) => void }) {
               dataSource={profiles ?? []}
               renderItem={(p) => (
                 <List.Item
-                  style={{ cursor: 'pointer', background: p.id === selectedId ? '#f0f5ff' : undefined }}
+                  style={{
+                    cursor: 'pointer',
+                    background: p.id === selectedId ? '#f0f5ff' : undefined,
+                  }}
                   onClick={() => setSelectedId(p.id)}
                   actions={[
-                    <Popconfirm key="del" title="删除该档案？" onConfirm={() => remove.mutate(p.id)}>
+                    <Popconfirm
+                      key="del"
+                      title="删除该档案？"
+                      onConfirm={() => remove.mutate(p.id)}
+                    >
                       <Button type="text" danger size="small" icon={<DeleteOutlined />} />
                     </Popconfirm>,
                   ]}
@@ -127,7 +128,9 @@ export default function ProfilesPage({ goTo }: { goTo: (p: PageKey) => void }) {
                     title={
                       <Space>
                         <Typography.Text strong>{p.label || p.name || p.id}</Typography.Text>
-                        {p.attachments > 0 && <Tag icon={<FileTextOutlined />}>{p.attachments} 附件</Tag>}
+                        {p.attachments > 0 && (
+                          <Tag icon={<FileTextOutlined />}>{p.attachments} 附件</Tag>
+                        )}
                       </Space>
                     }
                     description={`更新于 ${fmtTime(p.updated_at)}`}

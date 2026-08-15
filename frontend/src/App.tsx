@@ -20,13 +20,7 @@ import ApplicationsPage from './pages/ApplicationsPage';
 import SettingsPage from './pages/SettingsPage';
 
 export type PageKey =
-  | 'onboarding'
-  | 'profiles'
-  | 'models'
-  | 'tasks'
-  | 'replay'
-  | 'applications'
-  | 'settings';
+  'onboarding' | 'profiles' | 'models' | 'tasks' | 'replay' | 'applications' | 'settings';
 
 const { Sider, Content } = Layout;
 
@@ -72,8 +66,8 @@ export default function App() {
       <Layout>
         <Content style={{ padding: 24, overflow: 'auto' }}>
           {page === 'onboarding' && <OnboardingPage goTo={setPage} />}
-          {page === 'profiles' && <ProfilesPage goTo={setPage} />}
-          {page === 'models' && <ModelsPage goTo={setPage} />}
+          {page === 'profiles' && <ProfilesPage />}
+          {page === 'models' && <ModelsPage />}
           {page === 'tasks' && <TasksPage />}
           {page === 'replay' && <ReplayPage />}
           {page === 'applications' && <ApplicationsPage />}

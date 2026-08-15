@@ -1,4 +1,3 @@
-import { useEffect, useState } from 'react';
 import { Button, Card, Result, Space, Steps, Typography } from 'antd';
 import { useQuery } from '@tanstack/react-query';
 import { listModels, listProfiles } from '../api/client';
@@ -28,7 +27,11 @@ export default function OnboardingPage({ goTo }: { goTo: (p: PageKey) => void })
             status="info"
             title="先配置一个模型端点"
             subTitle="软件会自动测试连通性与视觉能力；api_key 用系统级加密存储，不会明文回显。"
-            extra={<Button type="primary" onClick={() => goTo('models')}>去配置模型</Button>}
+            extra={
+              <Button type="primary" onClick={() => goTo('models')}>
+                去配置模型
+              </Button>
+            }
           />
         )}
         {current === 1 && (
@@ -36,7 +39,11 @@ export default function OnboardingPage({ goTo }: { goTo: (p: PageKey) => void })
             status="info"
             title="再建立你的个人档案"
             subTitle="上传简历 PDF/Word 自动解析，或手动填写结构化模板；扩展信息按需填写。"
-            extra={<Button type="primary" onClick={() => goTo('profiles')}>去建立档案</Button>}
+            extra={
+              <Button type="primary" onClick={() => goTo('profiles')}>
+                去建立档案
+              </Button>
+            }
           />
         )}
         {current === 2 && (
@@ -44,7 +51,11 @@ export default function OnboardingPage({ goTo }: { goTo: (p: PageKey) => void })
             status="success"
             title="准备就绪"
             subTitle="模型与档案都已配置完成，可以发起你的第一个自动填写任务了。"
-            extra={<Button type="primary" onClick={() => goTo('tasks')}>发起任务</Button>}
+            extra={
+              <Button type="primary" onClick={() => goTo('tasks')}>
+                发起任务
+              </Button>
+            }
           />
         )}
         <Typography.Paragraph type="secondary" style={{ textAlign: 'center' }}>
