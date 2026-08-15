@@ -67,6 +67,12 @@ jobs:
       - name: Type check
         run: npm run typecheck
 
+      - name: Lint (ESLint)
+        run: npm run lint
+
+      - name: Format check (Prettier)
+        run: npm run format:check
+
       - name: Test (Vitest + RTL)
         run: npm test
 

@@ -29,6 +29,11 @@ if (!window.ResizeObserver) {
   };
 }
 
+// jsdom 未实现 Element.scrollTo（任务详情页滚动事件流用）
+if (!Element.prototype.scrollTo) {
+  Element.prototype.scrollTo = function scrollTo() {};
+}
+
 afterEach(() => {
   cleanup();
 });

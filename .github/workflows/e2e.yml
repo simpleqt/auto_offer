@@ -1,0 +1,43 @@
+name: E2E (基准表单集)
+
+# 基准表单集端到端验收（docs/01 §4、docs/05 §4）：需真实模型端点。
+# 手动触发，注入模型端点密钥（secrets.AO_MODEL_*）。默认 CI 不运行（标记 llm 的用例被跳过）。
+
+on:
+  workflow_dispatch:
+    inputs:
+      run-llm:
+        description: '运行需真实模型端点的 e2e（否则只跑离线部分）'
+        type: boolean
+        default: false
+
+jobs:
+  e2e:
+    runs-on: ubuntu-latest
+    env:
+      AO_BASE_URL: ${{ secrets.AO_BASE_URL }}
+      AO_API_KEY: ${{ secrets.AO_API_KEY }}
+      AO_MODEL: ${{ secrets.AO_MODEL }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+          playwright install chromium
+
+      - name: Run e2e（含真实端点）
+        if: ${{ inputs.run-llm }}
+        env:
+          AO_RUN_LLM: "1"
+        run: pytest tests -m llm -q
+
+      - name: Run e2e（离线冒烟，跳过 llm）
+        if: ${{ !inputs.run-llm }}
+        run: pytest tests -q
