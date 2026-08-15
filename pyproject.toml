@@ -40,10 +40,11 @@ dev = [
 
 [project.scripts]
 autooffer = "cli.main:app"
+autooffer-app = "app.launcher:main"
 
 [tool.setuptools.packages.find]
-where = ["core", "server", "cli"]
-include = ["autooffer_core*", "autooffer_server*", "cli*"]
+where = ["core", "server", "cli", "app"]
+include = ["autooffer_core*", "autooffer_server*", "cli*", "app*"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
@@ -69,12 +70,12 @@ ignore = [
 
 [tool.mypy]
 python_version = "3.11"
-mypy_path = ["core", "server", "cli"]
+mypy_path = ["core", "server", "cli", "app"]
 packages = ["autooffer_core"]
 strict = true
 ignore_missing_imports = true
 
 [[tool.mypy.overrides]]
-module = ["autooffer_server.*", "tests.*"]
+module = ["autooffer_server.*", "tests.*", "app.*", "scripts.*"]
 strict = false
 disallow_untyped_defs = true

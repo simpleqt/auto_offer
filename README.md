@@ -23,13 +23,14 @@ AutoOffer 是一款基于多智能体（Multi-Agent）架构的**桌面软件**�
 
 ## 当前进度
 
-Agent Core 与本地服务已可用（CLI + REST/WebSocket），图形界面在建设中。
+Agent Core、本地服务、图形界面与桌面壳均已实现；安装包打包与干净环境验收为剩余收尾项。
 
 | 层 | 状态 |
 | --- | --- |
 | Agent Core（感知/多智能体/控件/档案/LLM 接入） | 已完成，五个基准页端到端通过 |
 | 本地服务（REST + WebSocket + 任务队列 + 审计） | 已完成，19 项集成测试通过 |
-| 桌面界面（React）与安装包 | 待建设 |
+| 桌面界面（React + TS，模型配置/档案中心/任务监控/回放/投递/设置） | 已实现，`tsc` 与 `vite build` 通过 |
+| 桌面壳与安装包（pywebview 启动器 + PyInstaller/Inno Setup 流水线） | 已实现脚本，待干净 Windows 环境打包验收 |
 
 基准表单集（`tests/demo_forms/`）真实模型端到端验收情况：
 
@@ -126,13 +127,13 @@ api_key 存入系统凭据管理器（Windows DPAPI），数据库只保存掩�
 # 后端 + Agent Core
 pip install -e ".[dev]"
 playwright install chromium
-python -m autooffer serve --dev          # 以开发模式启动本地服务
+python -m cli.main serve --port 8765        # 以开发模式启动本地服务
 
-# 前端
+# 前端（开发模式，Vite 代理到 8765）
 cd frontend && npm install && npm run dev
 
-# 桌面模式启动（加载前端构建产物）
-python -m autooffer app
+# 桌面模式启动（先 npm run build 产出 frontend/dist，再起本地服务并加载界面）
+python -m app.launcher
 
 # 打包 Windows 安装程序
 python scripts/build_installer.py

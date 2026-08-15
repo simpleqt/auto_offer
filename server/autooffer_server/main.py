@@ -7,11 +7,14 @@ from __future__ import annotations
 
 import contextlib
 from collections.abc import AsyncIterator
+from pathlib import Path
 from typing import Any
 
 import structlog
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 
 from autooffer_core import __version__
 from autooffer_server.api.routes import router
@@ -62,7 +65,42 @@ def create_app(
     app.state.ctx = context
     app.include_router(router)
     app.include_router(ws_router)
+    _mount_frontend(app)
     return app
+
+
+def _frontend_dist() -> Path | None:
+    """定位前端构建产物目录（开发仓库内 frontend/dist，或打包后与主程序同目录）。"""
+    candidates = [
+        # 仓库开发布局：server/autooffer_server/main.py → 仓库根/frontend/dist
+        Path(__file__).resolve().parents[2] / "frontend" / "dist",
+        # 打包（onedir）布局：可执行文件同级的 frontend/dist
+        Path(__file__).resolve().parent / "frontend" / "dist",
+    ]
+    for cand in candidates:
+        if (cand / "index.html").exists():
+            return cand
+    return None
+
+
+def _mount_frontend(app: FastAPI) -> None:
+    """有前端构建产物时挂载 SPA；无则仅提供 API（开发模式由 Vite 独立服务）。"""
+    dist = _frontend_dist()
+    if dist is None:
+        log.info("server.frontend_missing", hint="开发模式请运行 `cd frontend && npm run dev`")
+        return
+
+    app.mount("/assets", StaticFiles(directory=dist / "assets"), name="assets")
+
+    @app.get("/{full_path:path}", include_in_schema=False)
+    async def spa(full_path: str) -> FileResponse:
+        """SPA 回退：非 API 路径一律返回 index.html，交给前端路由。"""
+        candidate = dist / full_path
+        if full_path and candidate.is_file():
+            return FileResponse(candidate)
+        return FileResponse(dist / "index.html")
+
+    log.info("server.frontend_mounted", dist=str(dist))
 
 
 def run(**kwargs: Any) -> None:
