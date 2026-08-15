@@ -47,6 +47,11 @@ class ServerConfig(BaseModel):
         """用户上传的简历/附件暂存目录。"""
         return self.data_dir / "uploads"
 
+    @property
+    def attachments_dir(self) -> Path:
+        """用户上传的附件永久存储目录（证件照/成绩单/证书/作品集等）。"""
+        return self.data_dir / "attachments"
+
     def ensure_dirs(self) -> None:
-        for p in (self.data_dir, self.runs_dir, self.uploads_dir):
+        for p in (self.data_dir, self.runs_dir, self.uploads_dir, self.attachments_dir):
             p.mkdir(parents=True, exist_ok=True)

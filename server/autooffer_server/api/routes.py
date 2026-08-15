@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Annotated, Any
 
 import structlog
-from fastapi import APIRouter, File, HTTPException, Request, UploadFile
+from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
 
 from autooffer_core import __version__
 from autooffer_core.applications import ApplicationStore
@@ -197,6 +197,42 @@ async def parse_resume_api(
     payload: dict[str, Any] = profile.model_dump(mode="json")
     await ctx.repo.save_profile(profile.id, profile.label, payload)
     return {"profile": payload, "low_confidence_paths": low_conf}
+
+
+@router.post("/attachments")
+async def upload_attachment(
+    request: Request,
+    file: Annotated[UploadFile, File()],
+    kind: Annotated[str, Form()] = "other",
+    label: Annotated[str, Form()] = "",
+    language: Annotated[str | None, Form()] = None,
+) -> dict[str, Any]:
+    """上传附件（证件照/成绩单/证书/作品集等）并落盘，返回附件元信息。
+
+    落盘到数据目录 attachments/，路径随档案一起存 SQLite（FR-P10：多附件管理）。
+    前端拿到返回的附件信息后写入档案的 attachments 列表再保存。
+    """
+    from autooffer_core.profile.schema import Attachment
+
+    ctx = _ctx(request)
+    ctx.config.ensure_dirs()
+    name = Path(file.filename or "attachment").name
+    dest = ctx.config.attachments_dir / f"{uuid.uuid4().hex[:8]}_{name}"
+    dest.write_bytes(await file.read())
+    try:
+        attachment = Attachment.model_validate(
+            {
+                "kind": kind,
+                "label": label or name,
+                "path": str(dest.resolve()),
+                "language": language,
+                "meta": {"size_kb": max(1, dest.stat().st_size // 1024), "filename": name},
+            }
+        )
+    except ValueError as exc:
+        dest.unlink(missing_ok=True)
+        raise HTTPException(422, f"附件参数非法: {exc}") from exc
+    return attachment.model_dump()
 
 
 # ---------- 任务 ----------

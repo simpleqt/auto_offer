@@ -308,3 +308,37 @@ def test_usage_empty(client: TestClient) -> None:
     r = client.get("/api/v1/usage")
     assert r.status_code == 200
     assert r.json() == {"by_model": [], "by_task": []}
+
+
+# ---------- 附件上传（单用户本地存储） ----------
+
+def test_attachment_upload_persists_file_and_meta(client: TestClient) -> None:
+    """上传附件应落盘到数据目录 attachments/ 并返回可入库的附件元信息。"""
+    files = {"file": ("photo.jpg", b"\xff\xd8\xff\xe0fake-jpeg", "image/jpeg")}
+    r = client.post(
+        "/api/v1/attachments",
+        files=files,
+        data={"kind": "photo", "label": "一寸白底照", "language": "zh"},
+    )
+    assert r.status_code == 200
+    body = r.json()
+    assert body["kind"] == "photo"
+    assert body["label"] == "一寸白底照"
+    assert body["language"] == "zh"
+    assert body["path"].endswith("_photo.jpg")
+    assert body["meta"]["size_kb"] >= 1
+
+    # 文件确实落盘到数据目录 attachments/ 下
+    from pathlib import Path
+
+    ctx = client.app.state.ctx  # type: ignore[attr-defined]
+    saved = Path(body["path"])
+    assert saved.exists()
+    assert ctx.config.attachments_dir in saved.parents
+
+
+def test_attachment_upload_invalid_kind(client: TestClient) -> None:
+    """非法 kind 应返回 422 且不残留文件。"""
+    files = {"file": ("bad.bin", b"data", "application/octet-stream")}
+    r = client.post("/api/v1/attachments", files=files, data={"kind": "not-a-kind"})
+    assert r.status_code == 422

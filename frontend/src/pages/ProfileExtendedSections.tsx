@@ -2,6 +2,7 @@
  * 档案扩展信息表单分组：扩展信息（按需注入）、问答知识库、附件管理。
  * 供 ProfileEditor 以 <Collapse> 折叠面板组织，字段命名与 Profile 模型对齐。
  */
+import { useState } from 'react';
 import {
   Button,
   Card,
@@ -12,10 +13,14 @@ import {
   InputNumber,
   Row,
   Select,
+  Space,
   Table,
   Typography,
+  Upload,
+  message,
 } from 'antd';
-import { DeleteOutlined, PlusOutlined } from '@ant-design/icons';
+import { DeleteOutlined, PlusOutlined, UploadOutlined } from '@ant-design/icons';
+import { uploadAttachment } from '../api/client';
 
 export function ExtendedFields() {
   return (
@@ -167,12 +172,15 @@ export function QABank() {
 }
 
 export function Attachments() {
+  const [uploading, setUploading] = useState(false);
+
   return (
     <Form.List name="attachments">
       {(fields, { add, remove }) => (
         <>
           <Typography.Paragraph type="secondary">
             附件在填表时按「用途标签 + 类型 + 语言」匹配站点上传控件；证件照超限会本地自动压缩。
+            上传后文件保存在本机数据目录，路径随档案一起持久化。
           </Typography.Paragraph>
           {fields.map(({ key, name }) => (
             <Card
@@ -220,9 +228,31 @@ export function Attachments() {
               </Form.Item>
             </Card>
           ))}
-          <Button type="dashed" icon={<PlusOutlined />} block onClick={() => add({ meta: {} })}>
-            添加附件
-          </Button>
+          <Space>
+            <Upload
+              showUploadList={false}
+              beforeUpload={async (file) => {
+                setUploading(true);
+                try {
+                  const attachment = await uploadAttachment(file, {});
+                  add(attachment);
+                  message.success(`已上传并保存：${file.name}`);
+                } catch (e) {
+                  message.error((e as Error).message);
+                } finally {
+                  setUploading(false);
+                }
+                return false; // 阻止 antd 自动上传，走自定义逻辑
+              }}
+            >
+              <Button icon={<UploadOutlined />} loading={uploading}>
+                上传附件
+              </Button>
+            </Upload>
+            <Button type="dashed" icon={<PlusOutlined />} onClick={() => add({ meta: {} })}>
+              手动添加
+            </Button>
+          </Space>
         </>
       )}
     </Form.List>

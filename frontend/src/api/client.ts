@@ -4,8 +4,10 @@
  */
 
 import type {
+  AgentEvent,
   ApplicationRecord,
   ApplicationStatusIn,
+  Attachment,
   EndpointIn,
   EndpointOut,
   FillReport,
@@ -18,7 +20,6 @@ import type {
   RoleRouting,
   TaskIn,
   TaskOut,
-  AgentEvent,
   UsageReport,
 } from './types';
 
@@ -90,6 +91,18 @@ export const parseResume = (file: File) => {
   const form = new FormData();
   form.append('file', file);
   return request<ParseResumeResult>('/profiles/parse-resume', { method: 'POST', body: form });
+};
+
+export const uploadAttachment = (
+  file: File,
+  meta: { kind?: string; label?: string; language?: string },
+) => {
+  const form = new FormData();
+  form.append('file', file);
+  if (meta.kind) form.append('kind', meta.kind);
+  if (meta.label) form.append('label', meta.label);
+  if (meta.language) form.append('language', meta.language);
+  return request<Attachment>('/attachments', { method: 'POST', body: form });
 };
 
 // ---------- 任务 ----------
