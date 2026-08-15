@@ -121,7 +121,12 @@ class DomExtractor:
         url: str = "",
     ) -> PageObservation:
         elements: list[UIElement] = []
-        for idx, raw in enumerate(merged.values()):
+        # 文件上传控件（file）不参与填写：过滤掉，让 Planner/Actor 完全感知不到，
+        # 从源头消除「上传简历」子任务（FR-A13 上传能力保留在驱动层，仅不进入默认填写流）。
+        raw_elements = [
+            raw for raw in merged.values() if str(raw.get("role") or "") != "file"
+        ]
+        for idx, raw in enumerate(raw_elements):
             bbox_raw = raw.get("bbox") or [0, 0, 0, 0]
             bbox = (int(bbox_raw[0]), int(bbox_raw[1]), int(bbox_raw[2]), int(bbox_raw[3]))
             elements.append(

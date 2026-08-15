@@ -167,6 +167,17 @@ class AgentRunner:
             if plan.decision == "finish" or plan.done:
                 return
             if plan.decision == "fail":
+                # 兜底：只要已有字段填写成功或已记入待确认，就按「部分完成」正常结束，
+                # 不因个别字段填不上而让整个任务失败。
+                counts = self._checklist.counts()
+                if counts["filled"] > 0 or counts["pending_confirm"] > 0:
+                    self._emit(
+                        "step", "runner",
+                        f"部分字段未填，已跳过并结束（成功 {counts['filled']} / "
+                        f"待确认 {counts['pending_confirm']} / 失败 {counts['failed']}）",
+                    )
+                    self._history.add("Planner 判定 fail，但有字段已填写，降级为部分完成")
+                    return
                 raise AutoOfferError(f"Planner 判定无法继续: {plan.reason}")
             if plan.decision == "wait_human":
                 await self._wait_human(plan.wait_human_reason or "需要人工处理")

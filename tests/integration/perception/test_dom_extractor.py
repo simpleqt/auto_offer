@@ -49,12 +49,10 @@ async def test_date_and_file_inputs(page):
     obs = await load(page, "date_file.html")
     birth = by_label(obs, "出生日期")
     assert birth.role == "date"
-    resume = by_label(obs, "中文简历")
-    assert resume.role == "file"
-    assert resume.accept == ".pdf,.doc,.docx"
-    photo = by_label(obs, "证件照")
-    assert photo.role == "file"
-    assert "image/png" in (photo.accept or "")
+    # file 控件不进入默认填写流（从源头消除「上传简历」子任务），应被过滤
+    file_labels = [e.label for e in obs.elements if e.role == "file"]
+    assert file_labels == []
+    assert not any("简历" in e.label or "证件照" in e.label for e in obs.elements)
 
 
 async def test_radio_checkbox(page):
