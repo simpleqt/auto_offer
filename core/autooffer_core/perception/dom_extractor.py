@@ -159,6 +159,7 @@ class DomExtractor:
             scroll_y=int(scroll.get("y", 0)),
             scroll_height=int(scroll.get("height", 0)),
             viewport_height=int(scroll.get("viewport", 0)),
+            body_text=str(signals.get("body_text") or "")[:8000],
             scenario=self._build_prefilled(meta),
         )
 

@@ -79,3 +79,5 @@ class PageObservation(BaseModel):
     scroll_y: int = 0
     scroll_height: int = 0
     viewport_height: int = 0
+    body_text: str = ""
+    """页面正文可见文本（已截断），供成功信号/文案检测（上传结果、重复投递提示等）。"""

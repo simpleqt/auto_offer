@@ -25,7 +25,7 @@ class FakeDriver:
 
     def __init__(self, observation: PageObservation | None = None) -> None:
         self.observation = observation or PageObservation(url="about:blank", title="")
-        self.calls: list[tuple[str, object]] = []  # 动作调用流水
+        self.calls: list[tuple[object, ...]] = []  # 动作调用流水
         self.opened_url: str | None = None
         self.values: dict[int, str] = {}  # element_index -> 已输入的值
         self.closed = False
@@ -40,8 +40,10 @@ class FakeDriver:
         self.observation.url = url
         self.calls.append(("open", url))
 
-    async def observe(self, *, with_screenshot: bool = True) -> PageObservation:
-        self.calls.append(("observe", with_screenshot))
+    async def observe(
+        self, *, with_screenshot: bool = True, scroll_full: bool = True
+    ) -> PageObservation:
+        self.calls.append(("observe", with_screenshot, scroll_full))
         return self.observation
 
     def _find(self, el: UIElement) -> UIElement:

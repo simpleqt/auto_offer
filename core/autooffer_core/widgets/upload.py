@@ -171,11 +171,20 @@ class UploadHandler:
         )
 
     async def _await_success(self, ctx: ExecContext, file_name: str) -> bool:
-        """轮询感知，等待文件名回显或"上传成功"类提示。"""
+        """轮询感知，等待文件名回显或"上传成功"类提示。
+
+        成功提示常出现在页面正文文本（而非表单元素）里，因此同时扫描 body_text；
+        轮询用 scroll_full=False 避免反复滚动页面（否则用户无法正常查看/选择页面）。
+        """
         stem = Path(file_name).stem.lower()
         deadline = time.monotonic() + self.timeout_s
         while True:
-            obs = await ctx.driver.observe(with_screenshot=False)
+            obs = await ctx.driver.observe(with_screenshot=False, scroll_full=False)
+            body = obs.body_text.lower()
+            if stem and stem in body:
+                return True
+            if any(h in body for h in _SUCCESS_HINTS):
+                return True
             for e in obs.elements:
                 text = f"{e.label} {e.value}".lower()
                 if stem and stem in text:

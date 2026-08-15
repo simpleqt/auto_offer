@@ -163,9 +163,11 @@ class PlaywrightDriver:
 
     # ---------- 感知 ----------
 
-    async def observe(self, *, with_screenshot: bool = True) -> PageObservation:
+    async def observe(
+        self, *, with_screenshot: bool = True, scroll_full: bool = True
+    ) -> PageObservation:
         page = await self._ensure_page()
-        obs, meta = await self._extractor.extract_with_meta(page)
+        obs, meta = await self._extractor.extract_with_meta(page, scroll_full=scroll_full)
 
         # 场景检测：用提取时收集的页面证据（正文/遮罩文本/可填字段数）
         signals = meta.get("signals", {})

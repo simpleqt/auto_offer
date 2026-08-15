@@ -25,8 +25,13 @@ class Driver(Protocol):
         """打开目标 URL（必要时启动浏览器/上下文）。"""
         ...
 
-    async def observe(self, *, with_screenshot: bool = True) -> PageObservation:
-        """感知当前页面，返回结构化观察（含可选 SoM 截图）。"""
+    async def observe(
+        self, *, with_screenshot: bool = True, scroll_full: bool = True
+    ) -> PageObservation:
+        """感知当前页面，返回结构化观察（含可选 SoM 截图）。
+
+        scroll_full=False 时只感知当前视口、不滚动页面（上传结果轮询等场景用）。
+        """
         ...
 
     async def click(self, el: UIElement) -> None:
