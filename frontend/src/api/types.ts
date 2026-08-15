@@ -197,13 +197,6 @@ export interface ProfileSummary {
   attachments: number;
 }
 
-export interface ProfileListRow {
-  id: string;
-  label: string;
-  updated_at: string;
-  payload: Profile;
-}
-
 // ---------- 任务 ----------
 
 export type TaskState =

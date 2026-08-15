@@ -30,7 +30,7 @@ export default function ProfilesPage() {
 
   const { data: activeProfile, isLoading: profileLoading } = useQuery({
     queryKey: ['profile', selectedId],
-    queryFn: () => getProfile(selectedId!).then((r) => r.payload),
+    queryFn: () => getProfile(selectedId!),
     enabled: !!selectedId,
   });
 

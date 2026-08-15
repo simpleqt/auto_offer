@@ -14,7 +14,6 @@ import type {
   HealthInfo,
   ParseResumeResult,
   Profile,
-  ProfileListRow,
   ProfileSummary,
   ProbeResult,
   RoleRouting,
@@ -78,8 +77,7 @@ export const putRouting = (mapping: RoleRouting) =>
 // ---------- 档案 ----------
 
 export const listProfiles = () => request<ProfileSummary[]>('/profiles');
-export const getProfile = (id: string) =>
-  request<ProfileListRow>(`/profiles/${encodeURIComponent(id)}`);
+export const getProfile = (id: string) => request<Profile>(`/profiles/${encodeURIComponent(id)}`);
 export const putProfile = (id: string, payload: Profile) =>
   request<Profile>(`/profiles/${encodeURIComponent(id)}`, {
     method: 'PUT',

@@ -96,7 +96,11 @@ export default function ModelsPage() {
 
   function openEdit(ep: EndpointOut) {
     setEditing(ep);
-    form.setFieldsValue({ ...ep, api_key: '' });
+    form.setFieldsValue({
+      ...ep,
+      api_key: '',
+      extra_body: JSON.stringify(ep.extra_body ?? {}),
+    });
     setDrawerOpen(true);
   }
 
@@ -256,6 +260,7 @@ export default function ModelsPage() {
         title={editing ? '编辑端点' : '添加端点'}
         width={480}
         open={drawerOpen}
+        forceRender
         onClose={() => setDrawerOpen(false)}
         extra={
           <Button type="primary" loading={upsert.isPending} onClick={() => form.submit()}>
@@ -269,12 +274,21 @@ export default function ModelsPage() {
           initialValues={{ temperature: 0.1, max_tokens: 4096, timeout_s: 600, max_concurrency: 4 }}
           onFinish={(vals) => {
             const id = editing ? editing.id : `ep-${Date.now().toString(36)}`;
+            let extraBody: Record<string, unknown> = {};
+            if (vals.extra_body) {
+              try {
+                extraBody = JSON.parse(vals.extra_body) as Record<string, unknown>;
+              } catch {
+                message.error('extra_body 不是合法 JSON，请检查后重试');
+                return;
+              }
+            }
             upsert.mutate({
               ...vals,
               id,
               api_key: vals.api_key || null,
               is_default: !!vals.is_default,
-              extra_body: vals.extra_body ? JSON.parse(vals.extra_body) : {},
+              extra_body: extraBody,
             });
           }}
         >
