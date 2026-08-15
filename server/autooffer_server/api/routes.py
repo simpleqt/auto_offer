@@ -16,6 +16,7 @@ from autooffer_core import __version__
 from autooffer_core.applications import ApplicationStore
 from autooffer_server.api.schemas import (
     ApplicationStatusIn,
+    AppSettings,
     EndpointIn,
     EndpointOut,
     ProfileIn,
@@ -64,6 +65,20 @@ async def version() -> dict[str, str]:
 async def usage_report(request: Request) -> dict[str, Any]:
     """模型调用统计（FR-M5）：按模型与按任务聚合 token 用量/时延/失败率。"""
     return await _ctx(request).repo.aggregate_llm_usage()
+
+
+@router.get("/settings", response_model=AppSettings)
+async def get_settings(request: Request) -> dict[str, Any]:
+    """读取应用设置（浏览器连接模式 / CDP 端点 / 启动最小化）。"""
+    result: dict[str, Any] = _ctx(request).settings.get()
+    return result
+
+
+@router.put("/settings", response_model=AppSettings)
+async def put_settings(request: Request, body: AppSettings) -> dict[str, Any]:
+    """更新应用设置。运行参数在任务启动时读取，对下一个任务生效。"""
+    result: dict[str, Any] = _ctx(request).settings.update(body.model_dump())
+    return result
 
 
 # ---------- 模型端点 ----------

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -104,3 +104,16 @@ class UsageReport(BaseModel):
 
     by_model: list[ModelUsage] = []
     by_task: list[TaskUsage] = []
+
+
+class AppSettings(BaseModel):
+    """应用设置（界面「设置」页）：浏览器连接模式与启动行为。"""
+
+    browser_mode: Literal["managed", "cdp"] = "managed"
+    """managed=软件自控持久浏览器；cdp=连接用户已有的 Chrome/Edge。"""
+
+    cdp_endpoint: str = ""
+    """browser_mode=cdp 时的远程调试端点，如 http://127.0.0.1:9222。"""
+
+    minimize_on_startup: bool = False
+    """主窗口启动后自动最小化。"""

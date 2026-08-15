@@ -318,6 +318,16 @@ export interface UsageReport {
   by_task: TaskUsage[];
 }
 
+// ---------- 应用设置 ----------
+
+export type BrowserMode = 'managed' | 'cdp';
+
+export interface AppSettings {
+  browser_mode: BrowserMode;
+  cdp_endpoint: string;
+  minimize_on_startup: boolean;
+}
+
 // ---------- WebSocket 事件 ----------
 
 export type WsEvent =

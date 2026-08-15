@@ -342,3 +342,42 @@ def test_attachment_upload_invalid_kind(client: TestClient) -> None:
     files = {"file": ("bad.bin", b"data", "application/octet-stream")}
     r = client.post("/api/v1/attachments", files=files, data={"kind": "not-a-kind"})
     assert r.status_code == 422
+
+
+# ---------- 应用设置（浏览器连接模式） ----------
+
+def test_settings_default_and_update(client: TestClient) -> None:
+    # 默认值
+    r = client.get("/api/v1/settings")
+    assert r.status_code == 200
+    assert r.json() == {
+        "browser_mode": "managed",
+        "cdp_endpoint": "",
+        "minimize_on_startup": False,
+    }
+
+    # 更新为 CDP 模式
+    r = client.put(
+        "/api/v1/settings",
+        json={
+            "browser_mode": "cdp",
+            "cdp_endpoint": "http://127.0.0.1:9222",
+            "minimize_on_startup": True,
+        },
+    )
+    assert r.status_code == 200
+    body = r.json()
+    assert body["browser_mode"] == "cdp"
+    assert body["cdp_endpoint"] == "http://127.0.0.1:9222"
+    assert body["minimize_on_startup"] is True
+
+    # 已持久化
+    assert client.get("/api/v1/settings").json()["browser_mode"] == "cdp"
+
+
+def test_settings_rejects_invalid_browser_mode(client: TestClient) -> None:
+    r = client.put(
+        "/api/v1/settings",
+        json={"browser_mode": "invalid", "cdp_endpoint": "", "minimize_on_startup": False},
+    )
+    assert r.status_code == 422

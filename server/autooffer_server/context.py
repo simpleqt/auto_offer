@@ -16,6 +16,7 @@ from autooffer_server.db.repo import Repo
 from autooffer_server.services.browser import SharedBrowser
 from autooffer_server.services.events import EventBus
 from autooffer_server.services.keystore import KeyStore
+from autooffer_server.services.settings import SettingsStore
 from autooffer_server.services.task_scheduler import TaskRunner, TaskScheduler
 
 log = structlog.get_logger(__name__)
@@ -34,6 +35,7 @@ class AppContext:
         self.repo = Repo(config.db_path)
         self.bus = EventBus()
         self.keystore = keystore or KeyStore(config.data_dir / "keys.json")
+        self.settings = SettingsStore(config.data_dir / "settings.json")
         if runner is None:
             from autooffer_server.services.agent_runner import AgentTaskRunner
 

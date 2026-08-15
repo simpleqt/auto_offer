@@ -57,14 +57,17 @@ class AgentTaskRunner:
 
         router = await self._ctx.build_router(usage_sink=_record_usage)
 
-        # 连接用户已有浏览器（CDP）优先：直接操作当前打开的页面，不新建页面
-        if self._ctx.config.cdp_endpoint:
+        # 浏览器模式优先级：界面设置（settings.json）> 启动参数（config）
+        settings = self._ctx.settings.get()
+        browser_mode = settings.get("browser_mode", "managed")
+        cdp_endpoint = settings.get("cdp_endpoint") or self._ctx.config.cdp_endpoint
+
+        # 连接用户已有浏览器（CDP）：直接操作当前打开的页面，不新建页面
+        if browser_mode == "cdp" and cdp_endpoint:
             from autooffer_core.drivers.playwright_driver import PlaywrightDriver
 
-            driver = PlaywrightDriver(
-                headless=False, cdp_endpoint=self._ctx.config.cdp_endpoint
-            )
-        # 桌面模式复用共享浏览器（保留登录态）；无头模式每任务独立
+            driver = PlaywrightDriver(headless=False, cdp_endpoint=str(cdp_endpoint))
+        # 软件自控共享浏览器（保留登录态）；无头模式每任务独立
         elif self._ctx.shared_browser is not None:
             driver = await self._ctx.shared_browser.new_driver()
         else:

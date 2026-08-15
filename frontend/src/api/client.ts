@@ -7,6 +7,7 @@ import type {
   AgentEvent,
   ApplicationRecord,
   ApplicationStatusIn,
+  AppSettings,
   Attachment,
   EndpointIn,
   EndpointOut,
@@ -60,6 +61,12 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 export const health = () => request<HealthInfo>('/system/health');
 export const version = () => request<{ version: string }>('/system/version');
 export const usageReport = () => request<UsageReport>('/usage');
+
+// ---------- 应用设置 ----------
+
+export const getSettings = () => request<AppSettings>('/settings');
+export const putSettings = (body: AppSettings) =>
+  request<AppSettings>('/settings', { method: 'PUT', body: JSON.stringify(body) });
 
 // ---------- 模型端点 ----------
 
