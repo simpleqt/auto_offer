@@ -242,7 +242,9 @@ async def _fill(
     attachments = {a.label: a.path for a in profile.attachments}
     runner = AgentRunner(
         task_id=f"cli-{abs(hash(url)) % 10_000}",
-        task_instruction="自动填写这份简历/求职表单；填完等待用户审核，不要提交。",
+        task_instruction="自动填写这份简历/求职表单：直接用档案内容填写页面上的所有表单字段，"
+        "不要上传简历文件或任何附件；遇到文件上传控件请跳过并继续填写其余字段。"
+        "填完等待用户审核，不要提交。",
         driver=driver,
         router=ModelRouterImpl(ep),
         executor=ActionExecutor(driver, attachments=attachments),
