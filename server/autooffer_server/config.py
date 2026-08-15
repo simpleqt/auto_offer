@@ -52,6 +52,11 @@ class ServerConfig(BaseModel):
         """用户上传的附件永久存储目录（证件照/成绩单/证书/作品集等）。"""
         return self.data_dir / "attachments"
 
+    @property
+    def browser_profile_dir(self) -> Path:
+        """共享持久浏览器 profile 目录（保留登录态，跨任务免登录）。"""
+        return self.data_dir / "browser_profile"
+
     def ensure_dirs(self) -> None:
         for p in (self.data_dir, self.runs_dir, self.uploads_dir, self.attachments_dir):
             p.mkdir(parents=True, exist_ok=True)

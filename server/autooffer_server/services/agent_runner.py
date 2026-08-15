@@ -1,6 +1,6 @@
 """真实执行体：把 Agent Core 的 AgentRunner 适配为调度器的 TaskRunner。
 
-每个任务独立浏览器上下文（docs/03 §5.3），结束后释放。
+桌面（有头）模式复用共享持久浏览器（登录态跨任务保留）；无头模式（测试/CI）每任务独立。
 """
 
 from __future__ import annotations
@@ -32,7 +32,6 @@ class AgentTaskRunner:
     ) -> dict[str, Any]:
         from autooffer_core.actions.executor import ActionExecutor
         from autooffer_core.applications import ApplicationStore
-        from autooffer_core.drivers.playwright_driver import PlaywrightDriver
         from autooffer_core.profile.schema import Profile
         from autooffer_core.runner import AgentRunner
 
@@ -58,7 +57,14 @@ class AgentTaskRunner:
 
         router = await self._ctx.build_router(usage_sink=_record_usage)
 
-        driver = PlaywrightDriver(headless=self._ctx.config.headless)
+        # 桌面模式复用共享浏览器（保留登录态）；无头模式每任务独立
+        if self._ctx.shared_browser is not None:
+            driver = await self._ctx.shared_browser.new_driver()
+        else:
+            from autooffer_core.drivers.playwright_driver import PlaywrightDriver
+
+            driver = PlaywrightDriver(headless=True)
+
         attachments = {a.label: a.path for a in profile.attachments}
         runner = AgentRunner(
             task_id=task_id,
@@ -73,9 +79,8 @@ class AgentTaskRunner:
         try:
             report = await runner.run(url)
         finally:
-            # 无头模式直接释放；有头模式保留窗口供用户审核提交（FR-A10）
-            if self._ctx.config.headless:
-                await driver.close()
+            # 共享模式只关本任务的页（保留共享浏览器）；无头模式整体释放
+            await driver.close()
 
         # 填写完成自动登记投递列表
         store = ApplicationStore(self._ctx.config.data_dir / "applications.json")

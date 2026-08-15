@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import random
 from pathlib import Path
@@ -47,6 +48,8 @@ class PlaywrightDriver:
         key_delay_ms: tuple[int, int] = (30, 80),
         action_delay_s: tuple[float, float] = (0.3, 0.8),
         viewport: tuple[int, int] = (1280, 900),
+        user_data_dir: Path | str | None = None,
+        existing_context: BrowserContext | None = None,
     ) -> None:
         self._headless = headless
         self._humanize = humanize
@@ -55,6 +58,10 @@ class PlaywrightDriver:
         self._viewport = viewport
         # SystemRandom：节奏抖动非安全用途，但避开伪随机告警（S311）
         self._rng = random.SystemRandom()
+        # 持久 profile 目录（launch_persistent_context，登录态跨任务保留）
+        self._user_data_dir = Path(user_data_dir) if user_data_dir else None
+        # 复用外部持久上下文（桌面模式共享浏览器；此时 close 只关本页）
+        self._existing_context = existing_context
         self._pw: Playwright | None = None
         self._browser: Browser | None = None
         self._context: BrowserContext | None = None
@@ -69,12 +76,30 @@ class PlaywrightDriver:
         if self._page is not None:
             return self._page
         try:
+            # 复用外部持久上下文（桌面模式：跨任务共享登录态）
+            if self._existing_context is not None:
+                self._context = self._existing_context
+                self._page = await self._context.new_page()
+                return self._page
+
             self._pw = await async_playwright().start()
-            self._browser = await self._pw.chromium.launch(headless=self._headless)
-            self._context = await self._browser.new_context(
-                viewport={"width": self._viewport[0], "height": self._viewport[1]}
-            )
-            self._page = await self._context.new_page()
+            if self._user_data_dir is not None:
+                self._context = await self._pw.chromium.launch_persistent_context(
+                    user_data_dir=str(self._user_data_dir),
+                    headless=self._headless,
+                    viewport={"width": self._viewport[0], "height": self._viewport[1]},
+                )
+                self._page = (
+                    self._context.pages[0]
+                    if self._context.pages
+                    else await self._context.new_page()
+                )
+            else:
+                self._browser = await self._pw.chromium.launch(headless=self._headless)
+                self._context = await self._browser.new_context(
+                    viewport={"width": self._viewport[0], "height": self._viewport[1]}
+                )
+                self._page = await self._context.new_page()
         except PlaywrightError as exc:
             raise DriverError(f"浏览器启动失败: {exc}") from exc
         return self._page
@@ -88,6 +113,14 @@ class PlaywrightDriver:
         log.info("driver.opened", url=url)
 
     async def close(self) -> None:
+        # 复用外部上下文时只关本页，保留共享浏览器与登录态
+        if self._existing_context is not None:
+            if self._page is not None:
+                with contextlib.suppress(PlaywrightError):
+                    await self._page.close()
+            self._page = None
+            self._context = None
+            return
         if self._browser is not None:
             await self._browser.close()
         if self._pw is not None:

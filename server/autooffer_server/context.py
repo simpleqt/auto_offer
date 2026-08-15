@@ -13,6 +13,7 @@ from pydantic import SecretStr
 from autooffer_core.llm.interfaces import ModelEndpoint, Role
 from autooffer_server.config import ServerConfig
 from autooffer_server.db.repo import Repo
+from autooffer_server.services.browser import SharedBrowser
 from autooffer_server.services.events import EventBus
 from autooffer_server.services.keystore import KeyStore
 from autooffer_server.services.task_scheduler import TaskRunner, TaskScheduler
@@ -39,6 +40,12 @@ class AppContext:
             runner = AgentTaskRunner(self)
         self.scheduler = TaskScheduler(
             self.repo, self.bus, runner, max_concurrent=config.max_concurrent_tasks
+        )
+        # 桌面（有头）模式共享持久浏览器；无头模式（测试/CI）仍每任务独立
+        self.shared_browser = (
+            SharedBrowser(config.browser_profile_dir, headless=config.headless)
+            if not config.headless
+            else None
         )
 
     async def build_endpoint(self, endpoint_id: str | None = None) -> ModelEndpoint:
@@ -92,3 +99,5 @@ class AppContext:
 
     async def shutdown(self) -> None:
         await self.scheduler.shutdown()
+        if self.shared_browser is not None:
+            await self.shared_browser.close()
