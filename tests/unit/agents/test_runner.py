@@ -215,7 +215,9 @@ async def test_runner_done_section_not_redispatched() -> None:
     )
     await runner.run("https://example.com/apply")
     summaries = [e.summary for e in events]
-    assert any("跳过已完成区块" in s for s in summaries)
+    assert any("跳过已处理区块" in s for s in summaries)
+    # 反复重派同一区块达到上限后自动收尾，不再烧完剩余步数
+    assert any("被反复重派" in s for s in summaries)
     assert runner.state == "AWAITING_REVIEW"
 
 

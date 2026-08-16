@@ -16,8 +16,9 @@
 - 个别字段/区块反复尝试仍填不上时，把它记入待确认（pending）并继续其它区块，最终 decision=finish（部分完成）；不要因部分字段未填而 decision=fail。
 - 仅当页面确实无法继续推进（登录墙、空白页、致命报错、验证码）时才 decision=fail。
 {% if done_sections_text %}
-【本页已完成区块（绝对不要再派发）】
+【本页已处理区块（绝对不要再派发，即使 Checklist 显示其中有失败字段）】
 {{ done_sections_text }}
+这些区块的失败/缺失字段已记入待确认清单，请继续派发其它区块或 decision=finish 结束。
 {% endif %}
 【全局 Checklist】
 {{ checklist_text }}

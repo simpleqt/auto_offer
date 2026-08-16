@@ -105,8 +105,14 @@ class AgentRunner:
         self._catalog = self._resolver.catalog(profile)
         self._seq = 0
         self._last_title = ""
-        self._done_sections: dict[str, dict[str, str]] = {}
-        """页面签名 → {区块id: 区块标题}。跨页不串（多步表单同名区块各自独立）。"""
+        self._done_sections: dict[str, dict[str, tuple[str, str]]] = {}
+        """页面签名 → {区块id: (标题, 状态)}（已完成/部分字段已放弃/重试用尽）。
+
+        跨页不串（多步表单同名区块各自独立）。所有「已处理」状态都硬跳过重派，
+        防止 Planner 对失败区块无限重派形成空转循环。
+        """
+        self._skip_counts: dict[str, int] = {}
+        """同区块被硬跳过的次数（page|sid 计数）；达到上限自动按部分完成收尾。"""
         self._field_failures: dict[str, int] = {}
         """字段级失败计数：连续失败达到阈值后放弃该字段，不再反复重试。"""
         self._vision_next = True
@@ -170,7 +176,8 @@ class AgentRunner:
             page_key = self._page_key(obs)
             done_here = self._done_sections.get(page_key, {})
             done_text = "、".join(
-                f"{sid}《{title}》" for sid, title in done_here.items()
+                f"{sid}《{title}》（{status}，勿再派发，剩余字段已记待确认）"
+                for sid, (title, status) in done_here.items()
             )
             plan = await self._planner.plan(
                 task_instruction=self._instruction,
@@ -207,9 +214,22 @@ class AgentRunner:
             if plan.decision == "dispatch_section":
                 sid = plan.next_section_id or ""
                 if sid in done_here:
-                    title = done_here[sid]
-                    self._emit("step", "runner", f"跳过已完成区块「{title}」")
-                    self._history.add(f"跳过已完成区块「{title}」")
+                    title, status = done_here[sid]
+                    key = f"{page_key}|{sid}"
+                    self._skip_counts[key] = self._skip_counts.get(key, 0) + 1
+                    self._emit("step", "runner", f"跳过已处理区块「{title}」（{status}）")
+                    self._history.add(f"区块「{title}」已处理过（{status}），跳过重派")
+                    if self._skip_counts[key] >= 3:
+                        # Planner 无视提示反复重派同一区块：按部分完成收尾，
+                        # 不再让「派发→跳过」空转烧掉剩余步数
+                        counts = self._checklist.counts()
+                        self._emit(
+                            "step", "runner",
+                            f"区块「{title}」被反复重派，自动结束（成功 {counts['filled']} / "
+                            f"待确认 {counts['pending_confirm']} / 失败 {counts['failed']}）",
+                        )
+                        self._history.add("Planner 反复重派已处理区块，按部分完成收尾")
+                        return
                     continue
                 await self._run_section(obs, plan, page_key)
                 continue
@@ -229,9 +249,18 @@ class AgentRunner:
         sec = next((s for s in obs.sections if s.id == plan.next_section_id), None)
         return sec.title if sec else (plan.next_section_id or "全部字段")
 
-    def _mark_section_done(self, page_key: str, section_id: str, section_title: str) -> None:
-        """区块完成登记（按页面签名），供 Planner 派发前跳过与提示词注入。"""
-        self._done_sections.setdefault(page_key, {})[section_id or section_title] = section_title
+    def _mark_section_done(
+        self, page_key: str, section_id: str, section_title: str, status: str = "已完成"
+    ) -> None:
+        """区块处理结果登记（按页面签名），供 Planner 派发前跳过与提示词注入。
+
+        status 如实描述（已完成/部分字段已放弃/重试用尽），让 Planner 知道
+        该区块已处理过、剩余字段已记待确认，不要再派发。
+        """
+        self._done_sections.setdefault(page_key, {})[section_id or section_title] = (
+            section_title,
+            status,
+        )
 
     def _section_elements(
         self, obs: PageObservation, section_id: str | None
@@ -374,7 +403,9 @@ class AgentRunner:
                     "step", "runner",
                     f"区块「{section_title}」部分字段已放弃，结束本区块继续后续",
                 )
-                self._mark_section_done(page_key, section_id, section_title)
+                self._mark_section_done(
+                    page_key, section_id, section_title, status="部分字段已放弃"
+                )
                 return
 
             if abandoned_this_round:
@@ -389,7 +420,7 @@ class AgentRunner:
             f"区块:{section_title}", section_title=section_title,
             status="failed", note="重试次数用尽",
         )
-        self._mark_section_done(page_key, section_id, section_title)
+        self._mark_section_done(page_key, section_id, section_title, status="重试用尽")
 
     async def _handle_meta_actions(
         self, batch: ActionBatch, section_title: str, obs: PageObservation
@@ -487,15 +518,27 @@ class AgentRunner:
             for label, exp, act, p in checks
         ]
         failed = [fr for fr in field_results if not fr.passed]
+        retry_advice: str | None = None
+        if failed:
+            parts: list[str] = []
+            for a, el, _exp, act in pairs:
+                fr = next((f for f in failed if f.label == (el.label or a.reason[:24])), None)
+                if fr is None:
+                    continue
+                if not act.strip() and el.role in ("combobox", "custom"):
+                    # 自定义下拉常见两步交互：点开展开面板 → 点选项文本
+                    parts.append(
+                        f"{fr.label} 为自定义控件且回读为空：先 click 展开下拉面板，"
+                        "等下一轮再 click 选项文本（不要用 input_text 直接键入）"
+                    )
+                else:
+                    parts.append(f"{fr.label} 期望'{fr.expected}'实际'{fr.actual}'")
+            retry_advice = "；".join(parts[:5]) + "。请重试或换策略。"
         return ValidatorOutput(
             passed=not failed,
             section_complete=actor_section_complete and not failed,
             field_results=field_results,
-            retry_advice=(
-                "；".join(
-                    f"{fr.label} 期望'{fr.expected}'实际'{fr.actual}'" for fr in failed[:5]
-                ) + "。请重试或换策略。" if failed else None
-            ),
+            retry_advice=retry_advice,
         )
 
     @staticmethod
@@ -522,6 +565,10 @@ class AgentRunner:
         if t == "click":
             if el.role == "radio":
                 return actual == "true"  # 感知层约定：选中 "true"/未选 ""
+            if el.role in ("combobox", "custom") and expected and expected != "(点击)":
+                # 带目标值的自定义控件点击（如下拉选值）：回读非空且包含期望才算数。
+                # 只点开面板时回读为空 → 判未通过，驱动 Actor 下一轮点选项文本。
+                return bool(actual.strip()) and AgentRunner._values_equal(expected, actual)
             return True  # 复选/按钮等结构动作，点击即成功
         return None  # 未知类型交 LLM
 
