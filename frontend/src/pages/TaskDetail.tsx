@@ -159,8 +159,8 @@ export default function TaskDetail({
         )}
       </Card>
 
-      <Row gutter={16}>
-        <Col span={12}>
+      <Row gutter={[16, 16]}>
+        <Col xs={24} xl={12}>
           <Card
             title="动作流水"
             extra={
@@ -191,7 +191,7 @@ export default function TaskDetail({
             </div>
           </Card>
         </Col>
-        <Col span={12}>
+        <Col xs={24} xl={12}>
           <Card title="填写报告">
             {task?.report ? (
               <ReportView report={task.report} />

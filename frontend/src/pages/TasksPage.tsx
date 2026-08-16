@@ -62,8 +62,8 @@ export default function TasksPage() {
   });
 
   return (
-    <Row gutter={16}>
-      <Col span={8}>
+    <Row gutter={[16, 16]}>
+      <Col xs={24} lg={8}>
         <Card title="新建任务" style={{ marginBottom: 16 }}>
           <Form form={form} layout="vertical" onFinish={(v) => create.mutate(v)}>
             <Form.Item
@@ -71,7 +71,7 @@ export default function TasksPage() {
               label="目标表单 URL"
               rules={[{ required: true, type: 'url', message: '请输入合法 URL' }]}
             >
-              <Input.TextArea rows={3} placeholder="https://example.com/apply" />
+              <Input placeholder="https://example.com/apply" allowClear />
             </Form.Item>
             <Form.Item
               name="profile_id"
@@ -143,7 +143,7 @@ export default function TasksPage() {
         </Card>
       </Col>
 
-      <Col span={16}>
+      <Col xs={24} lg={16}>
         {selectedId ? (
           <TaskDetail
             key={selectedId}

@@ -197,13 +197,13 @@ export default function ModelsPage() {
         >
           <Row gutter={[16, 16]}>
             {(Object.keys(ROLE_LABELS) as (keyof typeof ROLE_LABELS)[]).map((role) => (
-              <Col span={8} key={role}>
-                <Space>
-                  <Typography.Text style={{ width: 130, display: 'inline-block' }}>
+              <Col xs={24} sm={12} xl={8} key={role}>
+                <Space wrap>
+                  <Typography.Text style={{ minWidth: 130, display: 'inline-block' }}>
                     {ROLE_LABELS[role]}
                   </Typography.Text>
                   <Select
-                    style={{ width: 200 }}
+                    style={{ minWidth: 200 }}
                     allowClear
                     placeholder="默认端点"
                     value={routingMap[role]}

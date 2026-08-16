@@ -31,8 +31,9 @@ export default function ApplicationsPage() {
   const update = useMutation({
     mutationFn: ({ id, status, note }: { id: string; status: ApplicationStatus; note?: string }) =>
       updateApplication(id, { status, note }),
-    onSuccess: () => {
-      message.success('状态已更新');
+    onSuccess: (_d, vars) => {
+      // 备注保存与状态更新区分提示，让用户知道备注已被持久化
+      message.success(vars.note !== undefined ? '备注已保存' : '状态已更新');
       qc.invalidateQueries({ queryKey: ['applications'] });
     },
     onError: (e: Error) => message.error(e.message),
@@ -88,8 +89,9 @@ export default function ApplicationsPage() {
       render: (_: unknown, r: ApplicationRecord) => (
         <Input
           size="small"
-          placeholder="添加备注"
+          placeholder="备注（失焦或回车保存）"
           defaultValue={r.note ?? ''}
+          onPressEnter={(e) => (e.target as HTMLInputElement).blur()}
           onBlur={(e) => {
             const v = e.target.value.trim();
             if (v !== (r.note ?? '')) update.mutate({ id: r.id, status: r.status, note: v });

@@ -5,6 +5,7 @@ import {
   Col,
   List,
   message,
+  Modal,
   Popconfirm,
   Row,
   Space,
@@ -17,6 +18,7 @@ import { DeleteOutlined, FileTextOutlined, PlusOutlined, UploadOutlined } from '
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { deleteProfile, getProfile, listProfiles, parseResume, putProfile } from '../api/client';
 import { emptyProfile, fmtTime, newProfileId } from '../profile-utils';
+import { getUnsaved, setUnsaved } from '../unsaved';
 import ProfileEditor from './ProfileEditor';
 
 export default function ProfilesPage() {
@@ -44,6 +46,25 @@ export default function ProfilesPage() {
     onError: (e: Error) => message.error(e.message),
   });
 
+  /** 有未保存修改时先确认再执行会丢弃编辑内容的操作。 */
+  function confirmIfUnsaved(action: () => void, title = '有未保存的档案修改') {
+    if (!getUnsaved()) {
+      action();
+      return;
+    }
+    Modal.confirm({
+      title,
+      content: '当前档案有未保存的修改，继续将丢失这些修改。',
+      okText: '丢弃修改并继续',
+      okButtonProps: { danger: true },
+      cancelText: '留下修改',
+      onOk: () => {
+        setUnsaved(false);
+        action();
+      },
+    });
+  }
+
   const create = useMutation({
     mutationFn: async () => {
       const id = newProfileId();
@@ -61,6 +82,10 @@ export default function ProfilesPage() {
   });
 
   async function handleParse(file: File) {
+    if (getUnsaved()) {
+      message.warning('当前档案有未保存的修改，请先保存或放弃后再解析新简历');
+      return false;
+    }
     setUploading(true);
     try {
       const r = await parseResume(file);
@@ -76,8 +101,8 @@ export default function ProfilesPage() {
   }
 
   return (
-    <Row gutter={16}>
-      <Col span={8}>
+    <Row gutter={[16, 16]}>
+      <Col xs={24} lg={8} xl={8}>
         <Card
           title="档案列表"
           extra={
@@ -95,7 +120,7 @@ export default function ProfilesPage() {
                 type="primary"
                 icon={<PlusOutlined />}
                 loading={create.isPending}
-                onClick={() => create.mutate()}
+                onClick={() => confirmIfUnsaved(() => create.mutate())}
               >
                 新建
               </Button>
@@ -113,7 +138,10 @@ export default function ProfilesPage() {
                     cursor: 'pointer',
                     background: p.id === selectedId ? '#f0f5ff' : undefined,
                   }}
-                  onClick={() => setSelectedId(p.id)}
+                  onClick={() =>
+                    p.id !== selectedId &&
+                    confirmIfUnsaved(() => setSelectedId(p.id), '切换档案将丢失未保存的修改')
+                  }
                   actions={[
                     <Popconfirm
                       key="del"
@@ -141,7 +169,7 @@ export default function ProfilesPage() {
           )}
         </Card>
       </Col>
-      <Col span={16}>
+      <Col xs={24} lg={16} xl={16}>
         <Card title="档案编辑" extra={activeProfile && <Tag>{activeProfile.label}</Tag>}>
           {profileLoading ? (
             <Spin />

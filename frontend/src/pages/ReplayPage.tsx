@@ -8,7 +8,7 @@ import {
   Row,
   Select,
   Space,
-  Steps,
+  Slider,
   Tag,
   Typography,
 } from 'antd';
@@ -37,8 +37,8 @@ export default function ReplayPage() {
   const current = stepEvents[cursor];
 
   return (
-    <Row gutter={16}>
-      <Col span={8}>
+    <Row gutter={[16, 16]}>
+      <Col xs={24} lg={8}>
         <Card title="选择任务">
           <Select
             style={{ width: '100%' }}
@@ -68,7 +68,7 @@ export default function ReplayPage() {
           )}
         </Card>
       </Col>
-      <Col span={16}>
+      <Col xs={24} lg={16}>
         <Card
           title="审计回放"
           extra={
@@ -111,12 +111,16 @@ export default function ReplayPage() {
                   </pre>
                 )}
               </Card>
-              <Steps
-                size="small"
-                current={cursor}
-                items={stepEvents.map((e) => ({ title: `${e.seq} ${e.agent}` }))}
-                responsive
-              />
+              {/* 滑杆步进替代逐事件 Steps：长任务（数百事件）不会渲染海量节点 */}
+              {stepEvents.length > 1 && (
+                <Slider
+                  min={0}
+                  max={stepEvents.length - 1}
+                  value={cursor}
+                  onChange={(v) => setCursor(v)}
+                  tooltip={{ formatter: (v) => `#${stepEvents[v ?? 0].seq}` }}
+                />
+              )}
               <Typography.Text type="secondary">
                 时间：{fmtTime(current.created_at)}
               </Typography.Text>

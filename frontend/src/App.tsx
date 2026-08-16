@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Layout, Menu, Space, Typography } from 'antd';
+import { Layout, Menu, Modal, Space, Typography } from 'antd';
 import {
   AimOutlined,
   DatabaseOutlined,
@@ -11,6 +11,7 @@ import {
 } from '@ant-design/icons';
 import { useQuery } from '@tanstack/react-query';
 import { health } from './api/client';
+import { getUnsaved, setUnsaved } from './unsaved';
 import OnboardingPage from './pages/OnboardingPage';
 import ProfilesPage from './pages/ProfilesPage';
 import ModelsPage from './pages/ModelsPage';
@@ -36,11 +37,39 @@ const MENU_ITEMS: { key: PageKey; icon: React.ReactNode; label: string }[] = [
 
 export default function App() {
   const [page, setPage] = useState<PageKey>('onboarding');
+  const [collapsed, setCollapsed] = useState(false);
   const { data } = useQuery({ queryKey: ['health'], queryFn: health });
+
+  function switchPage(next: PageKey) {
+    if (next === page) return;
+    if (getUnsaved()) {
+      Modal.confirm({
+        title: '有未保存的档案修改',
+        content: '离开当前页面将丢失未保存的修改，确定离开吗？',
+        okText: '离开',
+        okButtonProps: { danger: true },
+        cancelText: '留下修改',
+        onOk: () => {
+          setUnsaved(false);
+          setPage(next);
+        },
+      });
+      return;
+    }
+    setPage(next);
+  }
 
   return (
     <Layout style={{ height: '100vh' }}>
-      <Sider width={200} theme="dark">
+      <Sider
+        width={200}
+        theme="dark"
+        breakpoint="lg"
+        collapsedWidth={48}
+        collapsible
+        collapsed={collapsed}
+        onCollapse={setCollapsed}
+      >
         <div
           style={{
             height: 56,
@@ -51,21 +80,23 @@ export default function App() {
             fontWeight: 600,
             fontSize: 16,
             letterSpacing: 1,
+            overflow: 'hidden',
+            whiteSpace: 'nowrap',
           }}
         >
-          AutoOffer
+          {collapsed ? 'A' : 'AutoOffer'}
         </div>
         <Menu
           theme="dark"
           mode="inline"
           selectedKeys={[page]}
           items={MENU_ITEMS}
-          onClick={(e) => setPage(e.key as PageKey)}
+          onClick={(e) => switchPage(e.key as PageKey)}
         />
       </Sider>
       <Layout>
         <Content style={{ padding: 24, overflow: 'auto' }}>
-          {page === 'onboarding' && <OnboardingPage goTo={setPage} />}
+          {page === 'onboarding' && <OnboardingPage goTo={switchPage} />}
           {page === 'profiles' && <ProfilesPage />}
           {page === 'models' && <ModelsPage />}
           {page === 'tasks' && <TasksPage />}
@@ -75,12 +106,14 @@ export default function App() {
         </Content>
         <Space
           style={{
+            display: 'flex',
+            width: '100%',
             padding: '4px 24px',
             justifyContent: 'space-between',
             borderTop: '1px solid #f0f0f0',
           }}
         >
-          <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+          <Typography.Text type="secondary" style={{ fontSize: 12 }} ellipsis>
             {data ? `服务 v${data.version} · 数据目录 ${data.data_dir}` : '连接本地服务中…'}
           </Typography.Text>
         </Space>
