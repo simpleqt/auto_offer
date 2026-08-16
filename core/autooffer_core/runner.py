@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import datetime
+import re
 from collections.abc import Awaitable, Callable
 from typing import Any, Literal, Protocol
 
@@ -17,7 +18,7 @@ from pydantic import BaseModel
 from autooffer_core.actions.models import Action, ActionBatch
 from autooffer_core.agents.actor import Actor
 from autooffer_core.agents.planner import Planner
-from autooffer_core.agents.schemas import FlowStrategy, PlannerOutput
+from autooffer_core.agents.schemas import FieldCheck, FlowStrategy, PlannerOutput, ValidatorOutput
 from autooffer_core.agents.validator import Validator
 from autooffer_core.drivers.base import Driver
 from autooffer_core.errors import ActionError, AutoOfferError, LLMError
@@ -67,6 +68,8 @@ class RunnerConfig(BaseModel):
     max_section_retries: int = 3
     prefill_threshold: float = 0.4
     token_budget: int = 400_000
+    field_abandon_after: int = 2
+    """同一字段连续失败达到该次数后放弃（记待确认），不再反复重试。"""
 
 
 class AgentRunner:
@@ -102,10 +105,12 @@ class AgentRunner:
         self._catalog = self._resolver.catalog(profile)
         self._seq = 0
         self._last_title = ""
-        self._done_sections: set[str] = set()
-        """已完成的区块标题，防止 Planner 反复重派同一区块（死循环保护）。"""
+        self._done_sections: dict[str, dict[str, str]] = {}
+        """页面签名 → {区块id: 区块标题}。跨页不串（多步表单同名区块各自独立）。"""
         self._field_failures: dict[str, int] = {}
         """字段级失败计数：连续失败达到阈值后放弃该字段，不再反复重试。"""
+        self._vision_next = True
+        """下一轮观察是否带截图（首轮/翻页/未知场景才带，节省 ~0.8s/张 + 标注耗时）。"""
         self.state: RunState = "RUNNING"
 
     # ---------- 事件 ----------
@@ -153,17 +158,27 @@ class AgentRunner:
         initial_prefill: float | None = None
         while steps < self._config.max_steps:
             steps += 1
-            obs = await self._driver.observe()
+            obs = await self._driver.observe(with_screenshot=self._vision_next)
+            self._vision_next = False
+            if obs.scenario.page_type == "unknown":
+                # 规则识别不出页面类型时，下一轮带截图辅助 Planner 裁决
+                self._vision_next = True
             self._last_title = obs.title or self._last_title
             if initial_prefill is None:
                 # 只按首轮观察判定核对模式：智能体自己填的字段不算"站点预填"
                 initial_prefill = obs.scenario.prefilled_ratio
+            page_key = self._page_key(obs)
+            done_here = self._done_sections.get(page_key, {})
+            done_text = "、".join(
+                f"{sid}《{title}》" for sid, title in done_here.items()
+            )
             plan = await self._planner.plan(
                 task_instruction=self._instruction,
                 observation=obs,
                 checklist_text=self._checklist.to_text(),
                 history_text=self._history.to_text(),
                 forced_verify=initial_prefill >= self._config.prefill_threshold,
+                done_sections_text=done_text,
             )
             self._emit("step", "planner", f"{plan.decision}: {plan.reason[:100]}")
             self._history.add(f"Planner 决策 {plan.decision}({plan.strategy}) {plan.reason}")
@@ -190,12 +205,13 @@ class AgentRunner:
                 await self._advance_page(obs, plan)
                 continue
             if plan.decision == "dispatch_section":
-                title = self._section_title(obs, plan)
-                if title in self._done_sections:
+                sid = plan.next_section_id or ""
+                if sid in done_here:
+                    title = done_here[sid]
                     self._emit("step", "runner", f"跳过已完成区块「{title}」")
                     self._history.add(f"跳过已完成区块「{title}」")
                     continue
-                await self._run_section(obs, plan)
+                await self._run_section(obs, plan, page_key)
                 continue
             raise AutoOfferError(f"未知的 Planner 决策: {plan.decision}")
         log.warning("runner.max_steps_reached", steps=steps)
@@ -203,17 +219,19 @@ class AgentRunner:
 
     # ---------- 区块子任务 ----------
 
+    @staticmethod
+    def _page_key(obs: PageObservation) -> str:
+        """页面签名：URL + 分页步号。多步表单不同步骤的同名区块互不干扰。"""
+        step = obs.pagination.current_step
+        return f"{obs.url}|{step if step is not None else 'single'}"
+
     def _section_title(self, obs: PageObservation, plan: PlannerOutput) -> str:
         sec = next((s for s in obs.sections if s.id == plan.next_section_id), None)
         return sec.title if sec else (plan.next_section_id or "全部字段")
 
-    def _mark_section_done(self, section_title: str) -> None:
-        """区块完成时写入 done 集合，供 Planner 派发前硬跳过（防死循环）。
-
-        只维护进程内集合，不写 checklist——checklist 是字段级报告数据源，
-        混入区块标记会污染 filled/failed 统计。
-        """
-        self._done_sections.add(section_title)
+    def _mark_section_done(self, page_key: str, section_id: str, section_title: str) -> None:
+        """区块完成登记（按页面签名），供 Planner 派发前跳过与提示词注入。"""
+        self._done_sections.setdefault(page_key, {})[section_id or section_title] = section_title
 
     def _section_elements(
         self, obs: PageObservation, section_id: str | None
@@ -226,8 +244,11 @@ class AgentRunner:
             if sec.element_start <= e.index <= sec.element_end and e.visible
         ]
 
-    async def _run_section(self, obs: PageObservation, plan: PlannerOutput) -> None:
+    async def _run_section(
+        self, obs: PageObservation, plan: PlannerOutput, page_key: str
+    ) -> None:
         section_title = self._section_title(obs, plan)
+        section_id = plan.next_section_id or section_title
         goal = plan.subtask_goal or f"填写区块「{section_title}」"
         slice_values = self._resolver.slice_for_section(self._profile, section_title)
         extra_profile: dict[str, Any] | None = None
@@ -235,7 +256,12 @@ class AgentRunner:
         strategy: FlowStrategy = plan.strategy
 
         for attempt in range(1, self._config.max_section_retries + 1):
-            observation = obs if attempt == 1 else await self._driver.observe()
+            # 重试轮不带截图：DOM 足够比对，省 ~0.8s/张的推理延迟与标注耗时
+            observation = (
+                obs
+                if attempt == 1
+                else await self._driver.observe(with_screenshot=False)
+            )
             elements = self._section_elements(observation, plan.next_section_id)
             batch = await self._actor.act(
                 goal=goal,
@@ -261,13 +287,13 @@ class AgentRunner:
                             if a.type not in ("request_profile", "skip_field", "done")]
             if not exec_actions:
                 if batch.section_complete:
-                    self._mark_section_done(section_title)
+                    self._mark_section_done(page_key, section_id, section_title)
                     return
                 # 全是 skip_field（档案无数据）→ 重试无意义，直接结束该区块
                 if batch.actions and all(a.type == "skip_field" for a in batch.actions):
                     log.info("runner.section_unfillable", section=section_title)
                     self._history.add(f"区块「{section_title}」档案缺失，已记入待确认")
-                    self._mark_section_done(section_title)
+                    self._mark_section_done(page_key, section_id, section_title)
                     return
                 retry_advice = "上一轮没有可执行动作，请重新审视区块元素与目标。"
                 continue
@@ -285,15 +311,11 @@ class AgentRunner:
 
             needs_human = [r for r in results if getattr(r, "status", "") == "needs_human"]
 
-            # 执行后重新感知（不滚动、不截图），读回真实页面状态。
-            # 若本批含"添加条目/展开"等结构变更，旧观察已过时，直接拿旧观察读回会失真。
+            # 执行后重新感知（视口级、无截图），读回真实页面状态
             after_obs = await self._driver.observe(with_screenshot=False, scroll_full=False)
-            expected_text, readback_text = await self._readback(
-                exec_actions, observation, after_obs
-            )
-            val = await self._validator.validate(
-                goal=goal, expected_text=expected_text, readback_text=readback_text
-            )
+            pairs = await self._readback_pairs(exec_actions, observation, after_obs)
+            val = await self._validate_or_llm(goal, pairs, batch.section_complete)
+
             failed_fields = [fr for fr in val.field_results if not fr.passed]
             summary = f"passed={val.passed} complete={val.section_complete}"
             if failed_fields:
@@ -319,7 +341,7 @@ class AgentRunner:
                     )
                 else:
                     self._field_failures[fr.label] = self._field_failures.get(fr.label, 0) + 1
-                    if self._field_failures[fr.label] >= 2:
+                    if self._field_failures[fr.label] >= self._config.field_abandon_after:
                         abandoned_this_round.add(fr.label)
                         self._checklist.upsert(
                             fr.label, section_title=section_title,
@@ -341,23 +363,23 @@ class AgentRunner:
                 await self._wait_human(f"敏感操作需确认: {needs_human[0].detail}")
                 continue
             if val.passed and (val.section_complete or batch.section_complete):
-                self._mark_section_done(section_title)
+                self._mark_section_done(page_key, section_id, section_title)
                 return
 
             # 若本轮失败字段已全部放弃（无新失败项），不再空转重试，直接结束该区块
-            if abandoned_this_round and not (failed_fields and any(
+            if abandoned_this_round and not any(
                 fr.label not in abandoned_this_round for fr in failed_fields
-            )):
+            ):
                 self._emit(
                     "step", "runner",
                     f"区块「{section_title}」部分字段已放弃，结束本区块继续后续",
                 )
-                self._mark_section_done(section_title)
+                self._mark_section_done(page_key, section_id, section_title)
                 return
 
             if abandoned_this_round:
                 retry_advice = (
-                    f"以下字段已多次尝试失败，请改用 skip_field 跳过、不要再填写："
+                    "以下字段已多次尝试失败，请改用 skip_field 跳过、不要再填写："
                     f"{'、'.join(sorted(abandoned_this_round))}。继续填写其余字段。"
                 )
             else:
@@ -367,7 +389,7 @@ class AgentRunner:
             f"区块:{section_title}", section_title=section_title,
             status="failed", note="重试次数用尽",
         )
-        self._done_sections.add(section_title)
+        self._mark_section_done(page_key, section_id, section_title)
 
     async def _handle_meta_actions(
         self, batch: ActionBatch, section_title: str, obs: PageObservation
@@ -397,48 +419,135 @@ class AgentRunner:
                 )
         return extra
 
-    async def _readback(
-        self, actions: list[Action], obs: PageObservation, after_obs: PageObservation
-    ) -> tuple[str, str]:
-        """用执行后的观察（after_obs）回读。
+    # ---------- 回读与校验 ----------
 
-        actions 里的 element_index 是执行前 obs 的编号；执行可能改变页面结构
-        （新增条目导致 index 位移），因此先按 index 取 selector，再到 after_obs
-        中按 selector 找回执行后的同元素做回读。
+    @staticmethod
+    def _expected_text(a: Action, el: UIElement) -> str:
+        target = a.value
+        if a.date is not None:
+            target = f"{a.date.year}-{a.date.month or ''}"
+        if a.date_range is not None:
+            end = a.date_range.end
+            target = (
+                f"{a.date_range.start.year}-{a.date_range.start.month or ''}"
+                f" ~ {end.year if end else '至今'}"
+            )
+        if a.attachment_label:
+            target = a.attachment_label
+        if target is None and a.type == "click":
+            target = "(点击)"
+        return target or ""
+
+    async def _readback_pairs(
+        self, actions: list[Action], obs: PageObservation, after_obs: PageObservation
+    ) -> list[tuple[Action, UIElement, str, str]]:
+        """回读为结构化 (动作, 元素, 期望, 实际) 列表。
+
+        动作的 element_index 是执行前 obs 的编号；执行可能改变结构（index 位移），
+        因此优先按 selector 在 after_obs 中找回执行后元素。视口外元素不在
+        after_obs 时回退用原元素按 selector 直读（元素定位不依赖观察列表），
+        不再误判"执行后未找到元素"。
         """
         by_index = {e.index: e for e in obs.elements}
         by_selector = {e.selector: e for e in after_obs.elements}
-        expected_lines: list[str] = []
-        readback_lines: list[str] = []
+        pairs: list[tuple[Action, UIElement, str, str]] = []
         for a in actions:
             if a.element_index is None or a.element_index not in by_index:
                 continue
             el = by_index[a.element_index]
-            target = a.value
-            if a.date is not None:
-                target = f"{a.date.year}-{a.date.month or ''}"
-            if a.date_range is not None:
-                end = a.date_range.end
-                target = (
-                    f"{a.date_range.start.year}-{a.date_range.start.month or ''}"
-                    f" ~ {end.year if end else '至今'}"
-                )
-            if a.attachment_label:
-                target = a.attachment_label
-            if target is None and a.type == "click":
-                target = "(点击)"
-            expected_lines.append(f"{el.label}: {target}")
+            expected = self._expected_text(a, el)
+            read_el = by_selector.get(el.selector, el)
+            try:
+                actual = await self._driver.element_value(read_el)
+            except AutoOfferError:
+                actual = "(回读失败)"
+            pairs.append((a, el, expected, actual))
+        return pairs
 
-            after_el = by_selector.get(el.selector)
-            if after_el is None:
-                actual = "(执行后未找到元素)"
-            else:
-                try:
-                    actual = await self._driver.element_value(after_el)
-                except AutoOfferError:
-                    actual = "(回读失败)"
-            readback_lines.append(f"{el.label}: {actual}")
-        return "\n".join(expected_lines), "\n".join(readback_lines)
+    async def _validate_or_llm(
+        self, goal: str, pairs: list[tuple[Action, UIElement, str, str]],
+        actor_section_complete: bool,
+    ) -> ValidatorOutput:
+        """表单字段的校验优先程序化（字符串/日期/选中态比对，零 LLM 调用）。
+
+        只有存在无法程序化判定的动作（回读失败、未知动作类型）才退回 LLM 校验。
+        """
+        checks: list[tuple[str, str, str, bool | None]] = []  # (label, expected, actual, passed)
+        for a, el, expected, actual in pairs:
+            checks.append((el.label or a.reason[:24], expected, actual,
+                           self._check_pair(a, el, expected, actual)))
+        if any(c[3] is None for c in checks):
+            expected_text = "\n".join(f"{label}: {exp}" for label, exp, _, _ in checks)
+            readback_text = "\n".join(f"{label}: {act}" for label, _, act, _ in checks)
+            return await self._validator.validate(
+                goal=goal, expected_text=expected_text, readback_text=readback_text
+            )
+        field_results = [
+            FieldCheck(label=label, expected=exp, actual=act, passed=bool(p))
+            for label, exp, act, p in checks
+        ]
+        failed = [fr for fr in field_results if not fr.passed]
+        return ValidatorOutput(
+            passed=not failed,
+            section_complete=actor_section_complete and not failed,
+            field_results=field_results,
+            retry_advice=(
+                "；".join(
+                    f"{fr.label} 期望'{fr.expected}'实际'{fr.actual}'" for fr in failed[:5]
+                ) + "。请重试或换策略。" if failed else None
+            ),
+        )
+
+    @staticmethod
+    def _check_pair(a: Action, el: UIElement, expected: str, actual: str) -> bool | None:
+        """单动作程序化判定；None 表示无法判定（需 LLM）。"""
+        if actual == "(回读失败)":
+            return None
+        t = a.type
+        if t == "input_text":
+            # 日期类输入框（input[type=date/month] 或角色 date）按日期等价比较
+            if el.role == "date" or el.input_type in ("date", "month"):
+                return AgentRunner._dates_equal(expected, actual)
+            return AgentRunner._values_equal(expected, actual)
+        if t == "select_option":
+            return bool(actual.strip()) and AgentRunner._values_equal(expected, actual)
+        if t == "set_date":
+            return AgentRunner._dates_equal(expected, actual)
+        if t == "set_date_range":
+            if " ~ " in expected and " ~ " in actual:
+                es, as_ = expected.split(" ~ ", 1), actual.split(" ~ ", 1)
+                return (AgentRunner._dates_equal(es[0], as_[0])
+                        and (as_[1] == "至今" or AgentRunner._dates_equal(es[1], as_[1])))
+            return AgentRunner._values_equal(expected, actual)
+        if t == "click":
+            if el.role == "radio":
+                return actual == "true"  # 感知层约定：选中 "true"/未选 ""
+            return True  # 复选/按钮等结构动作，点击即成功
+        return None  # 未知类型交 LLM
+
+    @staticmethod
+    def _values_equal(expected: str, actual: str) -> bool:
+        def norm(s: str) -> str:
+            return " ".join(str(s).split()).lower()
+
+        e, a = norm(expected), norm(actual)
+        return e == a or (e != "" and e in a)
+
+    @staticmethod
+    def _dates_equal(expected: str, actual: str) -> bool:
+        """日期等价比较：2024-07 / 2024/7 / 2024年7月 视为一致。"""
+
+        def parts(s: str) -> tuple[int, ...] | None:
+            m = re.match(r"^(\d{4})[^\d]+(\d{1,2})(?:[^\d]+(\d{1,2}))?", s.strip())
+            if not m:
+                return None
+            vals = (int(m.group(1)), int(m.group(2)))
+            return vals + (int(m.group(3)),) if m.group(3) else vals
+
+        ep, ap = parts(expected), parts(actual)
+        if ep is None or ap is None:
+            return AgentRunner._values_equal(expected, actual)
+        return ep == ap
 
     async def _advance_page(self, obs: PageObservation, plan: PlannerOutput) -> None:
         idx = obs.pagination.next_button_index
@@ -459,6 +568,7 @@ class AgentRunner:
         action = Action(type="click", element_index=target.index, reason="进入下一步")
         await self._executor.execute_batch(ActionBatch(actions=[action]), obs)
         await self._driver.wait(1.0)
+        self._vision_next = True  # 新页面首轮带截图辅助 Planner 裁决
         self._history.add("已点击下一步进入新页面")
         self._emit("step", "runner", "翻页: 已点击下一步")
 

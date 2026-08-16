@@ -12,6 +12,7 @@ import asyncio
 import contextlib
 import json
 import random
+import re
 from pathlib import Path
 from typing import Any
 
@@ -321,6 +322,10 @@ class PlaywrightDriver:
     async def element_value(self, el: UIElement) -> str:
         loc = self._locate(el)
         try:
+            # 单选/复选读"选中状态"而非 value 属性（对齐感知层约定：选中 "true"/未选 ""）。
+            # browser-use #3437 的教训：读不到选中态会让智能体重复点击把状态切回去。
+            if el.role in ("radio", "checkbox"):
+                return await self._checked_state(loc)
             if el.tag in ("input", "textarea"):
                 return await loc.input_value(timeout=3000)
             if el.tag == "select":
@@ -329,6 +334,25 @@ class PlaywrightDriver:
                     return (await selected.first.inner_text()).strip()
                 return ""
             return (await loc.inner_text(timeout=3000)).strip()
+        except PlaywrightError:
+            return ""
+
+    async def _checked_state(self, loc: Locator) -> str:
+        """读控件选中态：原生 input 用 is_checked；自定义组件读 aria-checked/状态类名。"""
+        try:
+            aria = await loc.get_attribute("aria-checked", timeout=2000)
+            if aria is not None:
+                return "true" if aria == "true" else ""
+        except PlaywrightError:
+            pass
+        try:
+            cls = await loc.get_attribute("class", timeout=2000) or ""
+            if re.search(r"(checked|selected|active)", cls):
+                return "true"
+        except PlaywrightError:
+            pass
+        try:
+            return "true" if await loc.is_checked(timeout=2000) else ""
         except PlaywrightError:
             return ""
 

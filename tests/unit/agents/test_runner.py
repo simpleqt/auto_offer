@@ -92,10 +92,11 @@ async def test_runner_happy_path_fill_and_finish() -> None:
             ],
         ),
     ]
+    validator_client = scripted(validator_script)
     router = FakeRouter({
         "planner": scripted(planner_script),
         "actor": scripted(actor_script),
-        "validator": scripted(validator_script),
+        "validator": validator_client,
     })
     events = []
     runner = AgentRunner(
@@ -114,6 +115,8 @@ async def test_runner_happy_path_fill_and_finish() -> None:
     assert driver.values[0] == "张三"  # 真实执行器写入 FakeDriver
     assert report.counts()["filled"] == 2
     assert report.counts()["failed"] == 0
+    # 程序化校验：文本字段比对不走 LLM，Validator 未被调用
+    assert validator_client.calls == 0
     kinds = [e.kind for e in events]
     assert "report" in kinds and "state" in kinds
 
@@ -147,40 +150,118 @@ async def test_runner_wait_human_on_login(monkeypatch: pytest.MonkeyPatch) -> No
 
 
 @pytest.mark.asyncio
-async def test_runner_section_retry_then_fail_recorded() -> None:
-    driver = FakeDriver(make_observation())
+async def test_runner_radio_fail_abandoned_not_loop() -> None:
+    """单选点击后选中态读不到 → 程序化校验失败 → 连续失败自动放弃，不无限重试。"""
+    radio_obs = PageObservation(
+        url="https://example.com/apply",
+        title="示例申请表",
+        sections=[SectionInfo(id="s1", title="基本信息", element_start=0, element_end=0)],
+        elements=[
+            UIElement(index=0, tag="input", role="radio", label="男", selector="#male"),
+        ],
+    )
+    driver = FakeDriver(radio_obs)
     profile = build_sample_profile()
 
     planner_script = [
         PlannerOutput(decision="dispatch_section", next_section_id="s1",
-                      subtask_goal="填写基本信息", reason="派发"),
-        PlannerOutput(decision="finish", done=True, reason="放弃该区块后结束"),
+                      subtask_goal="选择性别", reason="派发"),
+        PlannerOutput(decision="finish", done=True, reason="结束后"),
     ]
+    # FakeDriver.click 不改变 values → 回读选中态恒为空 → 程序化校验必失败
     actor_batch = ActionBatch(
-        actions=[Action(type="input_text", element_index=0, value="张三", reason="填姓名")],
-        section_complete=True, summary="尝试填写",
+        actions=[Action(type="click", element_index=0, reason="选择男")],
+        section_complete=True, summary="选择性别",
     )
-    failed_validation = ValidatorOutput(
-        passed=False,
-        field_results=[FieldCheck(label="姓名", expected="张三", actual="", passed=False)],
-        retry_advice="请重试",
-    )
+    validator_client = scripted([ValidatorOutput(passed=True)])
     router = FakeRouter({
         "planner": scripted(planner_script),
         "actor": scripted([actor_batch]),
-        "validator": scripted([failed_validation]),
+        "validator": validator_client,
     })
     runner = AgentRunner(
         task_id="t3", task_instruction="x", driver=driver, router=router,
         executor=ActionExecutor(driver), profile=profile,
-        config=RunnerConfig(max_section_retries=2),
+        config=RunnerConfig(max_section_retries=3),
     )
     report = await runner.run("https://example.com/apply")
-    # 字段连续失败达到阈值后放弃（记待确认），任务不中断、不空转
-    labels = [f.label for f in report.fields]
-    assert any("姓名" in label for label in labels)
+    # 字段连续失败达到阈值后放弃（记待确认），任务不中断、Validator LLM 未被调用
     assert report.counts()["pending_confirm"] >= 1
+    assert validator_client.calls == 0
     assert runner.state == "AWAITING_REVIEW"
+
+
+@pytest.mark.asyncio
+async def test_runner_done_section_not_redispatched() -> None:
+    """区块完成后 Planner 再派发同一区块应被跳过（防死循环）。"""
+    driver = FakeDriver(make_observation())
+    profile = build_sample_profile()
+    dispatch = PlannerOutput(decision="dispatch_section", next_section_id="s1",
+                             subtask_goal="填写基本信息", reason="派发")
+    # Planner 永远想派 s1：第一次执行成功后，后续派发应被硬跳
+    router = FakeRouter({
+        "planner": scripted([dispatch]),
+        "actor": scripted([ActionBatch(
+            actions=[], section_complete=True, summary="完成",
+        )]),
+        "validator": scripted([ValidatorOutput(passed=True)]),
+    })
+    events = []
+    runner = AgentRunner(
+        task_id="t5", task_instruction="x", driver=driver, router=router,
+        executor=ActionExecutor(driver), profile=profile,
+        config=RunnerConfig(max_steps=5),
+        on_event=events.append,
+    )
+    await runner.run("https://example.com/apply")
+    summaries = [e.summary for e in events]
+    assert any("跳过已完成区块" in s for s in summaries)
+    assert runner.state == "AWAITING_REVIEW"
+
+
+@pytest.mark.asyncio
+async def test_runner_deterministic_date_validation() -> None:
+    """日期字段程序化校验：2024-07 与 2024/7 等价，不需要 LLM。"""
+    date_obs = PageObservation(
+        url="https://example.com/apply",
+        title="示例",
+        sections=[SectionInfo(id="s1", title="教育经历", element_start=0, element_end=0)],
+        elements=[
+            UIElement(index=0, tag="input", role="date", label="入学时间",
+                      selector="#d", input_type="month"),
+        ],
+    )
+
+    class DateDriver(FakeDriver):
+        async def element_value(self, el: UIElement) -> str:
+            return "2024/7"  # 站点回显格式与期望 2024-07 不同但等价
+
+    driver = DateDriver(date_obs)
+    profile = build_sample_profile()
+    planner_script = [
+        PlannerOutput(decision="dispatch_section", next_section_id="s1",
+                      subtask_goal="填日期", reason="派发"),
+        PlannerOutput(decision="finish", done=True, reason="完成"),
+    ]
+    actor_batch = ActionBatch(
+        actions=[Action(type="input_text", element_index=0, value="2024-07",
+                        reason="填入学时间")],
+        section_complete=True, summary="填日期",
+    )
+    validator_client = scripted([ValidatorOutput(passed=True)])
+    router = FakeRouter({
+        "planner": scripted(planner_script),
+        "actor": scripted([actor_batch]),
+        "validator": validator_client,
+    })
+    runner = AgentRunner(
+        task_id="t6", task_instruction="x", driver=driver, router=router,
+        executor=ActionExecutor(driver), profile=profile,
+    )
+    report = await runner.run("https://example.com/apply")
+    assert report.counts()["filled"] >= 1
+    assert report.counts()["failed"] == 0
+    assert validator_client.calls == 0
 
 
 @pytest.mark.asyncio

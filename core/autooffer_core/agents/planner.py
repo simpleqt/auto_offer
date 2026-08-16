@@ -29,11 +29,13 @@ class Planner:
         checklist_text: str,
         history_text: str,
         forced_verify: bool | None = None,
+        done_sections_text: str = "",
     ) -> PlannerOutput:
         """forced_verify：是否提示进入核对模式。
 
         由 Runner 按"首轮观察"的预填比例判定并传入——智能体自己填过的字段
         不应在后续轮次触发核对模式；None 时退回按当前观察判定。
+        done_sections_text：当前页面已完成区块列表（防止重复派发）。
         """
         if forced_verify is None:
             forced_verify = observation.scenario.prefilled_ratio >= self._prefill_threshold
@@ -47,6 +49,7 @@ class Planner:
             sections_text=format_observation_overview(observation),
             checklist_text=checklist_text,
             history_text=history_text,
+            done_sections_text=done_sections_text,
         )
         images: list[bytes] = []
         if self._llm.supports_vision and observation.screenshot_som:
