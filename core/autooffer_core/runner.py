@@ -245,25 +245,14 @@ class AgentRunner:
                         self._history.add("Planner 反复重派已处理区块，按部分完成收尾")
                         return
                     continue
-                if plan.next_section_id and not any(
-                    s.id == plan.next_section_id for s in obs.sections
-                ):
-                    # 派发的区块不在当前页（多步表单未到该步）：先点"下一步"推进；
-                    # 没有翻页按钮或连续翻页无效时登记跳过，不浪费区块重试轮次
-                    absent_sid = plan.next_section_id
+                if not self._section_on_page(obs, plan):
+                    # 派发的区块确实不在当前页（多步表单未到该步）：先点"下一步"推进；
+                    # 没有翻页按钮则回退正常派发（全量元素兜底），由 Actor 自行判断字段
+                    absent_sid = plan.next_section_id or ""
                     advances = self._absent_advances.get(absent_sid, 0)
                     if advances < 3 and await self._try_advance(obs):
                         self._absent_advances[absent_sid] = advances + 1
                         continue  # 翻页成功：外层重新观察、重新规划
-                    self._mark_section_done(
-                        page_key, absent_sid, absent_sid, status="字段不在当前页"
-                    )
-                    self._checklist.upsert(
-                        f"区块:{absent_sid}", section_title=absent_sid,
-                        status="pending_confirm", note="区块字段不在当前页面",
-                    )
-                    self._emit("step", "runner", f"区块「{absent_sid}」不在当前页面，已记待确认")
-                    continue
                 await self._run_section(obs, plan, page_key)
                 continue
             raise AutoOfferError(f"未知的 Planner 决策: {plan.decision}")
@@ -281,6 +270,27 @@ class AgentRunner:
     def _section_title(self, obs: PageObservation, plan: PlannerOutput) -> str:
         sec = next((s for s in obs.sections if s.id == plan.next_section_id), None)
         return sec.title if sec else (plan.next_section_id or "全部字段")
+
+    @staticmethod
+    def _section_on_page(obs: PageObservation, plan: PlannerOutput) -> bool:
+        """派发区块是否在当前页：按感知分段的 id/标题匹配。
+
+        感知层未分段（sections 为空）时一律视为在页——Planner 自拟的 s1/s2
+        编号与感知 id 天然对不上，不能据此判"不在当前页"（真实站点回归：
+        表单就在当前页却被误判缺页，任务一步结束）。
+        """
+        if not obs.sections or not plan.next_section_id:
+            return True
+        if any(s.id == plan.next_section_id for s in obs.sections):
+            return True
+        plan_titles = [sec.title for sec in plan.sections if sec.title]
+        if plan.subtask_goal:
+            plan_titles.append(plan.subtask_goal)
+        for s in obs.sections:
+            for t in plan_titles:
+                if t in s.title or s.title in t:
+                    return True
+        return False
 
     def _mark_section_done(
         self, page_key: str, section_id: str, section_title: str, status: str = "已完成"

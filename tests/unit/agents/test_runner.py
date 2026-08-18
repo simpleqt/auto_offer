@@ -380,12 +380,16 @@ async def test_runner_advances_when_section_absent() -> None:
 
 
 @pytest.mark.asyncio
-async def test_runner_marks_absent_section_when_no_next_button() -> None:
-    """派发的区块不在当前页且没有翻页按钮：登记待确认后继续，不空转重试。"""
+async def test_runner_no_sections_fallback_dispatch() -> None:
+    """感知层未分段（sections 为空）时必须正常派发，不能判"区块不在当前页"。
+
+    回归（真实站点）：Planner 自拟 s1/s2 编号与感知分段 id 对不上，曾导致
+    表单明明在当前页却被记待确认、任务一步结束。
+    """
     flat_obs = PageObservation(
         url="https://example.com/apply",
-        title="单页表单",
-        sections=[SectionInfo(id="s1", title="基本信息", element_start=0, element_end=0)],
+        title="表单",
+        sections=[],
         elements=[
             UIElement(index=0, tag="input", role="input", label="姓名", selector="#name"),
         ],
@@ -393,13 +397,20 @@ async def test_runner_marks_absent_section_when_no_next_button() -> None:
     driver = FakeDriver(flat_obs)
     profile = build_sample_profile()
     planner_script = [
-        PlannerOutput(decision="dispatch_section", next_section_id="s2",
-                      subtask_goal="填写教育背景", reason="顺序派发"),
+        PlannerOutput(
+            sections=[PlannedSection(id="s1", title="基本信息")],
+            decision="dispatch_section", next_section_id="s1",
+            subtask_goal="填写基本信息", reason="开始填写",
+        ),
         PlannerOutput(decision="finish", done=True, reason="完成"),
     ]
     router = FakeRouter({
         "planner": scripted(planner_script),
-        "actor": scripted([ActionBatch(actions=[])]),
+        "actor": scripted([ActionBatch(
+            actions=[Action(type="input_text", element_index=0, value="张三",
+                            reason="填姓名")],
+            section_complete=True, summary="填写姓名",
+        )]),
         "validator": scripted([ValidatorOutput(passed=True)]),
     })
     events = []
@@ -410,8 +421,89 @@ async def test_runner_marks_absent_section_when_no_next_button() -> None:
     )
     report = await runner.run("https://example.com/apply")
 
+    # 正常派发并填写，绝不出现"不在当前页面"误判
+    assert driver.values[0] == "张三"
+    assert not any("不在当前页面" in e.summary for e in events)
+    assert report.counts()["filled"] >= 1
+
+
+@pytest.mark.asyncio
+async def test_runner_absent_section_without_button_falls_back() -> None:
+    """区块确实不在当前页且没有翻页按钮：回退正常派发，不直接记待确认杀死任务。"""
+    step1_obs = PageObservation(
+        url="https://example.com/apply",
+        title="向导第1步",
+        sections=[SectionInfo(id="sec-1", title="基本信息", element_start=0, element_end=0)],
+        elements=[
+            UIElement(index=0, tag="input", role="input", label="姓名", selector="#name"),
+        ],
+    )
+    driver = FakeDriver(step1_obs)
+    profile = build_sample_profile()
+    planner_script = [
+        PlannerOutput(
+            sections=[PlannedSection(id="s1", title="基本信息"),
+                      PlannedSection(id="s2", title="教育背景")],
+            decision="dispatch_section", next_section_id="s2",
+            subtask_goal="填写教育背景", reason="顺序派发",
+        ),
+        PlannerOutput(decision="finish", done=True, reason="完成"),
+    ]
+    router = FakeRouter({
+        "planner": scripted(planner_script),
+        "actor": scripted([ActionBatch(actions=[], section_complete=False)]),
+        "validator": scripted([ValidatorOutput(passed=True)]),
+    })
+    events = []
+    runner = AgentRunner(
+        task_id="t10", task_instruction="x", driver=driver, router=router,
+        executor=ActionExecutor(driver), profile=profile,
+        on_event=events.append,
+    )
+    await runner.run("https://example.com/apply")
+
+    # 无翻页按钮 → 回退派发：Actor 被调用（空动作轮兜底收尾），任务正常结束
     summaries = [e.summary for e in events]
-    assert any("不在当前页面" in s for s in summaries)
-    # 没有任何点击/输入动作被执行，区块直接记入待确认
-    assert not any(c[0] in ("click", "input_text") for c in driver.calls)
-    assert report.counts()["pending_confirm"] >= 1
+    assert any(e.agent == "actor" for e in events)
+    assert not any("不在当前页面" in s for s in summaries)
+    assert runner.state == "AWAITING_REVIEW"
+
+
+@pytest.mark.asyncio
+async def test_runner_section_title_match_dispatches() -> None:
+    """派发区块标题与感知分段标题吻合（id 不同）时按在页处理，正常派发。"""
+    obs = PageObservation(
+        url="https://example.com/apply",
+        title="表单",
+        sections=[SectionInfo(id="sec-edu", title="教育背景", element_start=0, element_end=0)],
+        elements=[
+            UIElement(index=0, tag="input", role="input", label="学校名称", selector="#school"),
+        ],
+    )
+    driver = FakeDriver(obs)
+    profile = build_sample_profile()
+    planner_script = [
+        PlannerOutput(
+            sections=[PlannedSection(id="s2", title="教育背景")],
+            decision="dispatch_section", next_section_id="s2",
+            subtask_goal="填写教育背景", reason="派发教育背景",
+        ),
+        PlannerOutput(decision="finish", done=True, reason="完成"),
+    ]
+    router = FakeRouter({
+        "planner": scripted(planner_script),
+        "actor": scripted([ActionBatch(
+            actions=[Action(type="input_text", element_index=0, value="某某大学",
+                            reason="填学校")],
+            section_complete=True, summary="填写学校",
+        )]),
+        "validator": scripted([ValidatorOutput(passed=True)]),
+    })
+    runner = AgentRunner(
+        task_id="t11", task_instruction="x", driver=driver, router=router,
+        executor=ActionExecutor(driver), profile=profile,
+    )
+    await runner.run("https://example.com/apply")
+
+    assert driver.values[0] == "某某大学"  # 正常派发填写，未走翻页分支
+    assert not any(c == ("click", 1) for c in driver.calls)
