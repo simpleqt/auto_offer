@@ -28,6 +28,8 @@ class FillResult(BaseModel):
     """实际生效的策略名（审计用，如 "native_select" / "panel_click"）。"""
     detail: str = ""
     needs_human: bool = False
+    panel_open: bool = False
+    """失败时下拉面板是否已展开（有候选或 expanded 信号），供上层选择兜底策略。"""
 
 
 @dataclass(slots=True)

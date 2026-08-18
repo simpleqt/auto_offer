@@ -117,8 +117,20 @@ class DropdownHandler:
 
         # 策略 2：点击展开 → 展开态验证 → 感知弹层 → 语义匹配
         panel_result = await self._try_panel_click(el, target, ctx)
-        if panel_result is not None:
+        if panel_result is not None and panel_result.ok:
             return panel_result
+
+        # 策略 2.5：文本锚定兜底——面板已展开但感知层提取不到选项（嵌套结构/
+        # 传送门渲染/面板类名不在提取提示内，真实站点北森系表单的常见形态）时，
+        # 直接在页面可见叶子节点中按目标文本点击。仅在面板确认展开时启用，
+        # 避免面板未打开时误点页面其它同文本元素。
+        if panel_result is not None and panel_result.panel_open:
+            clicked = await self._click_text_fallback(ctx, target)
+            if clicked is not None:
+                log.info("dropdown.text_click_hit", label=el.label, target=target, option=clicked)
+                return FillResult(
+                    ok=True, strategy="text_click", detail=f"{clicked}(文本锚定)"
+                )
 
         # 策略 3：搜索式（可键入的 combobox）
         if el.tag == "input":
@@ -128,10 +140,27 @@ class DropdownHandler:
             if hit is not None:
                 return FillResult(ok=True, strategy="search", detail=f"{hit[0]}({hit[1]})")
 
+        if panel_result is not None:
+            return panel_result
         log.warning("dropdown.exhausted", label=el.label, target=target)
         return FillResult(
             ok=False, strategy="exhausted", detail=f"下拉[{el.label}]未匹配到选项: {target}"
         )
+
+    @staticmethod
+    async def _click_text_fallback(ctx: ExecContext, target: str) -> str | None:
+        """文本锚定点击（驱动可选能力）；驱动不支持或未命中返回 None。"""
+        fn = getattr(ctx.driver, "click_visible_text", None)
+        if not callable(fn):
+            return None
+        variants = [target]
+        stripped = target.replace(" ", "")
+        if stripped and stripped != target:
+            variants.append(stripped)
+        try:
+            return await fn(variants)  # type: ignore[operator]
+        except Exception:  # noqa: BLE001
+            return None
 
     async def _try_panel_click(
         self, el: UIElement, target: str, ctx: ExecContext
@@ -224,4 +253,6 @@ class DropdownHandler:
                 expanded=expanded,
                 candidates=[c.label for c in candidates[:10]],
             )
-        return FillResult(ok=False, strategy="panel_click", detail=detail)
+        return FillResult(
+            ok=False, strategy="panel_click", detail=detail, panel_open=panel_open_signal
+        )

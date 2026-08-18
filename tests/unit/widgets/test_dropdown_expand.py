@@ -220,6 +220,65 @@ async def test_panel_click_expanded_false_triggers_retry_then_true() -> None:
 
 
 @pytest.mark.asyncio
+async def test_text_click_fallback_when_options_not_extracted() -> None:
+    """面板已展开但选项未被感知层提取（嵌套/传送门渲染）→ 文本锚定点击兜底。
+
+    回归（真实站点）：北森系表单下拉面板类名不在提取提示内、选项带嵌套 span，
+    面板点开后元素表里没有任何选项 → 策略链走驱动的 click_visible_text 兜底。
+    """
+    from autooffer_core.perception.models import UIElement as El
+
+    class TextClickDriver(FakeDriver):
+        def __init__(self, obs: PageObservation) -> None:
+            super().__init__(obs)
+            self.text_clicks: list[list[str]] = []
+
+        async def click_visible_text(self, texts: list[str]) -> str | None:
+            self.text_clicks.append(texts)
+            return texts[0]
+
+    trigger = _combobox(index=0, label="性别")
+    other = El(index=1, tag="button", role="button", label="下一步",
+               selector="#next", visible=True)
+    # 面板展开后的观察里只有触发器与无关按钮——选项完全未被提取
+    after_click = PageObservation(url="about:blank", title="", elements=[trigger, other])
+    driver = TextClickDriver(after_click)
+    ctx = ExecContext(driver=driver)
+
+    result = await DropdownHandler().fill(trigger, "男", ctx)
+
+    assert result.ok is True
+    assert result.strategy == "text_click"
+    assert driver.text_clicks and driver.text_clicks[0][0] == "男"
+
+
+@pytest.mark.asyncio
+async def test_no_text_click_when_panel_not_open() -> None:
+    """面板未展开（无候选无信号）时不做文本锚定——避免误点页面其它同文本元素。"""
+
+    class TextClickDriver(FakeDriver):
+        def __init__(self, obs: PageObservation) -> None:
+            super().__init__(obs)
+            self.text_clicks: list[list[str]] = []
+
+        async def click_visible_text(self, texts: list[str]) -> str | None:
+            self.text_clicks.append(texts)
+            return None
+
+    trigger = _combobox(index=0, label="性别")
+    # 点击后页面毫无变化：无候选、无 expanded 信号 → 面板未展开
+    same = PageObservation(url="about:blank", title="", elements=[trigger])
+    driver = TextClickDriver(same)
+    ctx = ExecContext(driver=driver)
+
+    result = await DropdownHandler().fill(trigger, "男", ctx)
+
+    assert result.ok is False
+    assert "面板未展开" in result.detail
+    assert driver.text_clicks == []  # 未启用兜底
+
+
+@pytest.mark.asyncio
 async def test_already_expanded_skips_trigger_click() -> None:
     """控件已展开（上轮点开）时跳过触发器点击直接选选项。
 

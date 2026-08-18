@@ -626,14 +626,21 @@
     // 已展开弹层内的选项项（自定义下拉/日历面板的叶子短文本，供选项点击与面板导航）
     const PANEL_SELECTOR =
       '[class*="panel"], [class*="dropdown"], [class*="menu"], ' +
-      '[class*="popover"], [class*="picker"], [role="listbox"]';
+      '[class*="popover"], [class*="picker"], [class*="popup"], ' +
+      '[class*="cascader"], [class*="combobox"], [role="listbox"]';
     const panelItems = new Set();
     let panelCount = 0;
     doc.querySelectorAll(PANEL_SELECTOR).forEach((panel) => {
       if (!isCssVisible(panel) || panelCount >= 60) return;
       panel.querySelectorAll("*").forEach((item) => {
         if (panelCount >= 60 || candidates.length >= opts.maxElements) return;
-        if (item.children.length > 0) return;
+        // 选项允许一层嵌套（li>span 结构）；更深的容器（ul 等）靠文本长度排除
+        if (item.children.length > 1) return;
+        if (item.children.length === 1) {
+          const it = (item.innerText || "").replace(/\s+/g, "");
+          const ct = (item.children[0].innerText || "").replace(/\s+/g, "");
+          if (it && it === ct) return; // 与唯一子节点同文本：只留子节点，避免父子重复
+        }
         if (item.matches(INTERACTIVE_SELECTOR)) return;
         if (candidates.includes(item)) return;
         const t = (item.innerText || "").trim();

@@ -18,6 +18,12 @@
     .select-dropdown { position: absolute; top: 32px; left: 0; right: 0; background: #fff; border: 1px solid #d9d9d9; z-index: 50; }
     .option { padding: 6px 10px; }
     .option:hover { background: #f0f6ff; }
+    .tigger { width: 230px; border: 1px solid #d9d9d9; height: 30px; line-height: 30px; cursor: pointer; }
+    .tigger-value { padding: 0 8px; color: #333; }
+    .bd-layer { position: absolute; z-index: 120; background: #fff; border: 1px solid #ccc; padding: 4px 0; min-width: 120px; }
+    .bd-list { list-style: none; margin: 0; padding: 0; }
+    .bd-item { padding: 6px 16px; cursor: pointer; }
+    .bd-item:hover { background: #f0f6ff; }
     .btn-next { margin-top: 16px; padding: 6px 24px; }
   </style>
 </head>
@@ -33,12 +39,8 @@
     <div class="form-row"><span class="lb">姓名</span><input id="f-name"></div>
     <div class="form-row"><span class="lb">手机</span><input id="f-phone"></div>
     <div class="form-row"><span class="lb">性别</span>
-      <div class="select" role="combobox" aria-expanded="false" tabindex="0">
-        <span class="select-value">请选择</span>
-        <div class="select-dropdown" style="display:none">
-          <div class="option" data-value="男">男</div>
-          <div class="option" data-value="女">女</div>
-        </div>
+      <div class="tigger" id="gender-trigger" role="combobox" aria-expanded="false" tabindex="0">
+        <span class="tigger-value">请选择</span>
       </div>
     </div>
     <div class="form-row"><span class="lb">出生日期</span><input id="f-birth" type="month"></div>
@@ -68,11 +70,33 @@
     <button type="button" id="btn-submit">提交申请</button>
   </div>
 </div>
+<!-- 北森风格传送门面板：挂在 body 尾部、类名不含任何提取提示、选项带嵌套 span
+     （感知层提取不到选项 → 走驱动"文本锚定点击"兜底） -->
+<div class="bd-layer" id="gender-panel" style="display:none">
+  <ul class="bd-list">
+    <li class="bd-item"><span>男</span></li>
+    <li class="bd-item"><span>女</span></li>
+  </ul>
+</div>
 <script>
   function closeSelect(t) {
     t.setAttribute('aria-expanded', 'false');
     t.querySelector('.select-dropdown').style.display = 'none';
   }
+  var genderTrigger = document.getElementById('gender-trigger');
+  var genderPanel = document.getElementById('gender-panel');
+  genderTrigger.addEventListener('click', function () {
+    var open = genderTrigger.getAttribute('aria-expanded') === 'true';
+    genderTrigger.setAttribute('aria-expanded', open ? 'false' : 'true');
+    genderPanel.style.display = open ? 'none' : 'block';
+  });
+  genderPanel.addEventListener('click', function (e) {
+    var item = e.target.closest('.bd-item');
+    if (!item) return;
+    genderTrigger.querySelector('.tigger-value').textContent = item.textContent.trim();
+    genderTrigger.setAttribute('aria-expanded', 'false');
+    genderPanel.style.display = 'none';
+  });
   document.querySelectorAll('.select').forEach(function (t) {
     t.addEventListener('click', function (e) {
       var opt = e.target.closest('.option');

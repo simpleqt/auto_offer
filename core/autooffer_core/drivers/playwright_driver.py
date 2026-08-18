@@ -38,6 +38,56 @@ from autooffer_core.perception.som_annotator import SomAnnotator
 
 log = structlog.get_logger(__name__)
 
+# 页内按文本点击可见叶子节点（弹层选项兜底）：感知层提取不到选项（嵌套结构/
+# 未知面板类名/传送门渲染）时，在全文可见短文本叶子中按目标精确匹配并点击。
+# 命中优先级：高 z-index 定位容器的叶子 > 弹层类名容器内的叶子 > 其它（取 DOM
+# 靠后者，弹层常渲染在尾部）；combobox 触发器内部的展示文本降权（避免点到已选值）。
+_CLICK_TEXT_JS = """
+(arg) => {
+  const targets = (arg.texts || []).map((t) => String(t).replace(/\\s+/g, ''));
+  if (!targets.length) return null;
+  const norm = (s) => String(s || '').replace(/\\s+/g, '');
+  const visible = (el) => {
+    const st = window.getComputedStyle(el);
+    if (st.display === 'none' || st.visibility === 'hidden' ||
+        st.visibility === 'collapse') return false;
+    if (parseFloat(st.opacity || '1') === 0) return false;
+    const r = el.getBoundingClientRect();
+    return r.width > 0 && r.height > 0 && r.height < 80;
+  };
+  const POPUP_HINT = '[class*="popup"], [class*="dropdown"], [class*="menu"], ' +
+    '[class*="popover"], [class*="panel"], [class*="picker"], [class*="select"], ' +
+    '[class*="cascader"], [class*="option"], [role="listbox"], [role="option"]';
+  const hits = [];
+  for (const el of document.querySelectorAll('*')) {
+    if (el.children.length > 0) continue;
+    const t = norm(el.innerText);
+    if (!t || t.length > 40 || targets.indexOf(t) === -1) continue;
+    if (!visible(el)) continue;
+    let score = 0;
+    if (el.closest(POPUP_HINT)) score += 100;
+    let a = el.parentElement;
+    while (a && a !== document.body) {
+      const st = window.getComputedStyle(a);
+      const z = parseInt(st.zIndex, 10);
+      if ((st.position === 'absolute' || st.position === 'fixed') && !isNaN(z) && z >= 10) {
+        score += 200;
+        break;
+      }
+      a = a.parentElement;
+    }
+    if (el.closest('[role="combobox"]')) score -= 50;
+    hits.push({ el: el, score: score, order: hits.length });
+  }
+  if (!hits.length) return null;
+  hits.sort((x, y) => (y.score - x.score) || (y.order - x.order));
+  const el = hits[0].el;
+  el.scrollIntoView({ block: 'center' });
+  el.click();
+  return norm(el.innerText);
+}
+"""
+
 # 页内按 label 邻近度消歧：选择器命中多个可见元素时，挑与目标 label 文本
 # 相邻（label 包含/label.for/共同近祖 ≤6 层）的那个——与人工找"姓名"输入框
 # 的方式一致。返回候选在 querySelectorAll 中的原始索引；无法判定返回 null。
@@ -489,6 +539,23 @@ class PlaywrightDriver:
             return (await loc.inner_text(timeout=3000)).strip()
         except PlaywrightError:
             return ""
+
+    async def click_visible_text(self, texts: list[str]) -> str | None:
+        """按文本点击可见叶子节点，返回命中文本；未命中返回 None。
+
+        弹层选项兜底：自定义下拉面板已展开但感知层提取不到选项（嵌套结构、
+        传送门渲染、面板类名不在提取提示内）时，直接在页面可见短文本叶子里
+        精确匹配目标并点击。点击的是叶子节点，事件冒泡到选项处理器。
+        """
+        if self._page is None:
+            raise DriverError("浏览器未打开")
+        try:
+            res = await self._page.evaluate(_CLICK_TEXT_JS, {"texts": texts})
+        except PlaywrightError as exc:
+            raise DriverError(f"文本点击失败: {exc}") from exc
+        if res:
+            await self._pace()
+        return str(res) if res else None
 
     async def element_state(self, el: UIElement) -> dict[str, Any]:
         """动作后最便宜的"状态验证"查询（对齐本地实现的 locator 状态查询模式）。
