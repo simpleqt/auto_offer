@@ -220,6 +220,31 @@ async def test_panel_click_expanded_false_triggers_retry_then_true() -> None:
 
 
 @pytest.mark.asyncio
+async def test_already_expanded_skips_trigger_click() -> None:
+    """控件已展开（上轮点开）时跳过触发器点击直接选选项。
+
+    回归：面板已展开再点触发器只会把它收起。el.expanded=True 时应直接进入
+    选项匹配，不产生对触发器的点击。
+    """
+    trigger = _combobox(expanded=True)
+    options = [_option("全职", index=1), _option("实习", index=2)]
+    driver = FakeDriver(
+        PageObservation(url="about:blank", title="", elements=[trigger, *options])
+    )
+    ctx = ExecContext(driver=driver)
+
+    result = await DropdownHandler().fill(trigger, "全职", ctx)
+
+    assert result.ok is True
+    assert result.strategy == "panel_click"
+    # 未点击触发器，直接点击了选项元素
+    assert ("click", 0) not in driver.calls
+    assert any(c == ("click", 1) for c in driver.calls)
+    assert "expanded_verified=True" in result.detail
+    assert "extra_clicks=0" in result.detail
+
+
+@pytest.mark.asyncio
 async def test_panel_click_observe_uses_lightweight_flags() -> None:
     """展开验证与找选项的 observe 应使用 with_screenshot=False、scroll_full=False。
 

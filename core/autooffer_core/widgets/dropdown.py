@@ -138,36 +138,41 @@ class DropdownHandler:
     ) -> FillResult | None:
         """策略 2：点击展开控件 → 展开态验证 → 匹配弹层选项。
 
-        展开态验证为"加速失败发现"的手段，非硬门槛：
+        面板已展开（el.expanded=True，如上轮已点开）时跳过触发器点击直接找选项——
+        再点触发器只会把面板收起。展开态验证为"加速失败发现"的手段，非硬门槛：
         - expanded=True：面板确认展开，直接找选项。
         - expanded=False/None：补点一次（最多 1 次）后仍未有 expanded 信号时，
           降级按现有逻辑尝试找弹层选项（部分组件不维护 aria-expanded 但选项已渲染）。
         返回 None 表示本策略未命中，交回上层降级到策略 3。
         """
-        try:
-            await ctx.driver.click(el)
-        except Exception as exc:  # 展开失败直接落到搜索式
-            log.info("dropdown.expand_failed", label=el.label, error=str(exc))
-            return None
-
-        # 展开态验证（动作后最便宜的验证）
-        expanded = await _verify_expanded(ctx.driver, el.selector)
+        expanded: bool | None = el.expanded
         extra_clicks = 0
-        if expanded is not True:
-            log.info(
-                "dropdown.expand_no_signal",
-                label=el.label,
-                selector=el.selector,
-                expanded=expanded,
-            )
-            # 补点一次（最多 1 次）：某些控件首次点击被页面事件吞掉
+        if expanded is True:
+            log.info("dropdown.already_expanded", label=el.label, selector=el.selector)
+        else:
             try:
                 await ctx.driver.click(el)
-                extra_clicks = 1
-            except Exception as exc:  # 补点失败不再阻塞，降级找选项
-                log.info("dropdown.expand_retry_failed", label=el.label, error=str(exc))
-            else:
-                expanded = await _verify_expanded(ctx.driver, el.selector)
+            except Exception as exc:  # 展开失败直接落到搜索式
+                log.info("dropdown.expand_failed", label=el.label, error=str(exc))
+                return None
+
+            # 展开态验证（动作后最便宜的验证）
+            expanded = await _verify_expanded(ctx.driver, el.selector)
+            if expanded is not True:
+                log.info(
+                    "dropdown.expand_no_signal",
+                    label=el.label,
+                    selector=el.selector,
+                    expanded=expanded,
+                )
+                # 补点一次（最多 1 次）：某些控件首次点击被页面事件吞掉
+                try:
+                    await ctx.driver.click(el)
+                    extra_clicks = 1
+                except Exception as exc:  # 补点失败不再阻塞，降级找选项
+                    log.info("dropdown.expand_retry_failed", label=el.label, error=str(exc))
+                else:
+                    expanded = await _verify_expanded(ctx.driver, el.selector)
 
         # 降级/正常路径统一在此找选项；候选列表用于失败时分类归因
         hit, candidates = await _try_match_option(ctx.driver, target, skip_index=el.index)

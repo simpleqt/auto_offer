@@ -116,6 +116,13 @@ class AgentRunner:
         """
         self._skip_counts: dict[str, int] = {}
         """同区块被硬跳过的次数（page|sid 计数）；达到上限自动按部分完成收尾。"""
+        self._action_log: dict[str, dict[str, Any]] = {}
+        """动作指纹 → {count, value, elements}（上次执行后的元素值与页面元素数）。
+
+        对齐本地浏览器自动化纪律：动作按"预期效果是否出现"判定成败，
+        没产生效果的动作禁止原样重复（尤其下拉触发器反复点击会 toggle 收起面板）。"""
+        self._absent_advances: dict[str, int] = {}
+        """区块不在当前页时自动点"下一步"的次数（按区块计，防一路翻完整个向导）。"""
         self._field_failures: dict[str, int] = {}
         """字段级失败计数：连续失败达到阈值后放弃该字段，不再反复重试。"""
         self._vision_next = self._config.use_vision
@@ -190,7 +197,11 @@ class AgentRunner:
                 forced_verify=initial_prefill >= self._config.prefill_threshold,
                 done_sections_text=done_text,
             )
-            self._emit("step", "planner", f"{plan.decision}: {plan.reason[:100]}")
+            self._emit(
+                "step", "planner", f"{plan.decision}: {plan.reason[:100]}",
+                section=plan.next_section_id, url=obs.url,
+                step=obs.pagination.current_step,
+            )
             self._history.add(f"Planner 决策 {plan.decision}({plan.strategy}) {plan.reason}")
 
             if plan.decision == "finish" or plan.done:
@@ -233,6 +244,25 @@ class AgentRunner:
                         )
                         self._history.add("Planner 反复重派已处理区块，按部分完成收尾")
                         return
+                    continue
+                if plan.next_section_id and not any(
+                    s.id == plan.next_section_id for s in obs.sections
+                ):
+                    # 派发的区块不在当前页（多步表单未到该步）：先点"下一步"推进；
+                    # 没有翻页按钮或连续翻页无效时登记跳过，不浪费区块重试轮次
+                    absent_sid = plan.next_section_id
+                    advances = self._absent_advances.get(absent_sid, 0)
+                    if advances < 3 and await self._try_advance(obs):
+                        self._absent_advances[absent_sid] = advances + 1
+                        continue  # 翻页成功：外层重新观察、重新规划
+                    self._mark_section_done(
+                        page_key, absent_sid, absent_sid, status="字段不在当前页"
+                    )
+                    self._checklist.upsert(
+                        f"区块:{absent_sid}", section_title=absent_sid,
+                        status="pending_confirm", note="区块字段不在当前页面",
+                    )
+                    self._emit("step", "runner", f"区块「{absent_sid}」不在当前页面，已记待确认")
                     continue
                 await self._run_section(obs, plan, page_key)
                 continue
@@ -286,6 +316,7 @@ class AgentRunner:
         extra_profile: dict[str, Any] | None = None
         retry_advice: str | None = None
         strategy: FlowStrategy = plan.strategy
+        empty_rounds = 0
 
         for attempt in range(1, self._config.max_section_retries + 1):
             # 重试轮不带截图：DOM 足够比对，省 ~0.8s/张的推理延迟与标注耗时
@@ -306,7 +337,20 @@ class AgentRunner:
                 history_text=self._history.to_text(),
                 retry_advice=retry_advice,
             )
-            self._emit("step", "actor", batch.summary or f"输出 {len(batch.actions)} 个动作")
+            self._emit(
+                "step", "actor", batch.summary or f"输出 {len(batch.actions)} 个动作",
+                actions=[
+                    {
+                        "type": a.type,
+                        "index": a.element_index,
+                        "value": (a.value or "")[:32],
+                        "reason": (a.reason or "")[:48],
+                    }
+                    for a in batch.actions[:12]
+                ],
+                url=observation.url,
+                step=observation.pagination.current_step,
+            )
 
             # 特殊动作前置处理
             extra_profile = await self._handle_meta_actions(batch, section_title, observation)
@@ -327,7 +371,34 @@ class AgentRunner:
                     self._history.add(f"区块「{section_title}」档案缺失，已记入待确认")
                     self._mark_section_done(page_key, section_id, section_title)
                     return
+                # request_profile 轮是有效推进（数据已补取），不计入空转
+                empty_rounds = 0 if extra_profile else empty_rounds + 1
+                if empty_rounds >= 2:
+                    self._history.add(f"区块「{section_title}」连续无可执行动作，跳过该区块")
+                    self._mark_section_done(
+                        page_key, section_id, section_title, status="无动作可执行"
+                    )
+                    return
                 retry_advice = "上一轮没有可执行动作，请重新审视区块元素与目标。"
+                continue
+
+            # 拦截"已执行过且无任何效果"的重复动作（防触发器反复点击死循环）
+            exec_actions, blocked = self._intercept_repeats(exec_actions, observation)
+            if blocked:
+                self._emit(
+                    "step", "runner", "拦截无进展的重复动作: " + "；".join(blocked[:2])
+                )
+                self._history.add(f"拦截重复动作: {'；'.join(blocked[:2])}")
+            if not exec_actions:
+                if batch.section_complete and all("目标已达成" in b for b in blocked):
+                    # 动作全部已生效且 Actor 判定完成：直接登记，不算失败
+                    self._mark_section_done(page_key, section_id, section_title)
+                    return
+                retry_advice = (
+                    "已拦截与之前完全相同且无进展的动作，禁止再原样输出。"
+                    "若上轮点开了下拉面板，请直接 click 面板中匹配的选项元素；"
+                    "自定义下拉改用带目标值的 select_option；确实无法推进的字段输出 skip_field。"
+                )
                 continue
 
             try:
@@ -346,6 +417,13 @@ class AgentRunner:
             # 执行后重新感知（视口级、无截图），读回真实页面状态
             after_obs = await self._driver.observe(with_screenshot=False, scroll_full=False)
             pairs = await self._readback_pairs(exec_actions, observation, after_obs)
+            # 登记动作指纹（值 + 页面元素数），供下轮拦截无进展的重复动作
+            for a, el, _exp, actual in pairs:
+                fp = self._action_fingerprint(a, el)
+                rec = self._action_log.get(fp) or {"count": 0, "value": "", "elements": -1}
+                rec.update(count=rec["count"] + 1, value=actual,
+                           elements=len(after_obs.elements))
+                self._action_log[fp] = rec
             val = await self._validate_or_llm(goal, pairs, batch.section_complete)
 
             failed_fields = [fr for fr in val.field_results if not fr.passed]
@@ -416,8 +494,19 @@ class AgentRunner:
                     "以下字段已多次尝试失败，请改用 skip_field 跳过、不要再填写："
                     f"{'、'.join(sorted(abandoned_this_round))}。继续填写其余字段。"
                 )
+            elif val.passed and not failed_fields:
+                # 动作都成功但区块没完成：明确要求推进新动作，否则模型会原样重复上一轮
+                retry_advice = (
+                    "上一轮动作已执行成功但区块未完成，请输出新的动作继续推进"
+                    "（如点击已展开面板中的选项元素、填写剩余字段）；"
+                    "系统会拦截与之前完全相同且无进展的动作。"
+                )
             else:
                 retry_advice = val.retry_advice or "部分字段未通过校验，请修正后重试。"
+            failed_exec = [r for r in results if getattr(r, "status", "") == "failed"]
+            if failed_exec:
+                detail = "；".join(r.detail for r in failed_exec[:3])
+                retry_advice = f"{retry_advice} | 执行器拦截: {detail}"
         log.warning("runner.section_exhausted", section=section_title)
         self._checklist.upsert(
             f"区块:{section_title}", section_title=section_title,
@@ -452,6 +541,76 @@ class AgentRunner:
                     note="档案缺失，待用户补充",
                 )
         return extra
+
+    # ---------- 重复动作拦截 ----------
+
+    @staticmethod
+    def _action_fingerprint(a: Action, el: UIElement) -> str:
+        """动作指纹：类型 + 元素 selector + 目标值（模型措辞变化不影响判定）。"""
+        target = a.value or ""
+        if a.date is not None:
+            target = f"{a.date.year}-{a.date.month or ''}"
+        if a.date_range is not None:
+            end = a.date_range.end
+            target = (
+                f"{a.date_range.start.year}-{a.date_range.start.month or ''}"
+                f"~{end.year if end else 'now'}"
+            )
+        return f"{a.type}|{el.selector}|{target}"
+
+    def _intercept_repeats(
+        self, actions: list[Action], observation: PageObservation
+    ) -> tuple[list[Action], list[str]]:
+        """拦截"已执行过且无任何效果"的重复动作，返回 (放行动作, 拦截说明)。
+
+        对齐本地浏览器自动化纪律：动作按"预期效果是否出现"判定成败；
+        - 目标已达成（值已填上/选项已选中）→ 无需重复；
+        - 下拉触发器/自定义控件/选项类点击：执行过一次且值未变 → 拦截
+          （再点触发器只会 toggle 收起面板，真实站点死循环的根因）；
+        - 其余角色：允许一次偶然失败重试，两次后页面仍无变化 → 拦截。
+        """
+        by_index = {e.index: e for e in observation.elements}
+        allowed: list[Action] = []
+        blocked: list[str] = []
+        for a in actions:
+            el = by_index.get(a.element_index) if a.element_index is not None else None
+            if (
+                a.type not in ("click", "input_text", "select_option",
+                               "set_date", "set_date_range")
+                or el is None
+            ):
+                allowed.append(a)  # scroll/wait/press_key 等允许重复
+                continue
+            fp = self._action_fingerprint(a, el)
+            prev = self._action_log.get(fp)
+            if prev is None:
+                allowed.append(a)
+                continue
+            current = (el.value or "").strip()
+            # 目标已达成（如填写值已在、单选已选中）：无需重复
+            if self._check_pair(a, el, self._expected_text(a, el), current) is True:
+                blocked.append(f"{a.type}[{el.index}]{el.label} 目标已达成，无需重复")
+                continue
+            prev_value = (prev.get("value") or "").strip()
+            if el.role in ("combobox", "custom", "option"):
+                if prev.get("count", 0) >= 1 and current == prev_value:
+                    blocked.append(
+                        f"{a.type}[{el.index}]{el.label} 已执行过且值未变"
+                        "（面板可能已展开），禁止再点触发器；请点选项元素或改用带值的动作"
+                    )
+                    continue
+            elif (
+                prev.get("count", 0) >= 2
+                and current == prev_value
+                and len(observation.elements) == prev.get("elements", -1)
+            ):
+                blocked.append(
+                    f"{a.type}[{el.index}]{el.label} "
+                    f"已执行{prev['count']}次页面无变化，禁止原样重复"
+                )
+                continue
+            allowed.append(a)
+        return allowed, blocked
 
     # ---------- 回读与校验 ----------
 
@@ -599,7 +758,8 @@ class AgentRunner:
             return AgentRunner._values_equal(expected, actual)
         return ep == ap
 
-    async def _advance_page(self, obs: PageObservation, plan: PlannerOutput) -> None:
+    async def _try_advance(self, obs: PageObservation) -> bool:
+        """点击可见的"下一步/继续"按钮推进多步表单；找不到返回 False。"""
         idx = obs.pagination.next_button_index
         by_index = {e.index: e for e in obs.elements}
         target = by_index.get(idx) if idx is not None else None
@@ -614,7 +774,7 @@ class AgentRunner:
                 None,
             )
         if target is None:
-            raise AutoOfferError("Planner 要求翻页但未识别到可见的下一步按钮")
+            return False
         action = Action(type="click", element_index=target.index, reason="进入下一步")
         await self._executor.execute_batch(ActionBatch(actions=[action]), obs)
         await self._driver.wait(1.0)
@@ -622,6 +782,11 @@ class AgentRunner:
             self._vision_next = True  # 视觉模式：新页面首轮带截图辅助 Planner 裁决
         self._history.add("已点击下一步进入新页面")
         self._emit("step", "runner", "翻页: 已点击下一步")
+        return True
+
+    async def _advance_page(self, obs: PageObservation, plan: PlannerOutput) -> None:
+        if not await self._try_advance(obs):
+            raise AutoOfferError("Planner 要求翻页但未识别到可见的下一步按钮")
 
     # ---------- 报告 ----------
 

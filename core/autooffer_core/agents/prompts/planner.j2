@@ -13,6 +13,7 @@
 - 只输出符合要求的 JSON，不要输出任何解释文字、坐标或 CSS 选择器。
 - 遇到登录、注册、验证码、扫码、第三方授权页面，必须 decision=wait_human 并写明 wait_human_reason。
 - 派发子任务时给出明确的 subtask_goal（一句话说明填什么、注意什么）。
+- 派发的区块必须来自【页面区块概览】列出的区块；目标区块不在当前页且页面存在"下一步/保存并继续"类按钮时，优先 decision=advance_page 翻页后再派发。
 - 个别字段/区块反复尝试仍填不上时，把它记入待确认（pending）并继续其它区块，最终 decision=finish（部分完成）；不要因部分字段未填而 decision=fail。
 - 仅当页面确实无法继续推进（登录墙、空白页、致命报错、验证码）时才 decision=fail。
 {% if done_sections_text %}

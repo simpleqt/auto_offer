@@ -169,6 +169,16 @@ class ActionExecutor:
                     action_type=t, status="needs_human", element_index=el.index,
                     detail=f"敏感动作待人工确认（命中'{hit}'）: {el.label}",
                 )
+            if (
+                action.value is None
+                and el.expanded
+                and el.role in ("combobox", "custom")
+            ):
+                # 面板已展开时再点触发器只会把它收起——拒绝执行并指路选项元素
+                return ExecResult(
+                    action_type=t, status="failed", element_index=el.index,
+                    detail=f"面板已展开，应点击选项元素而非触发器: {el.label}",
+                )
             if el.role in ("radio", "checkbox") and action.value:
                 return await self._via_handler(el, action.value, ctx, t)
             await self._driver.click(el)

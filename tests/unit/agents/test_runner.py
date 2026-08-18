@@ -286,3 +286,132 @@ async def test_runner_max_steps_guardrail() -> None:
     report = await runner.run("https://example.com/apply")
     assert runner.state == "AWAITING_REVIEW"  # 安全终止仍产出报告
     assert report.task_id == "t4"
+
+
+@pytest.mark.asyncio
+async def test_runner_intercepts_repeated_combobox_click() -> None:
+    """同一自定义下拉触发器反复点击（真实站点死循环）必须被拦截。
+
+    回归：Actor 连续输出"点击类型选择框"裸 click，每次都执行成功（校验 passed）
+    但控件值始终为空，无任何机制阻止重复——现在动作指纹登记后，值未变的
+    触发器重复点击直接拦截，逼模型换动作（点选项/带值动作/skip）。
+    """
+    loop_obs = PageObservation(
+        url="https://example.com/apply",
+        title="示例",
+        sections=[SectionInfo(id="s1", title="工作经历", element_start=0, element_end=0)],
+        elements=[
+            UIElement(index=0, tag="div", role="combobox", label="类型", selector="#type"),
+        ],
+    )
+    driver = FakeDriver(loop_obs)  # click 不改变任何状态 → 控件值恒空
+    profile = build_sample_profile()
+    planner_script = [
+        PlannerOutput(decision="dispatch_section", next_section_id="s1",
+                      subtask_goal="选择类型", reason="派发"),
+        PlannerOutput(decision="finish", done=True, reason="完成"),
+    ]
+    actor_batch = ActionBatch(
+        actions=[Action(type="click", element_index=0, reason="点开类型下拉")],
+        section_complete=False, summary="点击类型选择框",
+    )
+    router = FakeRouter({
+        "planner": scripted(planner_script),
+        "actor": scripted([actor_batch]),
+        "validator": scripted([ValidatorOutput(passed=True)]),
+    })
+    events = []
+    runner = AgentRunner(
+        task_id="t7", task_instruction="x", driver=driver, router=router,
+        executor=ActionExecutor(driver), profile=profile,
+        config=RunnerConfig(max_section_retries=3),
+        on_event=events.append,
+    )
+    await runner.run("https://example.com/apply")
+
+    summaries = [e.summary for e in events]
+    assert any("拦截无进展的重复动作" in s for s in summaries)
+    # 触发器只被真实点击一次，之后的重复输出全部被拦截
+    assert driver.calls.count(("click", 0)) == 1
+    assert runner.state == "AWAITING_REVIEW"
+    # 审计落盘补齐：actor 事件带原始动作与页面信息
+    actor_events = [e for e in events if e.agent == "actor"]
+    assert actor_events[0].data["actions"][0]["type"] == "click"
+    assert actor_events[0].data["actions"][0]["index"] == 0
+    assert actor_events[0].data["url"]
+
+
+@pytest.mark.asyncio
+async def test_runner_advances_when_section_absent() -> None:
+    """派发的区块不在当前页（多步表单未到该步）：自动点"下一步"翻页推进。"""
+    wizard_obs = PageObservation(
+        url="https://example.com/apply",
+        title="向导",
+        sections=[SectionInfo(id="s1", title="基本信息", element_start=0, element_end=0)],
+        elements=[
+            UIElement(index=0, tag="input", role="input", label="姓名", selector="#name"),
+            UIElement(index=1, tag="button", role="button", label="保存并下一步", selector="#next"),
+        ],
+    )
+    driver = FakeDriver(wizard_obs)
+    profile = build_sample_profile()
+    planner_script = [
+        PlannerOutput(decision="dispatch_section", next_section_id="s2",
+                      subtask_goal="填写教育背景", reason="顺序派发下一区块"),
+        PlannerOutput(decision="finish", done=True, reason="完成"),
+    ]
+    router = FakeRouter({
+        "planner": scripted(planner_script),
+        "actor": scripted([ActionBatch(actions=[])]),
+        "validator": scripted([ValidatorOutput(passed=True)]),
+    })
+    events = []
+    runner = AgentRunner(
+        task_id="t8", task_instruction="x", driver=driver, router=router,
+        executor=ActionExecutor(driver), profile=profile,
+        on_event=events.append,
+    )
+    await runner.run("https://example.com/apply")
+
+    # s2 不在当前页：自动点击了可见的"保存并下一步"按钮
+    assert ("click", 1) in driver.calls
+    assert any("翻页" in e.summary for e in events)
+    assert runner.state == "AWAITING_REVIEW"
+
+
+@pytest.mark.asyncio
+async def test_runner_marks_absent_section_when_no_next_button() -> None:
+    """派发的区块不在当前页且没有翻页按钮：登记待确认后继续，不空转重试。"""
+    flat_obs = PageObservation(
+        url="https://example.com/apply",
+        title="单页表单",
+        sections=[SectionInfo(id="s1", title="基本信息", element_start=0, element_end=0)],
+        elements=[
+            UIElement(index=0, tag="input", role="input", label="姓名", selector="#name"),
+        ],
+    )
+    driver = FakeDriver(flat_obs)
+    profile = build_sample_profile()
+    planner_script = [
+        PlannerOutput(decision="dispatch_section", next_section_id="s2",
+                      subtask_goal="填写教育背景", reason="顺序派发"),
+        PlannerOutput(decision="finish", done=True, reason="完成"),
+    ]
+    router = FakeRouter({
+        "planner": scripted(planner_script),
+        "actor": scripted([ActionBatch(actions=[])]),
+        "validator": scripted([ValidatorOutput(passed=True)]),
+    })
+    events = []
+    runner = AgentRunner(
+        task_id="t9", task_instruction="x", driver=driver, router=router,
+        executor=ActionExecutor(driver), profile=profile,
+        on_event=events.append,
+    )
+    report = await runner.run("https://example.com/apply")
+
+    summaries = [e.summary for e in events]
+    assert any("不在当前页面" in s for s in summaries)
+    # 没有任何点击/输入动作被执行，区块直接记入待确认
+    assert not any(c[0] in ("click", "input_text") for c in driver.calls)
+    assert report.counts()["pending_confirm"] >= 1
