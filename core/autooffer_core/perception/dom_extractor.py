@@ -147,6 +147,11 @@ class DomExtractor:
                     placeholder=raw.get("placeholder"),
                     accept=raw.get("accept"),
                     input_type=raw.get("input_type"),
+                    disabled=bool(raw.get("disabled", False)),
+                    expanded=(
+                        bool(raw["expanded"]) if raw.get("expanded") is not None else None
+                    ),
+                    readonly=bool(raw.get("readonly", False)),
                 )
             )
         sections = self._build_sections(meta.get("sections", []), elements)

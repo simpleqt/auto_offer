@@ -6,7 +6,7 @@ from pydantic import BaseModel
 
 ElementRole = Literal[
     "input", "textarea", "select", "button", "combobox", "radio",
-    "checkbox", "date", "file", "richtext", "link", "custom",
+    "checkbox", "date", "file", "richtext", "link", "option", "custom",
 ]
 
 
@@ -31,6 +31,15 @@ class UIElement(BaseModel):
 
     input_type: str | None = None
     """input 元素的原生 type（date/month/tel/email...），供控件处理器选择填值精度。"""
+
+    disabled: bool = False
+    """控件禁用态（原生 disabled / aria-disabled）。提示词标记[禁用]，执行前预检。"""
+
+    expanded: bool | None = None
+    """元素级展开态（aria-expanded）：自定义下拉/手风琴是否已展开。None=无该属性。"""
+
+    readonly: bool = False
+    """只读态（input/textarea readOnly）。提示词标记[只读]，Actor 应跳过填写。"""
 
 
 class SectionInfo(BaseModel):

@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head><meta charset="utf-8"><title>控件状态测试页</title></head>
+<body>
+  <form>
+    <fieldset>
+      <legend>状态字段</legend>
+      <label>禁用输入 <input type="text" name="locked" disabled></label>
+      <label>只读输入 <input type="text" name="ro" value="不可改" readonly></label>
+      <label>aria-disabled 选项 <div role="option" aria-disabled="true">灰选项</div></label>
+    </fieldset>
+    <div>
+      <span>自定义下拉</span>
+      <div role="combobox" aria-expanded="true" tabindex="0">当前值：本科</div>
+      <div role="combobox" aria-expanded="false" tabindex="0">当前值：硕士</div>
+    </div>
+    <div>
+      <span>类名选中态</span>
+      <div role="radio" class="ant-radio checked" tabindex="0">男</div>
+      <div role="radio" class="ant-radio" tabindex="0">女</div>
+    </div>
+    <div role="listbox">
+      <div role="option" aria-selected="true">已选项</div>
+      <div role="option" aria-selected="false">未选项</div>
+    </div>
+  </form>
+</body>
+</html>

@@ -67,6 +67,35 @@ async def test_radio_checkbox(page):
     assert custom.value == ""
 
 
+async def test_element_states(page):
+    """控件状态内联提取（纯 DOM 无视觉模式的状态来源）。"""
+    obs = await load(page, "element_states.html")
+
+    locked = by_label(obs, "禁用输入")
+    assert locked.disabled is True
+    ro = by_label(obs, "只读输入")
+    assert ro.readonly is True
+
+    combos = [e for e in obs.elements if e.role == "combobox"]
+    expanded = [c for c in combos if c.expanded is True]
+    collapsed = [c for c in combos if c.expanded is False]
+    assert len(expanded) == 1 and len(collapsed) == 1
+
+    # 类名选中态（antd 风格 custom radio）：checked 类 → value "true"
+    radios = [e for e in obs.elements if e.role == "radio"]
+    male = next(e for e in radios if "男" in e.label)
+    female = next(e for e in radios if "女" in e.label)
+    assert male.value == "true"
+    assert female.value == ""
+
+    # listbox 选项 aria-selected
+    options = [e for e in obs.elements if e.role == "option"]
+    picked = [o for o in options if "已选项" in o.label]
+    assert picked and picked[0].value == "true"
+    unpicked = [o for o in options if "未选项" in o.label]
+    assert unpicked and unpicked[0].value == ""
+
+
 async def test_multi_section_and_pagination(page):
     obs = await load(page, "multi_section.html")
     titles = [s.title for s in obs.sections]

@@ -70,6 +70,9 @@ class RunnerConfig(BaseModel):
     token_budget: int = 400_000
     field_abandon_after: int = 2
     """同一字段连续失败达到该次数后放弃（记待确认），不再反复重试。"""
+    use_vision: bool = False
+    """是否给 LLM 附 SoM 截图。默认纯 DOM 模式（对齐本地浏览器自动化实现：
+    状态内联进元素表，无需视觉模型即可判定控件状态）。"""
 
 
 class AgentRunner:
@@ -115,8 +118,8 @@ class AgentRunner:
         """同区块被硬跳过的次数（page|sid 计数）；达到上限自动按部分完成收尾。"""
         self._field_failures: dict[str, int] = {}
         """字段级失败计数：连续失败达到阈值后放弃该字段，不再反复重试。"""
-        self._vision_next = True
-        """下一轮观察是否带截图（首轮/翻页/未知场景才带，节省 ~0.8s/张 + 标注耗时）。"""
+        self._vision_next = self._config.use_vision
+        """下一轮观察是否带截图。默认纯 DOM（use_vision=False）恒不带图。"""
         self.state: RunState = "RUNNING"
 
     # ---------- 事件 ----------
@@ -166,8 +169,8 @@ class AgentRunner:
             steps += 1
             obs = await self._driver.observe(with_screenshot=self._vision_next)
             self._vision_next = False
-            if obs.scenario.page_type == "unknown":
-                # 规则识别不出页面类型时，下一轮带截图辅助 Planner 裁决
+            if self._config.use_vision and obs.scenario.page_type == "unknown":
+                # 仅视觉模式下：规则识别不出页面类型时，下一轮带截图辅助 Planner 裁决
                 self._vision_next = True
             self._last_title = obs.title or self._last_title
             if initial_prefill is None:
@@ -615,7 +618,8 @@ class AgentRunner:
         action = Action(type="click", element_index=target.index, reason="进入下一步")
         await self._executor.execute_batch(ActionBatch(actions=[action]), obs)
         await self._driver.wait(1.0)
-        self._vision_next = True  # 新页面首轮带截图辅助 Planner 裁决
+        if self._config.use_vision:
+            self._vision_next = True  # 视觉模式：新页面首轮带截图辅助 Planner 裁决
         self._history.add("已点击下一步进入新页面")
         self._emit("step", "runner", "翻页: 已点击下一步")
 

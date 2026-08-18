@@ -35,12 +35,20 @@ def format_elements(elements: list[UIElement], *, max_options: int = 10) -> str:
     """把区块元素渲染为紧凑文本表（每行一个元素）。
 
     只暴露 element_index 与语义信息；selector 属于内部定位符，绝不进入提示词。
+    控件状态（禁用/已展开/只读）内联为标记，对齐 ARIA 快照模式——
+    模型无需截图即可"看见"状态。
     """
     lines: list[str] = []
     for el in elements:
         parts = [f"#{el.index}", el.role, el.label or "(无标签)"]
         if el.required:
             parts.append("必填")
+        if el.disabled:
+            parts.append("禁用")
+        if el.expanded is True:
+            parts.append("已展开")
+        if el.readonly:
+            parts.append("只读")
         if el.placeholder:
             parts.append(f'占位:"{el.placeholder}"')
         if el.value:

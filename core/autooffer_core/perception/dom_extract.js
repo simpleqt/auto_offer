@@ -78,6 +78,7 @@
     const type = (el.getAttribute("type") || "").toLowerCase();
     if (explicit === "combobox") return "combobox";
     if (explicit === "listbox") return "custom";
+    if (explicit === "option") return "option";
     if (explicit === "button") return "button";
     if (explicit === "checkbox" || explicit === "switch") return "checkbox";
     if (explicit === "radio") return "radio";
@@ -111,7 +112,14 @@
   const currentValue = (el, role) => {
     const tag = el.tagName.toLowerCase();
     if (role === "checkbox" || role === "radio") {
-      const checked = el.checked === true || el.getAttribute("aria-checked") === "true";
+      // 选中态三级探测：原生 checked → aria-checked → 状态类名（antd 等自定义组件）。
+      // 与驱动层 _checked_state 保持一致，避免"提取为空、回读为 true"的感知/回读漂移。
+      const checked =
+        el.checked === true ||
+        el.getAttribute("aria-checked") === "true" ||
+        /(^|\s)(checked|selected|active)(\s|$)/i.test(
+          String(typeof el.className === "string" ? el.className : "")
+        );
       return checked ? "true" : "";
     }
     if (tag === "select") {
@@ -119,10 +127,30 @@
       const picked = [...sel.options].filter((o) => o.selected).map((o) => o.text.trim());
       return picked.join(", ").slice(0, 200);
     }
+    if (role === "option") {
+      // 弹层选项：aria-selected 呈现已选态
+      return el.getAttribute("aria-selected") === "true" ? "true" : "";
+    }
     if (role === "richtext") return (el.innerText || "").trim().slice(0, 200);
     if ("value" in el && typeof el.value === "string") return el.value.trim().slice(0, 200);
     return (el.innerText || "").trim().slice(0, 200);
   };
+
+  // 控件状态（对齐本地浏览器自动化的 ARIA 快照模式：状态内联进元素行，
+  // 让模型无需截图即可"看见"禁用/展开/只读）
+  const elState = (el) => ({
+    disabled:
+      el.disabled === true ||
+      el.getAttribute("aria-disabled") === "true" ||
+      el.getAttribute("disabled") !== null,
+    expanded: (() => {
+      const v = el.getAttribute("aria-expanded");
+      return v === "true" ? true : v === "false" ? false : null;
+    })(),
+    readonly:
+      el.readOnly === true ||
+      (el.getAttribute("readonly") !== null && el.getAttribute("readonly") !== "false"),
+  });
 
   const stableSelector = (el, doc) => {
     const unique = (sel) => {
@@ -558,13 +586,16 @@
         if (own) labelInfo = { text: own, raw: own, source: "self-text" };
       }
       // 自定义勾选控件与弹层选项（div 叶子）的文字写在元素内部：
-      // - custom/checkbox/radio：自身文本优先于 nearby 归因（相邻格子文本会串位）
+      // - custom/checkbox/radio/option：自身文本优先于 nearby 归因（相邻格子文本会串位）
       // - combobox 展示框：自身文本是"当前值"而非标签，仅在无归因时兜底
       if (tag !== "input" && tag !== "select") {
         const own = cleanLabel(el.innerText || "");
         if (own) {
           const weak = !labelInfo.text || labelInfo.source === "nearby";
-          if ((role === "custom" || role === "checkbox" || role === "radio") && weak) {
+          if (
+            (role === "custom" || role === "checkbox" || role === "radio" || role === "option") &&
+            weak
+          ) {
             labelInfo = { text: own, raw: own, source: "self-text" };
           } else if (role === "combobox" && !labelInfo.text) {
             labelInfo = { text: own, raw: own, source: "self-text" };
@@ -573,6 +604,7 @@
       }
       const { options, truncated } = extractOptions(el, role, opts.maxOptions);
       const r = el.getBoundingClientRect();
+      const state = elState(el);
       const rec = {
         index: out.elements.length,
         tag,
@@ -596,6 +628,9 @@
         placeholder: el.getAttribute("placeholder") || el.getAttribute("data-placeholder") || null,
         accept: el.type === "file" ? el.getAttribute("accept") || null : null,
         input_type: tag === "input" ? (el.getAttribute("type") || "text").toLowerCase() : null,
+        disabled: state.disabled,
+        expanded: state.expanded,
+        readonly: state.readonly,
       };
       collected.push({ el, rec });
       out.elements.push(rec);

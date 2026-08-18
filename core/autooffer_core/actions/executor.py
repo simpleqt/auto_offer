@@ -29,7 +29,7 @@ from autooffer_core.widgets.upload import UploadHandler, UploadTask, parse_attac
 
 log = structlog.get_logger(__name__)
 
-ExecStatus = Literal["ok", "needs_human", "skipped", "delegated"]
+ExecStatus = Literal["ok", "needs_human", "skipped", "delegated", "failed"]
 
 # 站点 accept 与实际扩展名的等价写法
 _EXT_ALIASES = {"jpg": {"jpg", "jpeg"}, "jpeg": {"jpg", "jpeg"}, "doc": {"doc", "docx"}}
@@ -139,6 +139,19 @@ class ActionExecutor:
 
         el = self._resolve(action, observation)
         ctx = ExecContext(driver=self._driver, humanize=self._humanize)
+
+        # 状态预检：禁用/只读元素不产生无效交互，直接返回失败并说明原因
+        # （状态来自感知层内联标记，对齐纯 DOM 无视觉模式）
+        if el.disabled:
+            return ExecResult(
+                action_type=t, status="failed", element_index=el.index,
+                detail=f"元素已禁用，无法操作: {el.label}",
+            )
+        if t == "input_text" and el.readonly:
+            return ExecResult(
+                action_type=t, status="failed", element_index=el.index,
+                detail=f"元素只读，无法填写: {el.label}",
+            )
 
         if t == "input_text":
             if action.value is None:
