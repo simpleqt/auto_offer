@@ -38,6 +38,68 @@ from autooffer_core.perception.som_annotator import SomAnnotator
 
 log = structlog.get_logger(__name__)
 
+# 页内按 label 邻近度消歧：选择器命中多个可见元素时，挑与目标 label 文本
+# 相邻（label 包含/label.for/共同近祖 ≤6 层）的那个——与人工找"姓名"输入框
+# 的方式一致。返回候选在 querySelectorAll 中的原始索引；无法判定返回 null。
+_LABEL_DISAMBIGUATE_JS = """
+(arg) => {
+  const wanted = String(arg.label || '').trim();
+  if (!wanted) return null;
+  const nodes = Array.from(document.querySelectorAll(arg.sel));
+  if (nodes.length < 2) return null;
+  const visible = [];
+  for (let i = 0; i < nodes.length; i++) {
+    const n = nodes[i];
+    const r = n.getBoundingClientRect();
+    if (r.width <= 0 || r.height <= 0) continue;
+    const st = window.getComputedStyle(n);
+    if (st.visibility === 'hidden' || st.display === 'none') continue;
+    visible.push({ n: n, i: i });
+  }
+  if (visible.length === 0) return null;
+  const norm = (s) => String(s || '').replace(/\\s+/g, '');
+  const target = norm(wanted);
+  const labelEls = [];
+  for (const le of document.querySelectorAll('label')) {
+    if (norm(le.textContent).indexOf(target) !== -1) labelEls.push(le);
+  }
+  if (labelEls.length === 0) {
+    // 无 <label>：退而求其次，找文本与目标吻合（前缀包含）的短叶子元素
+    for (const e of document.querySelectorAll('*')) {
+      if (e.children.length === 0) {
+        const t = norm(e.textContent);
+        if (t && t.length <= 30 &&
+            (t === target || t.indexOf(target) === 0 ||
+             (target.indexOf(t) === 0 && t.length >= 2))) {
+          labelEls.push(e);
+          if (labelEls.length > 60) break;
+        }
+      }
+    }
+  }
+  if (labelEls.length === 0) return null;
+  const related = (ctrl) => {
+    for (const le of labelEls) {
+      if (le.contains(ctrl) || ctrl.contains(le)) return true;
+      if (le.htmlFor) {
+        const c = document.getElementById(le.htmlFor);
+        if (c && (c === ctrl || c.contains(ctrl))) return true;
+      }
+      let a = ctrl.parentElement, hops = 0;
+      while (a && hops < 6) {
+        if (a.contains(le)) return true;
+        a = a.parentElement; hops++;
+      }
+    }
+    return false;
+  };
+  const hits = visible.filter((v) => related(v.n));
+  if (hits.length === 0) return null;
+  return hits[0].i;
+}
+"""
+
+
 class PlaywrightDriver:
     """Chromium 驱动。humanize=False 时跳过节奏停顿（测试用）。"""
 
@@ -262,6 +324,19 @@ class PlaywrightDriver:
             # 但与 count>1 一致地记 warning，交由上层决策（可能是选择器过宽）。
             narrowed = base
             narrowed_count = count
+        # 仍歧义：按 label 邻近度在页内挑出目标元素（人工找控件的语义方式）。
+        # 挑不中才回退 .first——错误选择器配合执行器预检会快速失败并留下日志。
+        if el.label and el.frame_path is None:
+            picked = await self._pick_by_label(el.selector, el.label)
+            if picked is not None:
+                log.info(
+                    "driver.locate_label_disambiguated",
+                    selector=el.selector,
+                    label=el.label,
+                    picked=picked,
+                    count=narrowed_count,
+                )
+                return base.nth(picked)
         log.warning(
             "driver.locate_ambiguous",
             selector=el.selector,
@@ -270,6 +345,22 @@ class PlaywrightDriver:
             narrowed_count=narrowed_count,
         )
         return narrowed.first
+
+    async def _pick_by_label(self, selector: str, label: str) -> int | None:
+        """页内 label 邻近度消歧；返回候选原始索引，无法判定/出错返回 None。
+
+        尽力而为的辅助路径：任何异常（页面导航中、evaluate 不可用等）都静默
+        回退到调用方 .first 兜底——消歧失败后必有 locate_ambiguous warning 留痕。
+        """
+        if self._page is None:
+            return None
+        try:
+            res = await self._page.evaluate(
+                _LABEL_DISAMBIGUATE_JS, {"sel": selector, "label": label}
+            )
+            return int(res) if isinstance(res, (int, float)) else None
+        except Exception:  # noqa: BLE001
+            return None
 
     async def _pace(self) -> None:
         """动作间随机停顿（docs/03 §3.3 人类化节奏）。"""
@@ -281,7 +372,13 @@ class PlaywrightDriver:
     async def click(self, el: UIElement) -> None:
         try:
             loc = await self._locate(el)
-            await loc.click(timeout=5000)
+            try:
+                await loc.click(timeout=5000)
+            except PlaywrightError as exc:
+                # 浮层/横幅拦截指针事件：force 绕过动作性检查重试一次
+                # （点击坐标落点不受遮挡影响，语义目标仍是该元素）
+                log.info("driver.click_force_retry", label=el.label, error=str(exc)[:80])
+                await loc.click(timeout=2000, force=True)
         except PlaywrightError as exc:
             raise DriverError(f"点击失败 [{el.label}]: {exc}") from exc
         await self._pace()
@@ -289,7 +386,11 @@ class PlaywrightDriver:
     async def input_text(self, el: UIElement, text: str, *, humanize: bool = True) -> None:
         loc = await self._locate(el)
         try:
-            await loc.click(timeout=5000)
+            try:
+                await loc.click(timeout=5000)
+            except PlaywrightError as exc:
+                # 点击被浮层拦截：fill 自带聚焦（不经过指针命中检测），跳过点击直接填
+                log.info("driver.input_skip_click", label=el.label, error=str(exc)[:80])
             await loc.fill("")
             if humanize and self._humanize:
                 await loc.press_sequentially(

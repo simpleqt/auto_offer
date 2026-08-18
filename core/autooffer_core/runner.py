@@ -223,7 +223,19 @@ class AgentRunner:
                 await self._wait_human(plan.wait_human_reason or "需要人工处理")
                 continue
             if plan.decision == "advance_page":
-                await self._advance_page(obs, plan)
+                try:
+                    await self._advance_page(obs, plan)
+                except AutoOfferError as exc:
+                    # Planner 想翻页但没有可见按钮：按当前进度部分完成收尾，
+                    # 不判任务失败（个别区块填不上不应毁掉整份报告）
+                    counts = self._checklist.counts()
+                    self._emit(
+                        "step", "runner",
+                        f"{exc}；按当前进度收尾（成功 {counts['filled']} / "
+                        f"待确认 {counts['pending_confirm']} / 失败 {counts['failed']}）",
+                    )
+                    self._history.add("未找到下一步按钮，按部分完成收尾")
+                    return
                 continue
             if plan.decision == "dispatch_section":
                 sid = plan.next_section_id or ""
@@ -420,6 +432,8 @@ class AgentRunner:
             except ActionError as exc:
                 retry_advice = f"动作执行报错：{exc}。请换一种策略。"
                 self._history.add(f"执行失败: {exc}")
+                # 报错细节落审计（真实站点排障依赖：元素定位/超时原因要能离线回看）
+                self._emit("step", "runner", f"动作执行失败: {str(exc)[:150]}")
                 continue
 
             needs_human = [r for r in results if getattr(r, "status", "") == "needs_human"]

@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <title>深层重复结构表单</title>
+  <style>
+    .banner { position: fixed; top: 0; left: 0; right: 0; height: 48px; background: #222; color: #fff; z-index: 99; }
+    .fg { display: flex; align-items: center; margin: 6px 0; }
+    .lb { width: 120px; color: #333; }
+    .bd input { height: 28px; width: 220px; }
+  </style>
+</head>
+<body>
+<div class="banner">校招固定横幅（遮挡顶部输入框）</div>
+<!-- 4 个同构深链子树：分歧点在 body 直接子级（第 10 层），6 层深度上限内
+     4 个输入框会得到同一个歧义选择器（真实站点 v-for 表单行的结构特征） -->
+<div><div><div><div><div><div><div>
+  <div class="fg"><div class="lb">姓名</div><div class="bd"><input></div></div>
+</div></div></div></div></div></div></div>
+<div><div><div><div><div><div><div>
+  <div class="fg"><div class="lb">邮箱</div><div class="bd"><input></div></div>
+</div></div></div></div></div></div></div>
+<div><div><div><div><div><div><div>
+  <div class="fg"><div class="lb">身高</div><div class="bd"><input></div></div>
+</div></div></div></div></div></div></div>
+<div><div><div><div><div><div><div>
+  <div class="fg"><div class="lb">电话</div><div class="bd"><input></div></div>
+</div></div></div></div></div></div></div>
+</body>
+</html>

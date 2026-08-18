@@ -267,6 +267,42 @@ async def test_runner_deterministic_date_validation() -> None:
 
 
 @pytest.mark.asyncio
+async def test_runner_advance_without_button_finishes_partial() -> None:
+    """Planner 要翻页但无可见下一步按钮：按部分完成收尾，不判任务失败。
+
+    回归（真实站点）：s1 填完后 Planner 误判 advance_page，找不到按钮直接把
+    任务置为 FAILED，整份报告作废——违反"部分完成收尾"原则。
+    """
+    driver = FakeDriver(make_observation())
+    profile = build_sample_profile()
+    planner_script = [
+        PlannerOutput(decision="dispatch_section", next_section_id="s1",
+                      subtask_goal="填写基本信息", reason="派发"),
+        PlannerOutput(decision="advance_page", reason="进入下一页"),
+    ]
+    router = FakeRouter({
+        "planner": scripted(planner_script),
+        "actor": scripted([ActionBatch(
+            actions=[Action(type="input_text", element_index=0, value="张三",
+                            reason="填姓名")],
+            section_complete=True, summary="填写姓名",
+        )]),
+        "validator": scripted([ValidatorOutput(passed=True)]),
+    })
+    events = []
+    runner = AgentRunner(
+        task_id="t12", task_instruction="x", driver=driver, router=router,
+        executor=ActionExecutor(driver), profile=profile,
+        on_event=events.append,
+    )
+    report = await runner.run("https://example.com/apply")
+
+    assert runner.state == "AWAITING_REVIEW"  # 不再 FAILED
+    assert report.counts()["filled"] >= 1      # 已填字段保留在报告中
+    assert any("按当前进度收尾" in e.summary for e in events)
+
+
+@pytest.mark.asyncio
 async def test_runner_max_steps_guardrail() -> None:
     driver = FakeDriver(make_observation())
     profile = build_sample_profile()

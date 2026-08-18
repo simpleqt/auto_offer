@@ -236,9 +236,11 @@
     // role / 语义 class）且锚点本身在文档内唯一，则以锚点为根生成选择器，避免纯
     // nth-of-type 路径在 DOM 变动（下拉插入面板、动态新增条目）后漂移。无可信锚点
     // 时维持原 nth-of-type 全路径，保证向后兼容。
+    // 深度上限 12：真实站点（如 zhiye 招聘表单）组件嵌套深，6 层内可能仍是重复
+    // 结构（v-for 生成的同构表单行），提前返回会得到匹配多个元素的歧义选择器。
     const parts = [];
     let cur = el;
-    while (cur && cur.nodeType === 1 && cur !== doc.documentElement && parts.length < 6) {
+    while (cur && cur.nodeType === 1 && cur !== doc.documentElement && parts.length < 12) {
       const tag = cur.tagName.toLowerCase();
       // 当前祖先之下的后代路径（尚未加入当前层片段）
       const descendantPath = parts.join(" > ");
