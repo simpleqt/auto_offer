@@ -205,7 +205,21 @@ class PlaywrightDriver:
 
     # ---------- 定位 ----------
 
-    def _locate(self, el: UIElement) -> Locator:
+    async def _locate(self, el: UIElement) -> Locator:
+        """定位元素并对齐本地浏览器自动化纪律：动手前确认唯一性。
+
+        - count == 0：选择器在 DOM 结构变化后可能已失效。盲目重试同一选择器
+          会卡死或点错；直接抛 DriverError，迫使上层重新观察页面再决策。
+        - count > 1：先尝试 .filter(visible=True) 收紧（Playwright async API
+          公开能力），仅保留可见元素以排除隐藏的占位/模板；收紧后仍 >1 则
+          记录 structlog warning（含 selector 与 count）并回退 .first，
+          保持兼容、不中断任务（错误的选择器总比卡死强，且留下日志供排查）。
+        - count == 1：唯一命中，正常返回。
+
+        返回值始终是单元素 Locator（.first），便于上层直接 click/fill，不破坏
+        既有契约。注意 count() 反映当前 DOM 快照、不阻塞等待——定位失效多因
+        页面已变更，与其久等不如直接报错让上层重新观察。
+        """
         if self._page is None:
             raise DriverError("浏览器未打开")
         scope: Page | FrameLocator = self._page
@@ -219,7 +233,43 @@ class PlaywrightDriver:
                     scope = scope.locator("iframe").nth(int(part)).content_frame
                 else:
                     scope = scope.frame_locator(part)
-        return scope.locator(el.selector).first
+        base = scope.locator(el.selector)
+        try:
+            count = await base.count()
+        except PlaywrightError as exc:
+            # count 本身也可能因页面导航/上下文销毁失败：等同定位失效处理
+            raise DriverError(f"元素定位失败 [{el.label}]: {exc}") from exc
+
+        if count == 0:
+            raise DriverError(
+                "元素未找到（选择器可能已失效，请重新观察页面）"
+                f" [{el.label}] selector={el.selector!r}"
+            )
+        if count == 1:
+            return base.first
+
+        # count > 1：用可见性收紧，尽量排掉隐藏占位/模板节点
+        narrowed = base.filter(visible=True)
+        try:
+            narrowed_count = await narrowed.count()
+        except PlaywrightError:
+            narrowed_count = count  # 收紧失败则按未收紧处理，避免二次抛错
+
+        if narrowed_count == 1:
+            return narrowed.first
+        if narrowed_count == 0:
+            # 收紧后全不可见——说明匹配到的都是隐藏节点。仍回退首个原始命中，
+            # 但与 count>1 一致地记 warning，交由上层决策（可能是选择器过宽）。
+            narrowed = base
+            narrowed_count = count
+        log.warning(
+            "driver.locate_ambiguous",
+            selector=el.selector,
+            label=el.label,
+            count=count,
+            narrowed_count=narrowed_count,
+        )
+        return narrowed.first
 
     async def _pace(self) -> None:
         """动作间随机停顿（docs/03 §3.3 人类化节奏）。"""
@@ -230,13 +280,14 @@ class PlaywrightDriver:
 
     async def click(self, el: UIElement) -> None:
         try:
-            await self._locate(el).click(timeout=5000)
+            loc = await self._locate(el)
+            await loc.click(timeout=5000)
         except PlaywrightError as exc:
             raise DriverError(f"点击失败 [{el.label}]: {exc}") from exc
         await self._pace()
 
     async def input_text(self, el: UIElement, text: str, *, humanize: bool = True) -> None:
-        loc = self._locate(el)
+        loc = await self._locate(el)
         try:
             await loc.click(timeout=5000)
             await loc.fill("")
@@ -252,7 +303,8 @@ class PlaywrightDriver:
 
     async def select_option(self, el: UIElement, option: str) -> None:
         try:
-            await self._locate(el).select_option(label=option, timeout=5000)
+            loc = await self._locate(el)
+            await loc.select_option(label=option, timeout=5000)
         except PlaywrightError as exc:
             raise DriverError(f"选项选择失败 [{el.label}] -> {option}: {exc}") from exc
         await self._pace()
@@ -263,7 +315,7 @@ class PlaywrightDriver:
         if not exists:
             raise DriverError(f"上传文件不存在: {file_path}")
         page = await self._ensure_page()
-        loc = self._locate(el)
+        loc = await self._locate(el)
 
         # 形态 1：input[type=file]（可见或隐藏覆盖式）
         if el.tag == "input":
@@ -320,7 +372,7 @@ class PlaywrightDriver:
         await self._pace()
 
     async def element_value(self, el: UIElement) -> str:
-        loc = self._locate(el)
+        loc = await self._locate(el)
         try:
             # 单选/复选读"选中状态"而非 value 属性（对齐感知层约定：选中 "true"/未选 ""）。
             # browser-use #3437 的教训：读不到选中态会让智能体重复点击把状态切回去。
@@ -336,6 +388,56 @@ class PlaywrightDriver:
             return (await loc.inner_text(timeout=3000)).strip()
         except PlaywrightError:
             return ""
+
+    async def element_state(self, el: UIElement) -> dict[str, Any]:
+        """动作后最便宜的"状态验证"查询（对齐本地实现的 locator 状态查询模式）。
+
+        返回 {"checked": str, "disabled": bool, "expanded": bool|None}：
+        - checked：复用 _checked_state，选中 "true"/未选 ""（与 element_value 对齐）。
+        - disabled：读 aria-disabled 优先（自定义组件常用），回退原生 disabled 属性；
+          任一为 "true"/真即判禁用，便于 Actor 在执行前预检并跳过。
+        - expanded：读 aria-expanded，"true"->True、"false"->False、缺失/异常->None。
+
+        全部用短超时读取，任一读取异常返回该字段的"安全默认值"（不抛错），
+        让 Validator 拿到尽力而为的快照，而不是因单个属性读取失败中断校验循环。
+        """
+        loc = await self._locate(el)
+        return {
+            "checked": await self._checked_state(loc),
+            "disabled": await self._disabled_state(loc),
+            "expanded": await self._expanded_state(loc),
+        }
+
+    async def _disabled_state(self, loc: Locator) -> bool:
+        """读禁用态：aria-disabled 优先（自定义组件），回退原生 disabled。"""
+        try:
+            aria = await loc.get_attribute("aria-disabled", timeout=2000)
+            if aria is not None:
+                # aria-disabled="true"/"True" 等均按真处理；其余视为未禁用
+                return aria.strip().lower() == "true"
+        except PlaywrightError:
+            pass
+        try:
+            native = await loc.get_attribute("disabled", timeout=2000)
+            # 原生 disabled：属性存在即禁用（"" 也算）
+            return native is not None
+        except PlaywrightError:
+            return False
+
+    async def _expanded_state(self, loc: Locator) -> bool | None:
+        """读展开态 aria-expanded：true/false/缺失(None)。"""
+        try:
+            aria = await loc.get_attribute("aria-expanded", timeout=2000)
+        except PlaywrightError:
+            return None
+        if aria is None:
+            return None
+        lowered = aria.strip().lower()
+        if lowered == "true":
+            return True
+        if lowered == "false":
+            return False
+        return None
 
     async def _checked_state(self, loc: Locator) -> str:
         """读控件选中态：原生 input 用 is_checked；自定义组件读 aria-checked/状态类名。"""

@@ -135,3 +135,64 @@ async def test_same_origin_iframe(page):
     inner = [e for e in obs.elements if e.frame_path]
     assert inner, "应提取到同源 iframe 内元素"
     assert any("iframe内姓名" in e.label for e in inner)
+
+
+async def test_selector_anchor(page):
+    """结构路径回退的稳定锚点策略：data-* / aria-label / 语义 class 祖先优先作锚点，
+    无可信锚点时维持 nth-of-type 全路径；所有 selector 文档内唯一。"""
+    obs = await load(page, "selector_anchor.html")
+
+    # 1) 全量文档内唯一性（执行点不可错位的最基础契约）
+    for el in obs.elements:
+        count = await page.evaluate(
+            "(s) => { try { return document.querySelectorAll(s).length; }"
+            " catch (e) { return -1; } }",
+            el.selector,
+        )
+        assert count == 1, f"selector 非唯一({count}): {el.selector}"
+
+    def find(label_frag: str):
+        return by_label(obs, label_frag)
+
+    # 2) data-* 锚点：教育区内无 id/name 的嵌套控件应以 div[data-section="edu"] 开头
+    school = find("学校名称")
+    assert school.selector.startswith('div[data-section="edu"]'), school.selector
+    degree = find("学历层次")
+    assert degree.selector.startswith('div[data-section="edu"]'), degree.selector
+    del_btn = find("删除该条")
+    assert del_btn.selector.startswith('div[data-section="edu"]'), del_btn.selector
+
+    # 3) aria-label 锚点：个人简介 textarea 以 aria-label 锚点开头
+    #    （placeholder 为"请输入个人简介"，按归因规则 label 取其原文）
+    intro = next(e for e in obs.elements if e.tag == "textarea")
+    assert intro.selector.startswith('div[aria-label="个人简介"]'), intro.selector
+
+    # 4) 语义 class 锚点：期望职位 input 以 div.profile-card 开头
+    expect_job = find("期望职位")
+    assert expect_job.selector.startswith("div.profile-card"), expect_job.selector
+
+    # 5) 无锚点回退：纯样式类（col-12/mt-2）与无属性区不应被当作锚点，
+    #    选择器维持 nth-of-type 全路径（不含 [ 属性段也不含 . 类段前缀）
+    backup_input = find("备用A")
+    noanchor_input = find("无锚点")
+    for sel in (backup_input.selector, noanchor_input.selector):
+        # 第一个片段必须是纯 nth-of-type 形式（tag 或 tag:nth-of-type(n)），非锚点
+        first = sel.split(" > ")[0]
+        assert first.startswith("div") and ":nth-of-type" in first or first == "div", sel
+        assert not first.startswith("div["), sel
+        assert not first.startswith("div."), sel
+
+    # 6) 锚点本身在文档内唯一（沿用 unique() 语义）
+    for sel in [
+        school.selector,
+        intro.selector,
+        expect_job.selector,
+    ]:
+        # 锚点根片段单独查询应唯一
+        root = sel.split(" > ")[0]
+        root_count = await page.evaluate(
+            "(s) => { try { return document.querySelectorAll(s).length; }"
+            " catch (e) { return -1; } }",
+            root,
+        )
+        assert root_count == 1, f"锚点根非唯一({root_count}): {root}"

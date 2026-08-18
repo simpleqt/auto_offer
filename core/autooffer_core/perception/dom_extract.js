@@ -152,6 +152,60 @@
       (el.getAttribute("readonly") !== null && el.getAttribute("readonly") !== "false"),
   });
 
+  // 判定单个 class 是否"看起来像语义类"，宁缺毋滥：
+  // 接受 kebab/camel 且长度 >=3、以字母开头的命名；过滤纯样式类与动态生成类前缀。
+  // 用作结构路径回退的稳定锚点候选，不参与标签/属性优先级。
+  const isSemanticClass = (cls) => {
+    if (!cls || cls.length < 3) return false;
+    // 必须以字母开头，仅含字母/数字/连字符（kebab 或 camel 命名）
+    if (!/^[a-zA-Z][a-zA-Z0-9-]*$/.test(cls)) return false;
+    const lc = cls.toLowerCase();
+    // 纯样式/工具类前缀（Tailwind、Bootstrap 等）：col-、mt-、p2、flex、text-、bg- …
+    if (
+      /^(col-|mt-|mb-|ml-|mr-|mx-|my-|pt-|pb-|pl-|pr-|px-|py-|p[0-9]|m[0-9]|w-|h-|d-|flex|grid|gap-|border|text-|bg-|rounded|shadow|opacity-|z-|float|cursor|overflow|order-|grow|shrink)/.test(
+        lc
+      )
+    )
+      return false;
+    // CSS-in-JS / 组件库动态类前缀：css-、ant-、makeStyles、mui-、jss、emotion …
+    if (/^(css-|ant-|makestyles|mui-|jss|emotion|sc-|r-)/.test(lc)) return false;
+    return true;
+  };
+
+  // 为结构路径的某层祖先构造"稳定锚点"选择器（需文档内唯一），找不到返回 null。
+  // 优先级：data-*（任意 data- 开头且值非空）→ aria-label → role → 语义 class。
+  const anchorSelector = (cur, doc, unique) => {
+    const tag = cur.tagName.toLowerCase();
+    // 1) data-* 任意（值非空）
+    const attrs = cur.attributes || [];
+    for (const a of attrs) {
+      if (a.name && a.name.indexOf("data-") === 0 && a.value) {
+        const sel = `${tag}[${a.name}="${CSS.escape(a.value)}"]`;
+        if (unique(sel)) return sel;
+      }
+    }
+    // 2) aria-label
+    const ariaLabel = cur.getAttribute("aria-label");
+    if (ariaLabel) {
+      const sel = `${tag}[aria-label="${CSS.escape(ariaLabel)}"]`;
+      if (unique(sel)) return sel;
+    }
+    // 3) role
+    const role = cur.getAttribute("role");
+    if (role) {
+      const sel = `${tag}[role="${CSS.escape(role)}"]`;
+      if (unique(sel)) return sel;
+    }
+    // 4) 语义 class（取首个在文档内唯一的）
+    const cls = typeof cur.className === "string" ? cur.className : "";
+    const classes = cls.split(/\s+/).filter(isSemanticClass);
+    for (const c of classes) {
+      const sel = `${tag}.${CSS.escape(c)}`;
+      if (unique(sel)) return sel;
+    }
+    return null;
+  };
+
   const stableSelector = (el, doc) => {
     const unique = (sel) => {
       try {
@@ -177,11 +231,24 @@
       const sel = `${el.tagName.toLowerCase()}[name="${CSS.escape(name)}"]`;
       if (unique(sel)) return sel;
     }
-    // 结构路径：逐级向上直到选择器在文档内唯一
+    // 结构路径：逐级向上直到选择器在文档内唯一。
+    // 在每层优先尝试"稳定锚点 + 后代路径"：若该层祖先带稳定属性（data-* / aria-label /
+    // role / 语义 class）且锚点本身在文档内唯一，则以锚点为根生成选择器，避免纯
+    // nth-of-type 路径在 DOM 变动（下拉插入面板、动态新增条目）后漂移。无可信锚点
+    // 时维持原 nth-of-type 全路径，保证向后兼容。
     const parts = [];
     let cur = el;
     while (cur && cur.nodeType === 1 && cur !== doc.documentElement && parts.length < 6) {
       const tag = cur.tagName.toLowerCase();
+      // 当前祖先之下的后代路径（尚未加入当前层片段）
+      const descendantPath = parts.join(" > ");
+      // 锚点优先：若当前祖先存在可信且唯一的锚点，用"锚点 + 后代路径"
+      const anchor = anchorSelector(cur, doc, unique);
+      if (anchor) {
+        const cand = descendantPath ? `${anchor} > ${descendantPath}` : anchor;
+        if (unique(cand)) return cand;
+      }
+      // 传统 nth-of-type 片段
       const parent = cur.parentElement;
       if (!parent) {
         parts.unshift(tag);

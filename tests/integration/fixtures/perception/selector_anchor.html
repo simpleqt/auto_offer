@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<!-- 选择器锚点测试页：验证结构路径回退的稳定锚点策略。
+     - 锚点区 A：div[data-section="edu"] 内含无 id/name/data-* 的嵌套 input/select/button，
+       应生成 "div[data-section=\"edu\"] > ... > tag" 形式选择器。
+     - 锚点区 B：div[aria-label="个人简介"] 内的 textarea 应以 aria-label 锚点开头。
+     - 锚点区 C：div.profile-card（语义 class 唯一）内的 input 应以 class 锚点开头。
+     - 无锚点区：div 内无任何稳定属性，应维持 nth-of-type 全路径（向后兼容）。
+     说明：故意在各区放重复标签（多处 input/select/textarea/button），使目标元素无法
+     仅凭自身标签在文档内唯一，从而强制结构路径向上走到祖先锚点。 -->
+<html lang="zh-CN">
+<head><meta charset="utf-8"><title>选择器锚点测试页</title></head>
+<body>
+  <h1>锚点策略验证</h1>
+
+  <!-- 锚点区 A：data-* 祖先唯一 -->
+  <div data-section="edu">
+    <div>
+      <div>
+        <label>学校名称</label>
+        <input type="text" placeholder="请输入学校">
+      </div>
+      <div>
+        <label>学历层次</label>
+        <select>
+          <option value="">请选择</option>
+          <option value="1">大专</option>
+          <option value="2">本科</option>
+        </select>
+      </div>
+      <button type="button">删除该条</button>
+    </div>
+  </div>
+
+  <!-- 锚点区 B：aria-label 祖先唯一 -->
+  <div aria-label="个人简介">
+    <div>
+      <textarea rows="3" placeholder="请输入个人简介"></textarea>
+    </div>
+  </div>
+
+  <!-- 锚点区 C：语义 class 祖先唯一 -->
+  <div class="profile-card">
+    <div>
+      <label>期望职位</label>
+      <input type="text" placeholder="请输入期望职位">
+    </div>
+  </div>
+
+  <!-- 干扰区：复刻教育区的结构（仅含纯样式类 col-12 mt-2，应被过滤不当作锚点），
+       用于制造结构性歧义、验证不误用样式类作为锚点 -->
+  <div class="col-12 mt-2">
+    <div>
+      <div>
+        <label>备用字段A</label>
+        <input type="text" placeholder="备用A">
+      </div>
+      <button type="button">备用按钮</button>
+    </div>
+  </div>
+
+  <!-- 无锚点区：纯结构（无任何稳定属性），验证向后兼容（nth-of-type 全路径）。
+       下方再多放一个 select 与一个 textarea，使锚点区 A 的 select、锚点区 B 的
+       textarea 无法凭自身标签在文档内唯一，从而强制向上走到祖先锚点 -->
+  <div>
+    <div>
+      <label>无锚点字段</label>
+      <input type="text" placeholder="无锚点">
+    </div>
+    <div>
+      <label>无锚点选择</label>
+      <select>
+        <option value="">请选择</option>
+        <option value="x">选项</option>
+      </select>
+    </div>
+    <div>
+      <label>无锚点文本</label>
+      <textarea rows="2" placeholder="无锚点文本"></textarea>
+    </div>
+  </div>
+</body>
+</html>
