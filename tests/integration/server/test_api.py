@@ -7,6 +7,7 @@ from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
+
 from tests.integration.server.conftest import sample_profile_payload
 
 
@@ -173,9 +174,8 @@ def test_task_list_and_404(client: TestClient) -> None:
 
 def test_task_waiting_human_then_resume(ctx_factory: Any) -> None:
     """登录墙类场景：任务挂起 WAITING_HUMAN，resume 后继续到 AWAITING_REVIEW。"""
-    from tests.integration.server.conftest import FakeRunner
-
     from autooffer_server.main import create_app
+    from tests.integration.server.conftest import FakeRunner
 
     runner = FakeRunner(pause_reason="检测到登录页，请手动登录")
     with TestClient(create_app(ctx=ctx_factory(runner))) as c:
@@ -192,9 +192,8 @@ def test_task_waiting_human_then_resume(ctx_factory: Any) -> None:
 
 
 def test_task_failure_recorded(ctx_factory: Any) -> None:
-    from tests.integration.server.conftest import FakeRunner
-
     from autooffer_server.main import create_app
+    from tests.integration.server.conftest import FakeRunner
 
     with TestClient(create_app(ctx=ctx_factory(FakeRunner(fail=True)))) as c:
         c.put("/api/v1/profiles/p1", json={"payload": sample_profile_payload()})
@@ -206,9 +205,8 @@ def test_task_failure_recorded(ctx_factory: Any) -> None:
 
 
 def test_task_cancel(ctx_factory: Any) -> None:
-    from tests.integration.server.conftest import FakeRunner
-
     from autooffer_server.main import create_app
+    from tests.integration.server.conftest import FakeRunner
 
     runner = FakeRunner(pause_reason="等待人工")
     with TestClient(create_app(ctx=ctx_factory(runner))) as c:

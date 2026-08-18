@@ -1,0 +1,24 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <title>顽固失败字段·放弃并部分完成</title>
+  <style>
+    body { font-family: sans-serif; margin: 0; padding: 16px; }
+    .form-row { display: flex; align-items: center; margin: 10px 0; }
+    .lb { width: 110px; color: #333; }
+    .form-row input { height: 30px; width: 260px; }
+  </style>
+</head>
+<body>
+<h3>基本信息</h3>
+<div class="form-row"><span class="lb">姓名</span><input id="f-name"></div>
+<div class="form-row"><span class="lb">证件号</span><input id="f-idcard"></div>
+<script>
+  // 模拟站点脚本清空输入（校验必过的顽固字段）：input 事件内同步清回空值，
+  // 保证回读时值恒为空（异步清空会与回读产生竞态）
+  var idc = document.getElementById('f-idcard');
+  idc.addEventListener('input', function () { idc.value = ''; });
+</script>
+</body>
+</html>

@@ -609,12 +609,15 @@
     const collected = [];
 
     const candidates = [...doc.querySelectorAll(INTERACTIVE_SELECTOR)];
-    // 类名启发式补充纯 div 自定义控件（包装器内已有交互元素则跳过，避免重复）
+    // 类名启发式补充纯 div 自定义控件（包装器内已有交互元素则跳过，避免重复）。
+    // 位于交互元素（如 combobox 触发器）内部的节点一律不补——触发器里的值
+    // span/内联面板会与触发器本身重复提取成多个 combobox，污染元素表。
     doc.querySelectorAll("[class]").forEach((el) => {
       if (candidates.length >= opts.maxElements) return;
       const cls = typeof el.className === "string" ? el.className : "";
       if (!cls || !(CUSTOM_CLASS_RE.test(cls) || DATE_CLASS_RE.test(cls))) return;
       if (el.matches(INTERACTIVE_SELECTOR)) return;
+      if (el.closest && el.closest(INTERACTIVE_SELECTOR)) return;
       if (el.querySelector(INTERACTIVE_SELECTOR)) return;
       if (el.children.length > 3) return;
       if (!isCssVisible(el)) return;
@@ -624,6 +627,7 @@
     const PANEL_SELECTOR =
       '[class*="panel"], [class*="dropdown"], [class*="menu"], ' +
       '[class*="popover"], [class*="picker"], [role="listbox"]';
+    const panelItems = new Set();
     let panelCount = 0;
     doc.querySelectorAll(PANEL_SELECTOR).forEach((panel) => {
       if (!isCssVisible(panel) || panelCount >= 60) return;
@@ -636,6 +640,7 @@
         if (!t || t.length > 40) return;
         if (!isCssVisible(item)) return;
         candidates.push(item);
+        panelItems.add(item);
         panelCount += 1;
       });
     });
@@ -647,7 +652,16 @@
       seen.add(el);
       const tag = el.tagName.toLowerCase();
       if (tag === "option" || tag === "optgroup") continue;
-      const role = detectRole(el);
+      // 弹层选项叶子：角色按元素自身判定（显式 role=option → option，其余 custom）。
+      // 不走 detectRole 的祖先类名链——选项的祖先类名（select-dropdown 等）会把
+      // 它们误判成 combobox，导致下拉处理器找不到可点的选项（真实站点回归）。
+      let role;
+      if (panelItems.has(el)) {
+        const explicitRole = (el.getAttribute("role") || "").toLowerCase();
+        role = explicitRole === "option" ? "option" : "custom";
+      } else {
+        role = detectRole(el);
+      }
       let labelInfo = attributeLabel(el, doc, opts.labelDistance);
       // 按钮/链接的自身文本就是最可靠的标签，避免被邻近文本误归因
       if (role === "button" || role === "link") {

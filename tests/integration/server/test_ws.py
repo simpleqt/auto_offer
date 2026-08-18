@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from fastapi.testclient import TestClient
+
 from tests.integration.server.conftest import FakeRunner, sample_profile_payload
 
 

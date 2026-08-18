@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <title>可重复条目·动态添加教育经历</title>
+  <style>
+    body { font-family: sans-serif; margin: 0; padding: 16px; }
+    .form-row { display: flex; align-items: center; margin: 10px 0; }
+    .lb { width: 110px; color: #333; }
+    .form-row input { height: 30px; width: 220px; }
+    .select { position: relative; width: 220px; border: 1px solid #d9d9d9; height: 30px; line-height: 30px; cursor: pointer; }
+    .select-value { padding: 0 8px; }
+    .select-dropdown { position: absolute; top: 32px; left: 0; right: 0; background: #fff; border: 1px solid #d9d9d9; z-index: 50; }
+    .option { padding: 6px 10px; }
+    .edu-row { border: 1px dashed #bbb; padding: 8px 12px; margin: 12px 0; }
+    .btn-add { margin: 8px 0; padding: 6px 20px; }
+  </style>
+</head>
+<body>
+<h3>教育经历</h3>
+<button type="button" class="btn-add" id="btn-add">添加教育经历</button>
+<div id="edu-list"></div>
+<script>
+  var rowSeq = 0;
+  function closeSelect(t) {
+    t.setAttribute('aria-expanded', 'false');
+    t.querySelector('.select-dropdown').style.display = 'none';
+  }
+  document.getElementById('btn-add').addEventListener('click', function () {
+    rowSeq += 1;
+    var row = document.createElement('div');
+    row.className = 'edu-row';
+    row.innerHTML =
+      '<div class="form-row"><span class="lb">学校</span><input data-f="school"></div>' +
+      '<div class="form-row"><span class="lb">学历</span>' +
+      '<div class="select" role="combobox" aria-expanded="false" tabindex="0">' +
+      '<span class="select-value">请选择</span>' +
+      '<div class="select-dropdown" style="display:none">' +
+      '<div class="option" data-value="本科">本科</div>' +
+      '<div class="option" data-value="硕士">硕士</div>' +
+      '</div></div></div>' +
+      '<div class="form-row"><span class="lb">开始时间</span><input data-f="start" type="month"></div>' +
+      '<div class="form-row"><span class="lb">结束时间</span><input data-f="end" type="month"></div>';
+    document.getElementById('edu-list').appendChild(row);
+    row.querySelectorAll('.select').forEach(function (t) {
+      t.addEventListener('click', function (e) {
+        var opt = e.target.closest('.option');
+        if (opt) {
+          t.querySelector('.select-value').textContent = opt.dataset.value;
+          t.querySelectorAll('.option').forEach(function (o) {
+            o.setAttribute('aria-selected', o === opt ? 'true' : 'false');
+          });
+          closeSelect(t);
+          return;
+        }
+        var open = t.getAttribute('aria-expanded') === 'true';
+        document.querySelectorAll('.select').forEach(closeSelect);
+        if (!open) {
+          t.setAttribute('aria-expanded', 'true');
+          t.querySelector('.select-dropdown').style.display = 'block';
+        }
+      });
+    });
+  });
+</script>
+</body>
+</html>

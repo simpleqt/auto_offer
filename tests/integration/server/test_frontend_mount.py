@@ -7,11 +7,11 @@ from __future__ import annotations
 from pathlib import Path
 
 from fastapi.testclient import TestClient
-from tests.integration.server.conftest import MemoryKeyStore
 
 from autooffer_server.config import ServerConfig
 from autooffer_server.context import AppContext
 from autooffer_server.main import create_app
+from tests.integration.server.conftest import MemoryKeyStore
 
 
 def _make_dist(tmp_path: Path) -> Path:

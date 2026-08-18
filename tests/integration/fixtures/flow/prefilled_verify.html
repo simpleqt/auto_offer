@@ -1,0 +1,21 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <title>站点预填·核对模式</title>
+  <style>
+    body { font-family: sans-serif; margin: 0; padding: 16px; }
+    .form-row { display: flex; align-items: center; margin: 10px 0; }
+    .lb { width: 110px; color: #333; }
+    .form-row input { height: 30px; width: 240px; }
+    .hint { color: #888; font-size: 12px; }
+  </style>
+</head>
+<body>
+<h3>基本信息（站点已预填部分字段）</h3>
+<div class="form-row"><span class="lb">姓名</span><input id="f-name" value="陈志谦"></div>
+<div class="form-row"><span class="lb">邮箱</span><input id="f-email" value="wrong@old.com"></div>
+<div class="form-row"><span class="lb">城市</span><input id="f-city" placeholder="请输入现居城市"></div>
+<p class="hint">预期核对行为：姓名一致跳过；邮箱错误纠正；城市空缺补填。</p>
+</body>
+</html>

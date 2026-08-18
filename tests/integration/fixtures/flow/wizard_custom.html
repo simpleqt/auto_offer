@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <title>多步向导·自定义控件·顶部遮挡</title>
+  <style>
+    .banner { position: fixed; top: 0; left: 0; right: 0; height: 80px; background: #1f3a5f; color: #fff; z-index: 99; display: flex; align-items: center; padding-left: 16px; }
+    body { font-family: sans-serif; margin: 0; }
+    .page { padding: 8px 16px; }
+    .steps { display: flex; gap: 12px; margin: 4px 0 12px; }
+    .step-item { padding: 4px 12px; border-bottom: 3px solid #ccc; color: #888; }
+    .step-item.active { border-color: #1677ff; color: #1677ff; font-weight: 600; }
+    .form-row { display: flex; align-items: center; margin: 10px 0; }
+    .lb { width: 110px; color: #333; }
+    .form-row input, .form-row select { height: 30px; width: 230px; }
+    .select { position: relative; width: 230px; border: 1px solid #d9d9d9; height: 30px; line-height: 30px; cursor: pointer; }
+    .select-value { padding: 0 8px; color: #333; }
+    .select-dropdown { position: absolute; top: 32px; left: 0; right: 0; background: #fff; border: 1px solid #d9d9d9; z-index: 50; }
+    .option { padding: 6px 10px; }
+    .option:hover { background: #f0f6ff; }
+    .btn-next { margin-top: 16px; padding: 6px 24px; }
+  </style>
+</head>
+<body>
+<div class="banner">浙江大华技术股份有限公司 · 校园招聘（固定横幅，遮挡首行输入框）</div>
+<div class="page">
+  <div class="steps">
+    <div class="step-item active">基本信息</div>
+    <div class="step-item">教育经历</div>
+  </div>
+
+  <div class="step-pane" id="step1">
+    <div class="form-row"><span class="lb">姓名</span><input id="f-name"></div>
+    <div class="form-row"><span class="lb">手机</span><input id="f-phone"></div>
+    <div class="form-row"><span class="lb">性别</span>
+      <div class="select" role="combobox" aria-expanded="false" tabindex="0">
+        <span class="select-value">请选择</span>
+        <div class="select-dropdown" style="display:none">
+          <div class="option" data-value="男">男</div>
+          <div class="option" data-value="女">女</div>
+        </div>
+      </div>
+    </div>
+    <div class="form-row"><span class="lb">出生日期</span><input id="f-birth" type="month"></div>
+    <div class="form-row"><span class="lb">政治面貌</span>
+      <select id="f-politics">
+        <option value="">请选择</option>
+        <option>中共党员</option>
+        <option>共青团员</option>
+        <option>群众</option>
+      </select>
+    </div>
+    <button type="button" class="btn-next" id="btn-next">下一步</button>
+  </div>
+
+  <div class="step-pane" id="step2" style="display:none">
+    <div class="form-row"><span class="lb">学校</span><input id="f-school"></div>
+    <div class="form-row"><span class="lb">学历</span>
+      <div class="select" role="combobox" aria-expanded="false" tabindex="0">
+        <span class="select-value">请选择</span>
+        <div class="select-dropdown" style="display:none">
+          <div class="option" data-value="本科">本科</div>
+          <div class="option" data-value="硕士">硕士</div>
+        </div>
+      </div>
+    </div>
+    <div class="form-row"><span class="lb">入学时间</span><input id="f-enroll" type="month"></div>
+    <button type="button" id="btn-submit">提交申请</button>
+  </div>
+</div>
+<script>
+  function closeSelect(t) {
+    t.setAttribute('aria-expanded', 'false');
+    t.querySelector('.select-dropdown').style.display = 'none';
+  }
+  document.querySelectorAll('.select').forEach(function (t) {
+    t.addEventListener('click', function (e) {
+      var opt = e.target.closest('.option');
+      if (opt) {
+        t.querySelector('.select-value').textContent = opt.dataset.value;
+        t.querySelectorAll('.option').forEach(function (o) {
+          o.setAttribute('aria-selected', o === opt ? 'true' : 'false');
+        });
+        closeSelect(t);
+        return;
+      }
+      var open = t.getAttribute('aria-expanded') === 'true';
+      document.querySelectorAll('.select').forEach(closeSelect);
+      if (!open) {
+        t.setAttribute('aria-expanded', 'true');
+        t.querySelector('.select-dropdown').style.display = 'block';
+      }
+    });
+  });
+  document.getElementById('btn-next').addEventListener('click', function () {
+    document.getElementById('step1').style.display = 'none';
+    document.getElementById('step2').style.display = 'block';
+    var items = document.querySelectorAll('.step-item');
+    items[0].classList.remove('active');
+    items[1].classList.add('active');
+  });
+</script>
+</body>
+</html>
