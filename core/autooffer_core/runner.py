@@ -741,7 +741,12 @@ class AgentRunner:
                 value_shape = self._value_shape(a.value)
 
             label_shape = self._label_shape(el.label or "") if el is not None else None
-            if (label_shape, value_shape) in self._SHAPE_CONFLICTS:
+            if (
+                el is not None
+                and label_shape is not None
+                and value_shape is not None
+                and (label_shape, value_shape) in self._SHAPE_CONFLICTS
+            ):
                 hint = self._find_shape_target(observation, value_shape)
                 notes.append(
                     f"元素[{el.index}]{el.label}是{self._SHAPE_CN[label_shape]}字段，"
