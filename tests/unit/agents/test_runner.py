@@ -267,6 +267,58 @@ async def test_runner_deterministic_date_validation() -> None:
 
 
 @pytest.mark.asyncio
+async def test_runner_reobserves_when_page_barren() -> None:
+    """首屏观察无可交互元素（SPA 渲染中）：等待重观察，不白烧 Actor 重试轮。"""
+    real_obs = make_observation()
+    empty_obs = PageObservation(url="https://example.com/apply", title="加载中", elements=[])
+
+    class SlowRenderDriver(FakeDriver):
+        def __init__(self) -> None:
+            super().__init__(empty_obs)
+            self.observation = empty_obs
+
+        async def observe(self, *, with_screenshot: bool = True, scroll_full: bool = True):
+            self.calls.append(("observe", with_screenshot, scroll_full))
+            # 第 1 次观察空（渲染中），其后返回真实表单
+            if len([c for c in self.calls if c[0] == "observe"]) == 1:
+                return empty_obs
+            self.observation = real_obs
+            return real_obs
+
+    driver = SlowRenderDriver()
+    profile = build_sample_profile()
+    planner_script = [
+        PlannerOutput(decision="dispatch_section", next_section_id="s1",
+                      subtask_goal="填写基本信息", reason="派发"),
+        PlannerOutput(decision="finish", done=True, reason="完成"),
+    ]
+    router = FakeRouter({
+        "planner": scripted(planner_script),
+        "actor": scripted([ActionBatch(
+            actions=[Action(type="input_text", element_index=0, value="张三",
+                            reason="填姓名")],
+            section_complete=True, summary="填写姓名",
+        )]),
+        "validator": scripted([ValidatorOutput(passed=True)]),
+    })
+    events = []
+    runner = AgentRunner(
+        task_id="t13", task_instruction="x", driver=driver, router=router,
+        executor=ActionExecutor(driver), profile=profile,
+        on_event=events.append,
+    )
+    report = await runner.run("https://example.com/apply")
+
+    # 重观察后正常派发填写；等待渲染的动作确实发生
+    assert report.counts()["filled"] >= 1
+    assert any("重新观察" in e.summary for e in events)
+    assert any(c == ("wait", 1.5) for c in driver.calls)
+    # Planner 首次决策即拿到非空页面（没有浪费在空页面上）
+    planner_events = [e.summary for e in events if e.agent == "planner"]
+    assert planner_events[0].startswith("dispatch_section")
+
+
+@pytest.mark.asyncio
 async def test_runner_advance_without_button_finishes_partial() -> None:
     """Planner 要翻页但无可见下一步按钮：按部分完成收尾，不判任务失败。
 

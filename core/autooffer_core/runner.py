@@ -172,9 +172,20 @@ class AgentRunner:
     async def _main_loop(self) -> None:
         steps = 0
         initial_prefill: float | None = None
+        empty_obs_streak = 0
+        """连续"无可交互元素"观察的次数；页面渲染中时等待重观察（有界，防空转）。"""
         while steps < self._config.max_steps:
             steps += 1
             obs = await self._driver.observe(with_screenshot=self._vision_next)
+            if self._observation_barren(obs) and empty_obs_streak < 2:
+                # SPA 首屏/iframe 懒加载未就绪：等 1.5s 重观察一次，避免
+                # Actor 第一轮拿到空元素表白烧重试（真实站点回归）
+                empty_obs_streak += 1
+                self._emit("step", "runner", "页面尚无可交互元素，等待渲染后重新观察")
+                await self._driver.wait(1.5)
+                obs = await self._driver.observe(with_screenshot=False)
+            elif not self._observation_barren(obs):
+                empty_obs_streak = 0
             self._vision_next = False
             if self._config.use_vision and obs.scenario.page_type == "unknown":
                 # 仅视觉模式下：规则识别不出页面类型时，下一轮带截图辅助 Planner 裁决
@@ -270,6 +281,19 @@ class AgentRunner:
             raise AutoOfferError(f"未知的 Planner 决策: {plan.decision}")
         log.warning("runner.max_steps_reached", steps=steps)
         self._emit("step", "runner", f"达到最大步数护栏({self._config.max_steps})，安全终止")
+
+    @staticmethod
+    def _observation_barren(obs: PageObservation) -> bool:
+        """页面是否没有任何可交互元素（可填控件或可点按钮/链接）。"""
+        for e in obs.elements:
+            if not e.visible:
+                continue
+            if e.role in ("input", "textarea", "select", "combobox", "date",
+                          "custom", "richtext", "radio", "checkbox"):
+                return False
+            if e.role in ("button", "link"):
+                return False
+        return True
 
     # ---------- 区块子任务 ----------
 

@@ -437,7 +437,9 @@ class PlaywrightDriver:
         loc = await self._locate(el)
         try:
             try:
-                await loc.click(timeout=5000)
+                # 点击只为聚焦（模拟人工先点再输）；fill 自带聚焦，被浮层遮挡时
+                # 没必要耗满长超时——1.5s 等不到就直接跳过点击进入填写
+                await loc.click(timeout=1500)
             except PlaywrightError as exc:
                 # 点击被浮层拦截：fill 自带聚焦（不经过指针命中检测），跳过点击直接填
                 log.info("driver.input_skip_click", label=el.label, error=str(exc)[:80])

@@ -150,7 +150,7 @@ class DropdownHandler:
     @staticmethod
     async def _click_text_fallback(ctx: ExecContext, target: str) -> str | None:
         """文本锚定点击（驱动可选能力）；驱动不支持或未命中返回 None。"""
-        fn = getattr(ctx.driver, "click_visible_text", None)
+        fn: Any = getattr(ctx.driver, "click_visible_text", None)
         if not callable(fn):
             return None
         variants = [target]
@@ -158,9 +158,10 @@ class DropdownHandler:
         if stripped and stripped != target:
             variants.append(stripped)
         try:
-            return await fn(variants)  # type: ignore[operator]
+            res = await fn(variants)
         except Exception:  # noqa: BLE001
             return None
+        return str(res) if res else None
 
     async def _try_panel_click(
         self, el: UIElement, target: str, ctx: ExecContext
