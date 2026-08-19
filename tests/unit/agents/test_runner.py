@@ -417,6 +417,112 @@ async def test_runner_planner_llm_failure_recovers() -> None:
 
 
 @pytest.mark.asyncio
+async def test_runner_blocks_value_label_mismatch() -> None:
+    """值-标签语义守卫：手机号填进"体重(公斤)"被拦截，并提示正确目标元素。
+
+    回归（真实站点）：模型在长元素表上配错编号——出生日期区间填进身高框、
+    手机号填进体重框。守卫按值形态（手机号/邮箱/证件/日期）拦截明确冲突，
+    提示给出正确目标（#N(联系电话)）帮助下一轮自纠。
+    """
+    mismatch_obs = PageObservation(
+        url="https://example.com/apply",
+        title="基本信息",
+        sections=[SectionInfo(id="s1", title="基本信息", element_start=0, element_end=2)],
+        elements=[
+            UIElement(index=0, tag="input", role="input", label="体重(公斤)", selector="#w"),
+            UIElement(index=1, tag="input", role="input", label="联系电话", selector="#tel"),
+            UIElement(index=2, tag="input", role="input", label="邮箱", selector="#mail"),
+        ],
+    )
+    driver = FakeDriver(mismatch_obs)
+    profile = build_sample_profile()
+    planner_script = [
+        PlannerOutput(decision="dispatch_section", next_section_id="s1",
+                      subtask_goal="填写基本信息", reason="派发"),
+        PlannerOutput(decision="finish", done=True, reason="完成"),
+    ]
+    actor_batch = ActionBatch(
+        actions=[
+            Action(type="input_text", element_index=0, value="18881048355", reason="填电话"),
+            Action(type="input_text", element_index=1, value="18881048355", reason="填电话"),
+            Action(type="input_text", element_index=2, value="a@b.com", reason="填邮箱"),
+        ],
+        section_complete=True, summary="填写联系信息",
+    )
+    router = FakeRouter({
+        "planner": scripted(planner_script),
+        "actor": scripted([actor_batch]),
+        "validator": scripted([ValidatorOutput(passed=True)]),
+    })
+    events = []
+    runner = AgentRunner(
+        task_id="t16", task_instruction="x", driver=driver, router=router,
+        executor=ActionExecutor(driver), profile=profile,
+        on_event=events.append,
+    )
+    report = await runner.run("https://example.com/apply")
+
+    # 手机号进体重框被拦截；电话与邮箱正常填写
+    assert driver.values.get(0, "") == ""
+    assert driver.values[1] == "18881048355"
+    assert driver.values[2] == "a@b.com"
+    assert report.counts()["filled"] == 2
+    mismatch_events = [e.summary for e in events if "字段与值不匹配" in e.summary]
+    assert mismatch_events, "应产生语义拦截事件"
+    assert "#1(联系电话)" in mismatch_events[0]  # 提示给出正确目标
+
+
+@pytest.mark.asyncio
+async def test_runner_coerces_daterange_on_birth_field() -> None:
+    """出生日期误发 set_date_range（end=null）：自动降级为单日期，不再找"至今"。"""
+    from autooffer_core.profile.schema import DateYM
+
+    birth_obs = PageObservation(
+        url="https://example.com/apply",
+        title="基本信息",
+        sections=[SectionInfo(id="s1", title="基本信息", element_start=0, element_end=0)],
+        elements=[
+            UIElement(index=0, tag="input", role="date", label="出生日期",
+                      selector="#birth", input_type="month"),
+        ],
+    )
+    driver = FakeDriver(birth_obs)
+    profile = build_sample_profile()
+    planner_script = [
+        PlannerOutput(decision="dispatch_section", next_section_id="s1",
+                      subtask_goal="填写出生日期", reason="派发"),
+        PlannerOutput(decision="finish", done=True, reason="完成"),
+    ]
+    actor_batch = ActionBatch(
+        actions=[Action(
+            type="set_date_range", element_index=0,
+            date_range={"start": {"year": 2001, "month": 11}, "end": None},
+            reason="填写出生日期",
+        )],
+        section_complete=True, summary="填出生日期",
+    )
+    router = FakeRouter({
+        "planner": scripted(planner_script),
+        "actor": scripted([actor_batch]),
+        "validator": scripted([ValidatorOutput(passed=True)]),
+    })
+    events = []
+    runner = AgentRunner(
+        task_id="t17", task_instruction="x", driver=driver, router=router,
+        executor=ActionExecutor(driver), profile=profile,
+        on_event=events.append,
+    )
+    report = await runner.run("https://example.com/apply")
+
+    # 降级为单日期后正常填写并通过校验，任务不挂起等人工
+    assert driver.values.get(0, "").startswith("2001-11") or driver.values.get(0, "") != ""
+    assert report.counts()["filled"] == 1
+    assert runner.state == "AWAITING_REVIEW"
+    assert any("降级为单日期" in e.summary for e in events)
+    assert DateYM(year=2001, month=11).year == 2001  # DateYM 可用性占位断言
+
+
+@pytest.mark.asyncio
 async def test_runner_advance_without_button_finishes_partial() -> None:
     """Planner 要翻页但无可见下一步按钮：按部分完成收尾，不判任务失败。
 

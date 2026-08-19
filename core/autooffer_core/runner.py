@@ -76,6 +76,29 @@ class RunnerConfig(BaseModel):
 
 
 class AgentRunner:
+    # 值形态 → 标签关键词（拦截"手机号填进体重框"类模型配错）
+    _LABEL_SHAPE_KEYWORDS: tuple[tuple[str, tuple[str, ...]], ...] = (
+        ("mobile", ("电话", "手机", "联系", "phone", "mobile", "tel")),
+        ("email", ("邮箱", "邮件", "email", "mail")),
+        ("idcard", ("证件", "身份证", "idcard")),
+        ("date", ("日期", "时间", "出生", "年月", "毕业", "入学", "date")),
+        ("measure", ("身高", "体重", "年龄", "岁")),
+    )
+    _SHAPE_CN = {
+        "mobile": "手机号", "email": "邮箱", "idcard": "证件号",
+        "date": "日期", "range": "日期区间", "measure": "数值量（身高/体重等）",
+    }
+    # (标签形态, 值形态) 明确冲突 → 拦截；日期标签允许区间值（教育时间常见）
+    _SHAPE_CONFLICTS = {
+        ("measure", "mobile"), ("measure", "email"), ("measure", "idcard"),
+        ("measure", "date"), ("measure", "range"),
+        ("mobile", "email"), ("mobile", "idcard"), ("mobile", "date"),
+        ("mobile", "range"),
+        ("email", "idcard"), ("email", "date"), ("email", "range"),
+        ("idcard", "date"), ("idcard", "range"),
+        ("date", "mobile"), ("date", "email"), ("date", "idcard"),
+    }
+
     def __init__(
         self,
         *,
@@ -459,22 +482,38 @@ class AgentRunner:
                 continue
 
             # 拦截"已执行过且无任何效果"的重复动作（防触发器反复点击死循环）
-            exec_actions, blocked = self._intercept_repeats(exec_actions, observation)
-            if blocked:
+            exec_actions, repeat_blocked = self._intercept_repeats(exec_actions, observation)
+            # 拦截"值与字段语义冲突"的动作并降级单日期字段上的区间动作
+            exec_actions, mismatch_notes = self._adjust_semantics(exec_actions, observation)
+            blocked = [*repeat_blocked, *mismatch_notes]
+            if mismatch_notes:
                 self._emit(
-                    "step", "runner", "拦截无进展的重复动作: " + "；".join(blocked[:2])
+                    "step", "runner", "字段与值不匹配已拦截/降级: " + "；".join(mismatch_notes[:2])
                 )
-                self._history.add(f"拦截重复动作: {'；'.join(blocked[:2])}")
+                self._history.add(f"语义拦截: {'；'.join(mismatch_notes[:2])}")
+            elif repeat_blocked:
+                self._emit(
+                    "step", "runner", "拦截无进展的重复动作: " + "；".join(repeat_blocked[:2])
+                )
+                self._history.add(f"拦截重复动作: {'；'.join(repeat_blocked[:2])}")
             if not exec_actions:
                 if batch.section_complete and all("目标已达成" in b for b in blocked):
                     # 动作全部已生效且 Actor 判定完成：直接登记，不算失败
                     self._mark_section_done(page_key, section_id, section_title)
                     return
-                retry_advice = (
-                    "已拦截与之前完全相同且无进展的动作，禁止再原样输出。"
-                    "若上轮点开了下拉面板，请直接 click 面板中匹配的选项元素；"
-                    "自定义下拉改用带目标值的 select_option；确实无法推进的字段输出 skip_field。"
-                )
+                if any("已拦截" in n for n in mismatch_notes):
+                    retry_advice = (
+                        "上轮动作因值与字段语义不匹配被拦截（详见拦截说明，提示中已给出"
+                        "正确目标元素编号）。请按元素标签逐个核对编号后重新输出，"
+                        "不要凭记忆编号。"
+                    )
+                else:
+                    retry_advice = (
+                        "已拦截与之前完全相同且无进展的动作，禁止再原样输出。"
+                        "若上轮点开了下拉面板，请直接 click 面板中匹配的选项元素；"
+                        "自定义下拉改用带目标值的 select_option；"
+                        "确实无法推进的字段输出 skip_field。"
+                    )
                 continue
 
             try:
@@ -635,6 +674,95 @@ class AgentRunner:
                 f"~{end.year if end else 'now'}"
             )
         return f"{a.type}|{el.selector}|{target}"
+
+    @staticmethod
+    def _label_shape(label: str) -> str | None:
+        """标签的值形态（手机号/邮箱/证件/日期/数值量）；命中多种或零种返回 None。"""
+        hits = {
+            shape
+            for shape, kws in AgentRunner._LABEL_SHAPE_KEYWORDS
+            if any(k in label.lower() for k in kws)
+        }
+        return next(iter(hits)) if len(hits) == 1 else None
+
+    @staticmethod
+    def _value_shape(value: str) -> str | None:
+        """值的形态推断（保守：形态明确才返回，自由文本返回 None 不拦截）。"""
+        v = value.strip()
+        if not v:
+            return None
+        if re.fullmatch(r"1[3-9]\d{9}", v):
+            return "mobile"
+        if re.fullmatch(r"[^@\s]+@[^@\s]+\.\w+", v):
+            return "email"
+        if re.fullmatch(r"\d{17}[\dXx]|\d{15}", v):
+            return "idcard"
+        if re.search(r"(19|20)\d{2}", v) and any(k in v for k in ("~", "～", "至", "—")):
+            return "range"
+        if re.fullmatch(r"(19|20)\d{2}[-/年.]\d{1,2}([-./月]\d{1,2}(日|号)?)?", v):
+            return "date"
+        return None
+
+    def _adjust_semantics(
+        self, actions: list[Action], observation: PageObservation
+    ) -> tuple[list[Action], list[str]]:
+        """拦截"值与目标字段语义冲突"的动作，并降级单日期字段上的区间动作。
+
+        模型在长元素表上偶发配错编号（真实站点回归：出生日期区间填进身高框、
+        手机号填进体重框）。值形态（手机号/邮箱/证件/日期）与标签语义明确冲突
+        时拦截，并在提示中给出正确目标元素，帮助模型下一轮自纠。
+        """
+        by_index = {e.index: e for e in observation.elements}
+        adjusted: list[Action] = []
+        notes: list[str] = []
+        for a in actions:
+            el = by_index.get(a.element_index) if a.element_index is not None else None
+            value_shape: str | None = None
+            coerced = a
+            if a.type == "set_date_range" and a.date_range is not None and el is not None:
+                if a.date_range.end is None:
+                    value_shape = "date"
+                    if re.search(r"出生|生日", el.label or ""):
+                        # 单日期字段误发区间动作（end=null）：降级为单日期，
+                        # 避免在出生日期框里找"至今"选项卡死转人工
+                        coerced = Action(
+                            type="set_date", element_index=a.element_index,
+                            date=a.date_range.start, reason=a.reason,
+                        )
+                        notes.append(
+                            f"元素[{el.index}]{el.label}为单日期字段，"
+                            "区间动作已降级为单日期填写"
+                        )
+                else:
+                    value_shape = "range"
+            elif a.type == "set_date":
+                value_shape = "date"
+            elif a.value is not None:
+                value_shape = self._value_shape(a.value)
+
+            label_shape = self._label_shape(el.label or "") if el is not None else None
+            if (label_shape, value_shape) in self._SHAPE_CONFLICTS:
+                hint = self._find_shape_target(observation, value_shape)
+                notes.append(
+                    f"元素[{el.index}]{el.label}是{self._SHAPE_CN[label_shape]}字段，"
+                    f"值'{(a.value or '')[:16]}'像{self._SHAPE_CN[value_shape]}，已拦截"
+                    + (f"；应填入{hint}" if hint else "；请核对元素编号")
+                )
+                continue
+            adjusted.append(coerced)
+        return adjusted, notes
+
+    @staticmethod
+    def _find_shape_target(observation: PageObservation, shape: str) -> str | None:
+        """在当前元素表中找与值形态匹配的目标元素（提示用），如 '#5(联系电话)'。"""
+        lookup = "date" if shape == "range" else shape
+        kws = dict(AgentRunner._LABEL_SHAPE_KEYWORDS).get(lookup)
+        if not kws:
+            return None
+        for e in observation.elements:
+            if e.visible and e.label and any(k in e.label.lower() for k in kws):
+                return f"#{e.index}({e.label})"
+        return None
 
     def _intercept_repeats(
         self, actions: list[Action], observation: PageObservation
