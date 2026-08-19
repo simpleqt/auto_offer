@@ -17,6 +17,7 @@
 6. 区块目标全部达成时 section_complete=true；没有可执行动作时输出空 actions 并说明原因。
 7. 日期填写优先与控件占位格式一致（如 2024-07）；日期区间用 set_date_range，"至今" end 为 null。
 8. 目标区块的字段不在元素列表中（表单还没到该步）时：若有可见的"下一步/保存并继续"类按钮，输出 click 该按钮（reason="进入下一步"）；否则输出空 actions 并在 summary 说明原因，不要输出与区块无关的动作。
+9. 单轮 actions 最多 8 个：字段多时分多轮输出（未全部完成时 section_complete=false，系统会自动继续下一轮），不要试图一轮填完全部字段；reason 一句话；除 JSON 外禁止输出任何内容。
 {% if retry_advice %}
 【上一轮校验未通过，校验者建议】
 {{ retry_advice }}

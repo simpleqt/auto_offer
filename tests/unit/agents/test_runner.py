@@ -319,6 +319,104 @@ async def test_runner_reobserves_when_page_barren() -> None:
 
 
 @pytest.mark.asyncio
+async def test_runner_actor_llm_truncation_retries_not_fail() -> None:
+    """Actor 输出超长被截断（LLMError）：压缩重试，不判任务失败。
+
+    回归（真实站点）：整页字段多时模型试图一轮填完 → 触发长度上限 →
+    "Could not parse response content as the length limit was reached"
+    曾直接把任务置为 FAILED。
+    """
+    from autooffer_core.errors import LLMError
+
+    class FlakyActorClient(ScriptedLLMClient):
+        def __init__(self, good: ActionBatch) -> None:
+            super().__init__([good])
+            self.raised = False
+
+        async def complete_json(self, messages, schema):  # type: ignore[no-untyped-def]
+            if not self.raised:
+                self.raised = True
+                raise LLMError(
+                    "LLM 调用失败: Could not parse response content "
+                    "as the length limit was reached"
+                )
+            return await super().complete_json(messages, schema)
+
+    driver = FakeDriver(make_observation())
+    profile = build_sample_profile()
+    planner_script = [
+        PlannerOutput(decision="dispatch_section", next_section_id="s1",
+                      subtask_goal="填写基本信息", reason="派发"),
+        PlannerOutput(decision="finish", done=True, reason="完成"),
+    ]
+    router = FakeRouter({
+        "planner": scripted(planner_script),
+        "actor": FlakyActorClient(ActionBatch(
+            actions=[Action(type="input_text", element_index=0, value="张三",
+                            reason="填姓名")],
+            section_complete=True, summary="填写姓名",
+        )),
+        "validator": scripted([ValidatorOutput(passed=True)]),
+    })
+    events = []
+    runner = AgentRunner(
+        task_id="t14", task_instruction="x", driver=driver, router=router,
+        executor=ActionExecutor(driver), profile=profile,
+        on_event=events.append,
+    )
+    report = await runner.run("https://example.com/apply")
+
+    assert runner.state == "AWAITING_REVIEW"  # 不再 FAILED
+    assert report.counts()["filled"] >= 1      # 重试后成功填写
+    assert any("Actor 输出异常" in e.summary for e in events)
+
+
+@pytest.mark.asyncio
+async def test_runner_planner_llm_failure_recovers() -> None:
+    """Planner 单次 LLM 失败：稍候重试后继续；连续 3 次才按部分完成收尾。"""
+    from autooffer_core.errors import LLMError
+
+    class FlakyPlannerClient(ScriptedLLMClient):
+        def __init__(self, script: list) -> None:
+            super().__init__(list(script))
+            self.raised = False
+
+        async def complete_json(self, messages, schema):  # type: ignore[no-untyped-def]
+            if not self.raised:
+                self.raised = True
+                raise LLMError("LLM 调用失败: 超时")
+            return await super().complete_json(messages, schema)
+
+    driver = FakeDriver(make_observation())
+    profile = build_sample_profile()
+    planner_script = [
+        PlannerOutput(decision="dispatch_section", next_section_id="s1",
+                      subtask_goal="填写基本信息", reason="派发"),
+        PlannerOutput(decision="finish", done=True, reason="完成"),
+    ]
+    router = FakeRouter({
+        "planner": FlakyPlannerClient(planner_script),
+        "actor": scripted([ActionBatch(
+            actions=[Action(type="input_text", element_index=0, value="张三",
+                            reason="填姓名")],
+            section_complete=True, summary="填写姓名",
+        )]),
+        "validator": scripted([ValidatorOutput(passed=True)]),
+    })
+    events = []
+    runner = AgentRunner(
+        task_id="t15", task_instruction="x", driver=driver, router=router,
+        executor=ActionExecutor(driver), profile=profile,
+        on_event=events.append,
+    )
+    report = await runner.run("https://example.com/apply")
+
+    assert runner.state == "AWAITING_REVIEW"
+    assert report.counts()["filled"] >= 1
+    assert any("Planner 输出异常" in e.summary for e in events)
+
+
+@pytest.mark.asyncio
 async def test_runner_advance_without_button_finishes_partial() -> None:
     """Planner 要翻页但无可见下一步按钮：按部分完成收尾，不判任务失败。
 

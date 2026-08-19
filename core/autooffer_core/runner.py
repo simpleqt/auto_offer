@@ -174,6 +174,8 @@ class AgentRunner:
         initial_prefill: float | None = None
         empty_obs_streak = 0
         """连续"无可交互元素"观察的次数；页面渲染中时等待重观察（有界，防空转）。"""
+        planner_llm_fails = 0
+        """Planner 连续 LLM 失败次数；达到 3 次按部分完成收尾，不判任务失败。"""
         while steps < self._config.max_steps:
             steps += 1
             obs = await self._driver.observe(with_screenshot=self._vision_next)
@@ -200,14 +202,31 @@ class AgentRunner:
                 f"{sid}《{title}》（{status}，勿再派发，剩余字段已记待确认）"
                 for sid, (title, status) in done_here.items()
             )
-            plan = await self._planner.plan(
-                task_instruction=self._instruction,
-                observation=obs,
-                checklist_text=self._checklist.to_text(),
-                history_text=self._history.to_text(),
-                forced_verify=initial_prefill >= self._config.prefill_threshold,
-                done_sections_text=done_text,
-            )
+            try:
+                plan = await self._planner.plan(
+                    task_instruction=self._instruction,
+                    observation=obs,
+                    checklist_text=self._checklist.to_text(),
+                    history_text=self._history.to_text(),
+                    forced_verify=initial_prefill >= self._config.prefill_threshold,
+                    done_sections_text=done_text,
+                )
+            except LLMError as exc:
+                # Planner 输出异常（截断/解析失败）：稍候重试；连续失败按部分完成收尾
+                planner_llm_fails += 1
+                self._emit("step", "runner", f"Planner 输出异常，稍后重试: {str(exc)[:100]}")
+                if planner_llm_fails >= 3:
+                    counts = self._checklist.counts()
+                    self._emit(
+                        "step", "runner",
+                        f"Planner 连续输出异常，按当前进度收尾（成功 {counts['filled']} / "
+                        f"待确认 {counts['pending_confirm']} / 失败 {counts['failed']}）",
+                    )
+                    self._history.add("Planner 连续输出异常，按部分完成收尾")
+                    return
+                await self._driver.wait(1.0)
+                continue
+            planner_llm_fails = 0
             self._emit(
                 "step", "planner", f"{plan.decision}: {plan.reason[:100]}",
                 section=plan.next_section_id, url=obs.url,
@@ -372,17 +391,28 @@ class AgentRunner:
                 else await self._driver.observe(with_screenshot=False)
             )
             elements = self._section_elements(observation, plan.next_section_id)
-            batch = await self._actor.act(
-                goal=goal,
-                mode=strategy,
-                observation=observation,
-                section_elements=elements,
-                catalog=self._catalog,
-                slice_values=slice_values,
-                extra_profile=extra_profile,
-                history_text=self._history.to_text(),
-                retry_advice=retry_advice,
-            )
+            try:
+                batch = await self._actor.act(
+                    goal=goal,
+                    mode=strategy,
+                    observation=observation,
+                    section_elements=elements,
+                    catalog=self._catalog,
+                    slice_values=slice_values,
+                    extra_profile=extra_profile,
+                    history_text=self._history.to_text(),
+                    retry_advice=retry_advice,
+                )
+            except LLMError as exc:
+                # 模型输出超长被截断/解析失败：压缩输出重试，不判任务失败
+                # （真实站点回归：整页字段多时模型试图一轮填完 → 触发长度上限）
+                retry_advice = (
+                    f"上轮模型输出异常（{str(exc)[:80]}）。请大幅精简："
+                    "单轮 actions 不超过 8 个，字段多分多轮完成，reason 一句话。"
+                )
+                self._history.add(f"Actor 输出异常: {exc}")
+                self._emit("step", "runner", f"Actor 输出异常，压缩后重试: {str(exc)[:100]}")
+                continue
             self._emit(
                 "step", "actor", batch.summary or f"输出 {len(batch.actions)} 个动作",
                 actions=[
