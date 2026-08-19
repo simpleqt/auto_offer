@@ -279,6 +279,42 @@ async def test_no_text_click_when_panel_not_open() -> None:
 
 
 @pytest.mark.asyncio
+async def test_fill_date_ym_year_month_picker() -> None:
+    """set_date（DateYM）打在年/月选择型 combobox 上：按"年→月"两级文本点击。
+
+    回归（真实站点）：出生日期是"请选择年份"型 combobox，set_date 路由到
+    下拉处理器后因目标非字符串直接报错、整批动作中断。
+    """
+    from autooffer_core.profile.schema import DateYM
+
+    class YearMonthDriver(FakeDriver):
+        def __init__(self, obs: PageObservation) -> None:
+            super().__init__(obs)
+            self.text_clicks: list[list[str]] = []
+
+        async def click_visible_text(self, texts: list[str]) -> str | None:
+            self.text_clicks.append(texts)
+            # 第 1 级点年、第 2 级点月
+            return texts[0]
+
+    trigger = _combobox(label="出生日期", selector="#birth")
+    driver = YearMonthDriver(
+        PageObservation(url="about:blank", title="", elements=[trigger])
+    )
+    ctx = ExecContext(driver=driver)
+
+    result = await DropdownHandler().fill(trigger, DateYM(year=2001, month=11), ctx)
+
+    assert result.ok is True
+    assert result.strategy == "date_text_click"
+    assert "2001" in result.detail and "11" in result.detail
+    # 两级文本点击：先年变体，再月变体
+    assert len(driver.text_clicks) == 2
+    assert driver.text_clicks[0][0] == "2001"
+    assert driver.text_clicks[1][0] == "11"
+
+
+@pytest.mark.asyncio
 async def test_already_expanded_skips_trigger_click() -> None:
     """控件已展开（上轮点开）时跳过触发器点击直接选选项。
 

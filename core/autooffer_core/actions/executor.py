@@ -100,10 +100,22 @@ class ActionExecutor:
     async def execute_batch(
         self, batch: ActionBatch, observation: PageObservation
     ) -> list[ExecResult]:
-        """顺序执行一批动作；遇 needs_human 中断（后续动作依赖人工结论）。"""
+        """顺序执行一批动作；遇 needs_human 中断（后续动作依赖人工结论）。
+
+        单个动作执行失败（ActionError）不再中断整批——记为 failed 结果继续
+        执行其余动作（真实站点回归：一个日历控件导航失败曾把整批填写全炸掉，
+        页面上只留下姓名和电话）。失败细节由上层并入重试建议。
+        """
         results: list[ExecResult] = []
         for action in batch.actions:
-            res = await self.execute(action, observation)
+            try:
+                res = await self.execute(action, observation)
+            except ActionError as exc:
+                res = ExecResult(
+                    action_type=action.type, status="failed",
+                    element_index=action.element_index, detail=str(exc)[:200],
+                )
+                log.info("action.batch_item_failed", error=str(exc)[:120])
             results.append(res)
             if res.status == "needs_human":
                 log.info("action.batch_interrupted", reason=res.detail)

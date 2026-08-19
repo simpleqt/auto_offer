@@ -483,7 +483,7 @@ class AgentRunner:
                 self._emit("step", "runner", f"Actor 输出异常，压缩后重试: {str(exc)[:100]}")
                 continue
             self._emit(
-                "step", "actor", batch.summary or f"输出 {len(batch.actions)} 个动作",
+                "step", "actor", (batch.summary or f"输出 {len(batch.actions)} 个动作")[:80],
                 actions=[
                     {
                         "type": a.type,
@@ -629,7 +629,7 @@ class AgentRunner:
 
             self._history.add(
                 f"区块「{section_title}」第{attempt}次: "
-                f"{'通过' if val.passed else '未通过'} {batch.summary}"
+                f"{'通过' if val.passed else '未通过'} {(batch.summary or '')[:60]}"
             )
             if needs_human:
                 # 回读与 checklist 已更新，再交人工（敏感按钮确认等）

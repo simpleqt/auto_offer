@@ -22,6 +22,7 @@ import structlog
 from autooffer_core.drivers.base import Driver
 from autooffer_core.errors import ActionError
 from autooffer_core.perception.models import PageObservation, UIElement
+from autooffer_core.profile.schema import DateYM
 from autooffer_core.widgets.base import ExecContext, FillResult
 from autooffer_core.widgets.matching import match_option
 
@@ -102,6 +103,10 @@ class DropdownHandler:
         return el.role in ("select", "combobox")
 
     async def fill(self, el: UIElement, target: Any, ctx: ExecContext) -> FillResult:
+        if isinstance(target, DateYM):
+            # 日期型目标（set_date 打在 combobox 角色的年/月选择器上）：
+            # 按"年 → 月"两级文本点击（真实站点出生日期=请选择年份型控件）
+            return await self._fill_date_ym(el, target, ctx)
         if not isinstance(target, str) or not target.strip():
             raise ActionError(f"下拉目标值必须为字符串: {target!r} (元素[{el.index}]{el.label})")
         target = target.strip()
@@ -162,6 +167,51 @@ class DropdownHandler:
         except Exception:  # noqa: BLE001
             return None
         return str(res) if res else None
+
+    async def _fill_date_ym(self, el: UIElement, d: DateYM, ctx: ExecContext) -> FillResult:
+        """年/月面板型日期 combobox：确保面板展开后按"年 → 月"两级文本点击。
+
+        各级多个文本变体（2001 / 2001年、11 / 11月）交给驱动的文本锚定点击
+        逐一尝试；某级未命中则止于已选部分（至少年份落地，月级失败给明确信号）。
+        """
+        if el.expanded is not True:
+            try:
+                await ctx.driver.click(el)
+                await ctx.driver.wait(0.3)
+            except Exception as exc:  # noqa: BLE001
+                log.info("dropdown.date_ym_open_failed", label=el.label, error=str(exc)[:80])
+        levels = [[str(d.year), f"{d.year}年"]]
+        if d.month:
+            levels.append([str(d.month), f"{d.month:02d}", f"{d.month}月"])
+        fn: Any = getattr(ctx.driver, "click_visible_text", None)
+        clicked: list[str] = []
+        for variants in levels:
+            hit: str | None = None
+            if callable(fn):
+                try:
+                    raw = await fn(variants)
+                    hit = str(raw) if raw else None
+                except Exception:  # noqa: BLE101
+                    hit = None
+            if hit is None:
+                matched = await _click_matched_option(
+                    ctx.driver, variants[0], skip_index=el.index
+                )
+                hit = matched[0] if matched else None
+            if hit is None:
+                break
+            clicked.append(hit)
+            await ctx.driver.wait(0.3)
+        if clicked:
+            detail = f"{'/'.join(clicked)} (date_ym, el={el.label})"
+            if d.month and len(clicked) < 2:
+                return FillResult(ok=False, strategy="date_text_click",
+                                  detail=f"{detail}；月份未命中")
+            return FillResult(ok=True, strategy="date_text_click", detail=detail)
+        return FillResult(
+            ok=False, strategy="date_text_click",
+            detail=f"年月面板未命中 {d.year}-{d.month or ''} (元素[{el.index}]{el.label})",
+        )
 
     async def _try_panel_click(
         self, el: UIElement, target: str, ctx: ExecContext
