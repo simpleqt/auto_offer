@@ -109,6 +109,15 @@ export default function SettingsPage() {
             <Switch />
           </Form.Item>
 
+          <Form.Item
+            name="auto_submit"
+            label="填写完成后自动提交"
+            valuePropName="checked"
+            extra="开启后：走完全部步骤即自动点击页面上的「提交/投递」按钮（默认关闭，由你人工审核后提交）"
+          >
+            <Switch />
+          </Form.Item>
+
           <Button type="primary" htmlType="submit" icon={<SaveOutlined />} loading={save.isPending}>
             保存设置
           </Button>

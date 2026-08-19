@@ -609,25 +609,27 @@
     const collected = [];
 
     const candidates = [...doc.querySelectorAll(INTERACTIVE_SELECTOR)];
+    const PANEL_SELECTOR =
+      '[class*="panel"], [class*="dropdown"], [class*="menu"], ' +
+      '[class*="popover"], [class*="picker"], [class*="popup"], ' +
+      '[class*="cascader"], [class*="combobox"], [role="listbox"]';
     // 类名启发式补充纯 div 自定义控件（包装器内已有交互元素则跳过，避免重复）。
-    // 位于交互元素（如 combobox 触发器）内部的节点一律不补——触发器里的值
-    // span/内联面板会与触发器本身重复提取成多个 combobox，污染元素表。
+    // 位于交互元素（如 combobox 触发器）或弹层容器内部的节点一律不补——
+    // 触发器里的值 span/内联面板会与触发器重复提取，弹层里的选项会被误判成
+    // combobox（选项类名常含 select 字样），Actor 会把选项当下拉框去点开。
     doc.querySelectorAll("[class]").forEach((el) => {
       if (candidates.length >= opts.maxElements) return;
       const cls = typeof el.className === "string" ? el.className : "";
       if (!cls || !(CUSTOM_CLASS_RE.test(cls) || DATE_CLASS_RE.test(cls))) return;
       if (el.matches(INTERACTIVE_SELECTOR)) return;
       if (el.closest && el.closest(INTERACTIVE_SELECTOR)) return;
+      if (el.closest && el.closest(PANEL_SELECTOR)) return;
       if (el.querySelector(INTERACTIVE_SELECTOR)) return;
       if (el.children.length > 3) return;
       if (!isCssVisible(el)) return;
       candidates.push(el);
     });
     // 已展开弹层内的选项项（自定义下拉/日历面板的叶子短文本，供选项点击与面板导航）
-    const PANEL_SELECTOR =
-      '[class*="panel"], [class*="dropdown"], [class*="menu"], ' +
-      '[class*="popover"], [class*="picker"], [class*="popup"], ' +
-      '[class*="cascader"], [class*="combobox"], [role="listbox"]';
     const panelItems = new Set();
     let panelCount = 0;
     doc.querySelectorAll(PANEL_SELECTOR).forEach((panel) => {

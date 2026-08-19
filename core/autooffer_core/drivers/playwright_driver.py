@@ -60,8 +60,17 @@ _CLICK_TEXT_JS = """
     '[class*="cascader"], [class*="option"], [role="listbox"], [role="option"]';
   const hits = [];
   for (const el of document.querySelectorAll('*')) {
-    if (el.children.length > 0) continue;
-    const t = norm(el.innerText);
+    // 候选：纯文本叶子，或"自有文本节点 + 图标等无文本子元素"的选项
+    // （<li>共青团员<i class=icon/></li> 形态：叶子规则匹配不到，需看直接文本节点）
+    let t = norm(el.children.length === 0 ? el.innerText : '');
+    if (!t) {
+      let own = '';
+      for (const n of el.childNodes) {
+        if (n.nodeType === 3) own += n.nodeValue || '';
+      }
+      t = norm(own);
+      if (t && norm(el.innerText) !== t) t = '';  // 含其它子元素文本的容器不算，防误配
+    }
     if (!t || t.length > 40 || targets.indexOf(t) === -1) continue;
     if (!visible(el)) continue;
     let score = 0;

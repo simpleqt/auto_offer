@@ -352,15 +352,17 @@ def test_settings_default_and_update(client: TestClient) -> None:
         "browser_mode": "managed",
         "cdp_endpoint": "",
         "minimize_on_startup": False,
+        "auto_submit": False,
     }
 
-    # 更新为 CDP 模式
+    # 更新为 CDP 模式 + 开启自动提交
     r = client.put(
         "/api/v1/settings",
         json={
             "browser_mode": "cdp",
             "cdp_endpoint": "http://127.0.0.1:9222",
             "minimize_on_startup": True,
+            "auto_submit": True,
         },
     )
     assert r.status_code == 200
@@ -368,9 +370,11 @@ def test_settings_default_and_update(client: TestClient) -> None:
     assert body["browser_mode"] == "cdp"
     assert body["cdp_endpoint"] == "http://127.0.0.1:9222"
     assert body["minimize_on_startup"] is True
+    assert body["auto_submit"] is True
 
     # 已持久化
     assert client.get("/api/v1/settings").json()["browser_mode"] == "cdp"
+    assert client.get("/api/v1/settings").json()["auto_submit"] is True
 
 
 def test_settings_rejects_invalid_browser_mode(client: TestClient) -> None:

@@ -76,17 +76,25 @@ class AgentTaskRunner:
             driver = PlaywrightDriver(headless=True)
 
         attachments = {a.label: a.path for a in profile.attachments}
+        auto_submit = bool(settings.get("auto_submit", False))
+        from autooffer_core.runner import RunnerConfig
+
         runner = AgentRunner(
             task_id=task_id,
             task_instruction=(
                 "自动填写这份简历/求职表单：直接用档案内容填写页面上的所有表单字段，"
                 "不要上传简历文件或任何附件；遇到文件上传控件请跳过并继续填写其余字段。"
-                "填完等待用户审核，不要提交。"
+                + (
+                    "多步表单请逐页点「下一步」走完全部步骤。"
+                    if auto_submit
+                    else "填完等待用户审核，不要提交。"
+                )
             ),
             driver=driver,
             router=router,
             executor=ActionExecutor(driver, attachments=attachments),
             profile=profile,
+            config=RunnerConfig(auto_submit=auto_submit),
             on_event=on_event,
             human_gate=human_gate,
         )

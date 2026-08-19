@@ -523,6 +523,165 @@ async def test_runner_coerces_daterange_on_birth_field() -> None:
 
 
 @pytest.mark.asyncio
+async def test_runner_finish_advances_wizard_before_ending() -> None:
+    """Planner 判定 finish 时页面还有"下一步"：先翻页走完向导再结束。
+
+    回归（真实站点）：基本信息填完后直接收尾退出，后续步骤（教育/工作经历）
+    完全没填——用户要求走完全部步骤。
+    """
+    step1 = PageObservation(
+        url="https://example.com/apply",
+        title="向导",
+        sections=[SectionInfo(id="s1", title="基本信息", element_start=0, element_end=0)],
+        elements=[
+            UIElement(index=0, tag="input", role="input", label="姓名", selector="#name"),
+            UIElement(index=1, tag="button", role="button", label="下一步", selector="#next"),
+        ],
+    )
+    step2 = PageObservation(
+        url="https://example.com/apply",
+        title="向导",
+        sections=[SectionInfo(id="s2", title="教育经历", element_start=0, element_end=0)],
+        elements=[
+            UIElement(index=0, tag="input", role="input", label="学校", selector="#school"),
+        ],
+    )
+
+    class PagedDriver(FakeDriver):
+        def __init__(self) -> None:
+            super().__init__(step1)
+            self._pages = [step1, step2]
+            self._n = 0
+
+        async def observe(self, *, with_screenshot: bool = True, scroll_full: bool = True):
+            self.calls.append(("observe", with_screenshot, scroll_full))
+            return self._pages[min(self._n, len(self._pages) - 1)]
+
+        def next_page(self) -> None:
+            self._n += 1
+
+    driver = PagedDriver()
+    orig_click = driver.click
+
+    async def click(el):  # type: ignore[no-untyped-def]
+        if el.index == 1:
+            driver.next_page()  # 点下一步切换到第 2 页
+        return await orig_click(el)
+
+    driver.click = click  # type: ignore[assignment]
+    profile = build_sample_profile()
+    planner_script = [
+        PlannerOutput(decision="dispatch_section", next_section_id="s1",
+                      subtask_goal="填写基本信息", reason="派发"),
+        PlannerOutput(decision="finish", done=True, reason="第 1 步完成"),
+        PlannerOutput(decision="dispatch_section", next_section_id="s2",
+                      subtask_goal="填写教育经历", reason="派发第 2 页"),
+        PlannerOutput(decision="finish", done=True, reason="全部完成"),
+    ]
+    router = FakeRouter({
+        "planner": scripted(planner_script),
+        "actor": scripted([ActionBatch(
+            actions=[Action(type="input_text", element_index=0, value="张三",
+                            reason="填姓名")],
+            section_complete=True, summary="填写",
+        )]),
+        "validator": scripted([ValidatorOutput(passed=True)]),
+    })
+    events = []
+    runner = AgentRunner(
+        task_id="t18", task_instruction="x", driver=driver, router=router,
+        executor=ActionExecutor(driver), profile=profile,
+        on_event=events.append,
+    )
+    report = await runner.run("https://example.com/apply")
+
+    # 第 1 页完成后没有直接结束：点了下一步，第 2 页的学校也填上了
+    assert ("click", 1) in driver.calls
+    assert driver.values.get(0) in ("张三", "某某大学")
+    assert report.counts()["filled"] >= 2
+    assert any("翻页" in e.summary for e in events)
+
+
+@pytest.mark.asyncio
+async def test_runner_auto_submit_when_enabled() -> None:
+    """开启自动提交：全部填写完成后点击提交按钮（绕过敏感门禁），状态 DONE。"""
+    submit_obs = PageObservation(
+        url="https://example.com/apply",
+        title="表单",
+        sections=[SectionInfo(id="s1", title="基本信息", element_start=0, element_end=1)],
+        elements=[
+            UIElement(index=0, tag="input", role="input", label="姓名", selector="#name"),
+            UIElement(index=1, tag="button", role="button", label="提交申请", selector="#submit"),
+        ],
+    )
+    driver = FakeDriver(submit_obs)
+    profile = build_sample_profile()
+    planner_script = [
+        PlannerOutput(decision="dispatch_section", next_section_id="s1",
+                      subtask_goal="填写基本信息", reason="派发"),
+        PlannerOutput(decision="finish", done=True, reason="完成"),
+    ]
+    router = FakeRouter({
+        "planner": scripted(planner_script),
+        "actor": scripted([ActionBatch(
+            actions=[Action(type="input_text", element_index=0, value="张三",
+                            reason="填姓名")],
+            section_complete=True, summary="填写",
+        )]),
+        "validator": scripted([ValidatorOutput(passed=True)]),
+    })
+    events = []
+    runner = AgentRunner(
+        task_id="t19", task_instruction="x", driver=driver, router=router,
+        executor=ActionExecutor(driver), profile=profile,
+        config=RunnerConfig(auto_submit=True),
+        on_event=events.append,
+    )
+    await runner.run("https://example.com/apply")
+
+    assert ("click", 1) in driver.calls  # 点了提交按钮（不经过门禁）
+    assert runner.state == "DONE"
+    assert any("自动提交" in e.summary for e in events)
+
+
+@pytest.mark.asyncio
+async def test_runner_auto_submit_off_keeps_review_state() -> None:
+    """默认不自动提交：保持 AWAITING_REVIEW，绝不点击提交按钮。"""
+    submit_obs = PageObservation(
+        url="https://example.com/apply",
+        title="表单",
+        sections=[SectionInfo(id="s1", title="基本信息", element_start=0, element_end=0)],
+        elements=[
+            UIElement(index=0, tag="input", role="input", label="姓名", selector="#name"),
+            UIElement(index=1, tag="button", role="button", label="提交申请", selector="#submit"),
+        ],
+    )
+    driver = FakeDriver(submit_obs)
+    profile = build_sample_profile()
+    router = FakeRouter({
+        "planner": scripted([
+            PlannerOutput(decision="dispatch_section", next_section_id="s1",
+                          subtask_goal="填写", reason="派发"),
+            PlannerOutput(decision="finish", done=True, reason="完成"),
+        ]),
+        "actor": scripted([ActionBatch(
+            actions=[Action(type="input_text", element_index=0, value="张三",
+                            reason="填姓名")],
+            section_complete=True, summary="填写",
+        )]),
+        "validator": scripted([ValidatorOutput(passed=True)]),
+    })
+    runner = AgentRunner(
+        task_id="t20", task_instruction="x", driver=driver, router=router,
+        executor=ActionExecutor(driver), profile=profile,
+    )
+    await runner.run("https://example.com/apply")
+
+    assert ("click", 1) not in driver.calls
+    assert runner.state == "AWAITING_REVIEW"
+
+
+@pytest.mark.asyncio
 async def test_runner_advance_without_button_finishes_partial() -> None:
     """Planner 要翻页但无可见下一步按钮：按部分完成收尾，不判任务失败。
 

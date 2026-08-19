@@ -73,6 +73,8 @@ class RunnerConfig(BaseModel):
     use_vision: bool = False
     """是否给 LLM 附 SoM 截图。默认纯 DOM 模式（对齐本地浏览器自动化实现：
     状态内联进元素表，无需视觉模型即可判定控件状态）。"""
+    auto_submit: bool = False
+    """全部填写完成后自动点击提交按钮（用户显式开启；绕过敏感门禁但全程留痕）。"""
 
 
 class AgentRunner:
@@ -146,6 +148,8 @@ class AgentRunner:
         没产生效果的动作禁止原样重复（尤其下拉触发器反复点击会 toggle 收起面板）。"""
         self._absent_advances: dict[str, int] = {}
         """区块不在当前页时自动点"下一步"的次数（按区块计，防一路翻完整个向导）。"""
+        self._finish_advances = 0
+        """收尾前自动翻页次数（多步表单还有后续步骤时不提前结束；上限 5）。"""
         self._field_failures: dict[str, int] = {}
         """字段级失败计数：连续失败达到阈值后放弃该字段，不再反复重试。"""
         self._vision_next = self._config.use_vision
@@ -183,7 +187,13 @@ class AgentRunner:
             await self._driver.open(url)
             await self._main_loop()
             if self.state == "RUNNING":
-                self._set_state("AWAITING_REVIEW", "填写完成，等待用户审核提交")
+                if self._config.auto_submit:
+                    if await self._try_auto_submit():
+                        self._set_state("DONE", "全部填写完成并已自动提交")
+                    else:
+                        self._set_state("AWAITING_REVIEW", "未找到提交按钮，等待人工提交")
+                else:
+                    self._set_state("AWAITING_REVIEW", "填写完成，等待用户审核提交")
         except AutoOfferError as exc:
             log.error("runner.failed", error=str(exc))
             self._set_state("FAILED", f"任务失败: {exc}")
@@ -191,6 +201,36 @@ class AgentRunner:
             report = self._build_report(url, started)
             self._emit("report", "runner", "填写报告生成", counts=report.counts())
         return report
+
+    _SUBMIT_WORDS: tuple[str, ...] = ("提交", "确认提交", "投递", "发送申请")
+
+    async def _try_auto_submit(self) -> bool:
+        """自动提交（用户在设置中显式开启）：点击可见的提交/投递按钮。
+
+        绕过敏感动作门禁是本功能的本意——门禁默认拦截提交正是为了把这个
+        决定权留给用户；开启即授权。全程事件留痕便于回溯。
+        """
+        obs = await self._driver.observe(with_screenshot=False, scroll_full=False)
+        target = next(
+            (
+                e for e in obs.elements
+                if e.visible and e.role in ("button", "link")
+                and any(k in (e.label or e.value) for k in self._SUBMIT_WORDS)
+            ),
+            None,
+        )
+        if target is None:
+            self._emit("step", "runner", "自动提交：未找到可见的提交按钮，转人工提交")
+            self._history.add("自动提交未找到提交按钮")
+            return False
+        self._emit(
+            "step", "runner",
+            f"自动提交：点击「{target.label}」（用户已开启自动提交）",
+        )
+        self._history.add(f"自动提交: 点击 {target.label}")
+        await self._driver.click(target)
+        await self._driver.wait(1.5)
+        return True
 
     async def _main_loop(self) -> None:
         steps = 0
@@ -258,6 +298,12 @@ class AgentRunner:
             self._history.add(f"Planner 决策 {plan.decision}({plan.strategy}) {plan.reason}")
 
             if plan.decision == "finish" or plan.done:
+                # 收尾前若页面还有可见的"下一步/保存并继续"：多步表单后续步骤
+                # 未走完，先翻页继续（有界）；最后一步没有下一步按钮，正常结束
+                if self._finish_advances < 5 and await self._try_advance(obs):
+                    self._finish_advances += 1
+                    self._history.add("收尾前发现下一步按钮，翻页继续后续步骤")
+                    continue
                 return
             if plan.decision == "fail":
                 # 兜底：只要已有字段填写成功或已记入待确认，就按「部分完成」正常结束，

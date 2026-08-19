@@ -117,3 +117,6 @@ class AppSettings(BaseModel):
 
     minimize_on_startup: bool = False
     """主窗口启动后自动最小化。"""
+
+    auto_submit: bool = False
+    """全部步骤填写完成后自动点击提交按钮（默认关闭，提交由用户人工完成）。"""

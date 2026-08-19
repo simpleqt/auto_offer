@@ -326,6 +326,7 @@ export interface AppSettings {
   browser_mode: BrowserMode;
   cdp_endpoint: string;
   minimize_on_startup: boolean;
+  auto_submit: boolean;
 }
 
 // ---------- WebSocket 事件 ----------

@@ -24,6 +24,7 @@
     .bd-list { list-style: none; margin: 0; padding: 0; }
     .bd-item { padding: 6px 16px; cursor: pointer; }
     .bd-item:hover { background: #f0f6ff; }
+    .bd-ic { display: inline-block; width: 14px; height: 14px; background: #c5c8ce; margin-left: 8px; }
     .btn-next { margin-top: 16px; padding: 6px 24px; }
   </style>
 </head>
@@ -70,12 +71,13 @@
     <button type="button" id="btn-submit">提交申请</button>
   </div>
 </div>
-<!-- 北森风格传送门面板：挂在 body 尾部、类名不含任何提取提示、选项带嵌套 span
-     （感知层提取不到选项 → 走驱动"文本锚定点击"兜底） -->
+<!-- 北森风格传送门面板：挂在 body 尾部、类名不含任何提取提示、选项为
+     "自有文本节点 + 图标兄弟"结构（li 直接含文本和 <i> 图标，无纯文本叶子——
+     感知层提取不到选项 → 走驱动"文本锚定点击"的自有文本匹配兜底） -->
 <div class="bd-layer" id="gender-panel" style="display:none">
   <ul class="bd-list">
-    <li class="bd-item"><span>男</span></li>
-    <li class="bd-item"><span>女</span></li>
+    <li class="bd-item">男<i class="bd-ic"></i></li>
+    <li class="bd-item">女<i class="bd-ic"></i></li>
   </ul>
 </div>
 <script>

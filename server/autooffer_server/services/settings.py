@@ -20,6 +20,7 @@ DEFAULTS: dict[str, Any] = {
     "browser_mode": "managed",
     "cdp_endpoint": "",
     "minimize_on_startup": False,
+    "auto_submit": False,
 }
 
 _ALLOWED_KEYS = set(DEFAULTS)
