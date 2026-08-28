@@ -166,7 +166,10 @@ function renderReport(report) {
   const list = $("report-list");
   list.innerHTML = "";
   const rows = [
-    ...(report.filled || []).map((r) => ["filled", `✓ ${r.label} = ${r.value}`]),
+    ...(report.filled || []).map((r) => [
+      "filled",
+      `✓ ${r.label} = ${r.value}${r.via === "ai" ? "（AI映射）" : ""}`,
+    ]),
     ...(report.failed || []).map((r) => ["failed", `✗ ${r.label}：${r.reason}`]),
     ...(report.skipped || []).map((r) => ["skipped", `— ${r.field}：${r.reason}`]),
   ];

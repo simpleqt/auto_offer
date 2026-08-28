@@ -33,10 +33,13 @@ async def page() -> AsyncIterator[Page]:
         await browser.close()
 
 
-async def autofill(page: Page, flat: dict[str, Any]) -> dict[str, Any]:
+async def autofill(
+    page: Page, flat: dict[str, Any], options: dict[str, Any] | None = None
+) -> dict[str, Any]:
     await page.add_script_tag(path=str(CONTENT_JS))
     return await page.evaluate(
-        "profile => window.__AUTOOFFER_CONTENT__.autofill(profile)", flat
+        "(args) => window.__AUTOOFFER_CONTENT__.autofill(args.p, args.o)",
+        {"p": flat, "o": options or {}},
     )
 
 
@@ -151,6 +154,32 @@ async def test_moka_like_element_fill(page: Page) -> None:
     assert await page.is_checked("#m-agree")
     edu_value = await page.eval_on_selector("#m-edu input", "el => el.value")
     assert edu_value == "硕士"
+
+
+async def test_ai_mapping_pass_fills_leftover(page: Page) -> None:
+    """AI 映射通道：别名表没有的问法（应聘方向）经 mapping 直通补填。"""
+    await page.goto(fixture_url("moka_like.html"))
+    flat: dict[str, Any] = {
+        "schema": 1,
+        "profile": {"id": "demo", "label": "示例档案"},
+        "sections": [
+            {
+                "key": "intention",
+                "title": "求职意向",
+                "kind": "simple",
+                "values": {"意向岗位": "LLM 应用开发工程师"},
+            }
+        ],
+    }
+    # 第一段：规则分不足（「应聘方向」与「意向岗位」无词元重合）→ 跳过并上报
+    first = await autofill(page, flat)
+    assert await page.input_value("#m-direction") == ""
+    assert any(u["label"] == "应聘方向" for u in first["unmatched"])
+
+    # 第二段：带 AI 映射补填
+    second = await autofill(page, flat, {"mapping": {"应聘方向": "意向岗位"}})
+    assert await page.input_value("#m-direction") == "LLM 应用开发工程师"
+    assert any(f["label"] == "应聘方向" for f in second["filled"])
 
 
 async def test_hard_vetoes(page: Page) -> None:

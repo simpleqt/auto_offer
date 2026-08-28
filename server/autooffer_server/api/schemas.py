@@ -120,3 +120,28 @@ class AppSettings(BaseModel):
 
     auto_submit: bool = False
     """全部步骤填写完成后自动点击提交按钮（默认关闭，提交由用户人工完成）。"""
+
+
+class MappingFieldIn(BaseModel):
+    """待映射的页面字段（仅标签/区块/选项文本，不含任何值）。"""
+
+    label: str
+    section: str | None = None
+    options: list[str] = []
+
+
+class MappingIn(BaseModel):
+    profile_id: str
+    fields: list[MappingFieldIn] = []
+
+
+class MappingMatchOut(BaseModel):
+    field_label: str
+    profile_label: str
+    confidence: float
+
+
+class MappingOut(BaseModel):
+    """AI 字段映射结果：页面标签 → 档案标签。"""
+
+    matches: list[MappingMatchOut] = []

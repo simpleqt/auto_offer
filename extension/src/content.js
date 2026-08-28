@@ -171,9 +171,17 @@
     现居住城市: ["当前居住地", "现居城市", "居住城市", "现居住地"],
     籍贯: ["祖籍", "家乡"],
     政治面貌: ["政治状态"],
-    意向岗位: ["应聘岗位", "期望岗位", "求职岗位", "意向职位", "期望职位", "申请岗位"],
-    期望城市: ["期望工作城市", "意向城市", "希望工作地"],
+    意向岗位: [
+      "应聘岗位", "期望岗位", "求职岗位", "意向职位", "期望职位", "申请岗位",
+      "期望从事职业", "从事职业", "期望工作", "应聘职位",
+    ],
+    期望城市: ["期望工作城市", "意向城市", "希望工作地", "期望工作地点"],
     期望薪资: ["期望薪资范围", "薪资要求", "期望年薪", "年薪范围"],
+    "期望月薪(税前)": ["期望月薪", "期望月薪（税前）", "月薪(税前)", "期望月薪范围", "税前期望月薪"],
+    "现月薪(税前)": ["现月薪", "目前月薪", "当前月薪", "现月薪（税前）", "上月薪资"],
+    期望从事行业: ["期望行业", "意向行业", "期望行业方向", "希望从事行业"],
+    国籍: ["nationality", "国家", "国籍（国家或地区）"],
+    工作年限: ["工作年数", "参加工作年限", "年限", "工作经历年限"],
     自我评价: ["自我描述", "个人评价", "自我介绍"],
     专业技能: ["技能特长", "IT技能", "计算机技能"],
     开始时间: ["起始时间", "从何时开始"],
@@ -636,7 +644,8 @@
         const sel = (container || el).querySelector(
           '[class*="selection-item"],[class*="selected-item"],[class*="selected"]:not([class*="unselected"])'
         );
-        currentValue = norm(sel ? sel.textContent : "", 80);
+        // Phoenix 等组件会把选中值写进内嵌 input 的 value
+        currentValue = norm(el.value || (sel ? sel.textContent : ""), 80);
       } else {
         currentValue = norm(el.value || "", 80);
       }
@@ -832,10 +841,19 @@
   const SCORE_THRESHOLD = 55;
   const SCORE_THRESHOLD_PREFILLED = 84;
 
-  function buildPlan(fields, entries) {
+  function buildPlan(fields, entries, mapping) {
     const candidates = [];
     for (let fi = 0; fi < fields.length; fi += 1) {
       const field = fields[fi];
+      // AI 映射直通：页面标签 → 档案标签（仍过值形否决保险）
+      const mappedLabel = mapping && field.label ? mapping[field.label] : null;
+      if (mappedLabel) {
+        const ei = entries.findIndex((e) => e.label === mappedLabel);
+        if (ei >= 0 && !shapeConflict(field, entries[ei]) && !field.currentValue) {
+          candidates.push({ fi, ei, score: 999 });
+          continue;
+        }
+      }
       for (let ei = 0; ei < entries.length; ei += 1) {
         const entry = entries[ei];
         const score = scoreField(field, entry);
@@ -1322,11 +1340,12 @@
 
   // ---------- 主入口 ----------
 
-  async function autofill(flatProfile) {
+  async function autofill(flatProfile, options) {
     const adapter = detectSiteAdapter();
     const { fields, uploads } = scanFields(adapter);
     const entries = buildEntries(flatProfile);
-    const { plan, usedFields } = buildPlan(fields, entries);
+    const mapping = (options && options.mapping) || null;
+    const { plan, usedFields } = buildPlan(fields, entries, mapping);
 
     const filled = [];
     const failed = [];
@@ -1367,13 +1386,29 @@
     }
 
     const skipped = [];
+    const unmatched = [];
     for (let i = 0; i < fields.length; i += 1) {
       if (usedFields.has(i)) {
         continue;
       }
       const f = fields[i];
       const label = f.label || f.nearbyText || "(无标签)";
-      skipped.push({ field: label, reason: f.currentValue ? "已有值，跳过" : "无匹配档案字段" });
+      if (f.currentValue) {
+        skipped.push({ field: label, reason: "已有值，跳过" });
+      } else {
+        skipped.push({ field: label, reason: "无匹配档案字段" });
+        // 供 AI 映射通道二次补填（只带标签/选项文本，不带任何值）
+        if (label !== "(无标签)" && unmatched.length < 60) {
+          unmatched.push({
+            label,
+            section: f.section || "",
+            options: String(f.optionText || "")
+              .split(/[\s,，、]+/)
+              .filter(Boolean)
+              .slice(0, 20),
+          });
+        }
+      }
     }
     for (const up of uploads) {
       const { containerSelector: cs } = getAdapterSelectors(adapter);
@@ -1387,6 +1422,7 @@
       filled,
       failed,
       skipped,
+      unmatched,
     };
   }
 
@@ -1405,7 +1441,7 @@
   if (typeof chrome !== "undefined" && chrome.runtime && chrome.runtime.onMessage) {
     chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
       if (msg && msg.type === "autooffer:fill") {
-        autofill(msg.profile || {})
+        autofill(msg.profile || {}, { mapping: msg.mapping || null })
           .then(sendResponse)
           .catch((err) => sendResponse({ error: String((err && err.message) || err) }));
         return true; // 异步响应

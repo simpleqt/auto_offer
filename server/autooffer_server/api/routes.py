@@ -19,6 +19,8 @@ from autooffer_server.api.schemas import (
     AppSettings,
     EndpointIn,
     EndpointOut,
+    MappingIn,
+    MappingOut,
     ProfileIn,
     ProfileSummary,
     RoutingIn,
@@ -186,6 +188,33 @@ async def get_profile_flat(
     if payload is None:
         raise HTTPException(404, f"档案不存在: {profile_id}")
     return flatten_profile(payload, include_sensitive=sensitive)
+
+
+@router.post("/mapping", response_model=MappingOut)
+async def map_fields_api(request: Request, body: MappingIn) -> dict[str, Any]:
+    """AI 字段映射（M2）：页面字段标签 → 档案字段标签。
+
+    隐私契约：请求只含标签/选项文本；LLM 提示词只含标签目录，档案值不出服务。
+    """
+    from autooffer_server.services.flat_profile import flatten_profile
+    from autooffer_server.services.mapping import PageField, map_fields
+
+    ctx = _ctx(request)
+    payload: dict[str, Any] | None = await ctx.repo.get_profile(body.profile_id)
+    if payload is None:
+        raise HTTPException(404, f"档案不存在: {body.profile_id}")
+    if not body.fields:
+        return {"matches": []}
+    flat = flatten_profile(payload, include_sensitive=False)
+    try:
+        llm = await ctx.build_llm("profile_parser")
+    except LookupError as exc:
+        raise HTTPException(503, f"映射需要可用的模型端点: {exc}") from exc
+    page_fields = [
+        PageField(label=f.label, section=f.section, options=f.options) for f in body.fields
+    ]
+    matches = await map_fields(page_fields, flat, llm)
+    return {"matches": [m.model_dump() for m in matches]}
 
 
 @router.put("/profiles/{profile_id}")

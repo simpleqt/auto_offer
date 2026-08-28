@@ -54,6 +54,10 @@ class BasicInfo(BaseModel):
     native_place: str | None = None
     current_city: str | None = None
     political_status: str | None = None
+    nationality: str | None = None
+    """国籍（招聘表常见必填，如「中国」）。"""
+    work_years: str | None = None
+    """工作年限（如「应届毕业生」「3年」），校园投递常问。"""
     id_number: str | None = Field(default=None, json_schema_extra=RESTRICTED)
 
 
@@ -61,6 +65,11 @@ class JobIntention(BaseModel):
     position: str | None = None
     city: list[str] = []
     salary_expectation: str | None = None
+    """期望薪资/期望月薪（如「20-30K」）。"""
+    current_salary: str | None = None
+    """现月薪（税前），社招/校招表常见。"""
+    expected_industry: str | None = None
+    """期望从事行业（如「人工智能/互联网」）。"""
     available_date: DateYM | None = None
 
 

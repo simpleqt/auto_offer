@@ -16,11 +16,11 @@ async function apiBase() {
   return aoApiBase || DEFAULT_API;
 }
 
-async function fetchJson(url, timeoutMs = 4000) {
+async function fetchJson(url, init = undefined, timeoutMs = 8000) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    const resp = await fetch(url, { signal: controller.signal });
+    const resp = await fetch(url, { ...init, signal: controller.signal });
     if (!resp.ok) {
       throw new Error(`HTTP ${resp.status}`);
     }
@@ -46,6 +46,37 @@ async function handleStatus() {
   }
 }
 
+async function runFillPass(tabId, flat, mapping) {
+  const report = await chrome.tabs.sendMessage(tabId, {
+    type: "autooffer:fill",
+    profile: flat,
+    mapping,
+  });
+  if (!report || report.error) {
+    throw new Error((report && report.error) || "内容脚本未返回报告");
+  }
+  return report;
+}
+
+function mergeReports(primary, secondary) {
+  // 第二段只统计「新增」的填写：已在第一段填过的标签去重
+  const filledLabels = new Set(primary.filled.map((r) => r.label));
+  const newFilled = secondary.filled.filter((r) => !filledLabels.has(r.label));
+  const newFailed = secondary.failed.filter((r) => !filledLabels.has(r.label));
+  return {
+    site: primary.site || secondary.site,
+    counts: {
+      filled: primary.counts.filled + newFilled.length,
+      failed: primary.counts.failed + newFailed.length,
+      skipped: secondary.counts.skipped,
+    },
+    filled: [...primary.filled, ...newFilled],
+    failed: [...primary.failed, ...newFailed],
+    skipped: secondary.skipped,
+    unmatched: secondary.unmatched || [],
+  };
+}
+
 async function handleAutofill(msg) {
   const base = await apiBase();
   const tabId = msg.tabId;
@@ -60,13 +91,40 @@ async function handleAutofill(msg) {
     target: { tabId },
     files: ["src/content.js"],
   });
-  const report = await chrome.tabs.sendMessage(tabId, {
-    type: "autooffer:fill",
-    profile: flat,
-  });
-  if (!report || report.error) {
-    throw new Error((report && report.error) || "内容脚本未返回报告");
+
+  // 第一段：本地规则直填（零 LLM）
+  let report = await runFillPass(tabId, flat, null);
+
+  // 第二段：规则未命中的字段交 AI 映射（仅标签，不含任何值）
+  const unmatched = report.unmatched || [];
+  if (unmatched.length > 0 && msg.aiMapping !== false) {
+    try {
+      const mappingResp = await fetchJson(
+        `${base}/api/v1/mapping`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ profile_id: msg.profileId, fields: unmatched }),
+        },
+        60000
+      );
+      const matches = (mappingResp && mappingResp.matches) || [];
+      if (matches.length > 0) {
+        const mappingUsed = {};
+        for (const m of matches) {
+          mappingUsed[m.field_label] = m.profile_label;
+        }
+        const second = await runFillPass(tabId, flat, mappingUsed);
+        for (const row of second.filled) {
+          row.via = "ai";
+        }
+        report = mergeReports(report, second);
+      }
+    } catch (err) {
+      report.mappingError = String((err && err.message) || err);
+    }
   }
+
   const { aoHistory = [] } = await chrome.storage.local.get("aoHistory");
   aoHistory.unshift({
     ts: Date.now(),

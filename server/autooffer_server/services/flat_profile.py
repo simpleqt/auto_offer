@@ -115,6 +115,8 @@ class _Flattener:
             "籍贯": basic.native_place,
             "现居住城市": basic.current_city,
             "政治面貌": basic.political_status,
+            "国籍": basic.nationality,
+            "工作年限": basic.work_years,
         }
         if self.include_sensitive and "id_number" in _SENSITIVE_BASIC:
             values["身份证号"] = basic.id_number
@@ -125,7 +127,9 @@ class _Flattener:
         values: dict[str, Any] = {
             "意向岗位": it.position if it else None,
             "期望城市": "、".join(it.city) if it and it.city else None,
-            "期望薪资": it.salary_expectation if it else None,
+            "期望月薪(税前)": it.salary_expectation if it else None,
+            "现月薪(税前)": it.current_salary if it else None,
+            "期望从事行业": it.expected_industry if it else None,
             "可到岗时间": _fmt_date(it.available_date) if it else None,
             "出差意愿": ext.travel_willingness if ext else None,
             "接受工作地调剂": ext.relocation_willingness if ext else None,

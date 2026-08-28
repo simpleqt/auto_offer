@@ -83,6 +83,10 @@ export interface BasicInfo {
   native_place: string | null;
   current_city: string | null;
   political_status: string | null;
+  /** 招聘表常见必填。 */
+  nationality: string | null;
+  /** 如「应届毕业生」「3年」。 */
+  work_years: string | null;
   /** restricted 级：命中时需界面单独授权。 */
   id_number: string | null;
 }
@@ -91,6 +95,10 @@ export interface JobIntention {
   position: string | null;
   city: string[];
   salary_expectation: string | null;
+  /** 现月薪（税前）。 */
+  current_salary: string | null;
+  /** 期望从事行业。 */
+  expected_industry: string | null;
   available_date: DateYM | null;
 }
 

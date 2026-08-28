@@ -70,6 +70,23 @@ export function BasicFields() {
           </Form.Item>
         </Col>
       </Row>
+      <Row gutter={12}>
+        <Col span={8}>
+          <Form.Item name={['basic', 'nationality']} label="国籍">
+            <Input placeholder="如 中国" />
+          </Form.Item>
+        </Col>
+        <Col span={8}>
+          <Form.Item name={['basic', 'work_years']} label="工作年限">
+            <Input placeholder="如 应届毕业生 / 3年" />
+          </Form.Item>
+        </Col>
+        <Col span={8}>
+          <Form.Item name={['intention', 'expected_industry']} label="期望从事行业">
+            <Input placeholder="如 人工智能 / 互联网" />
+          </Form.Item>
+        </Col>
+      </Row>
       <Divider orientation="left" plain>
         求职意向
       </Divider>
@@ -85,8 +102,20 @@ export function BasicFields() {
           </Form.Item>
         </Col>
         <Col span={8}>
-          <Form.Item name={['intention', 'salary_expectation']} label="期望薪资">
-            <Input placeholder="如 15-20k" />
+          <Form.Item name={['intention', 'salary_expectation']} label="期望月薪">
+            <Input placeholder="如 20-30K" />
+          </Form.Item>
+        </Col>
+      </Row>
+      <Row gutter={12}>
+        <Col span={8}>
+          <Form.Item name={['intention', 'current_salary']} label="现月薪(税前)">
+            <Input placeholder="如 5K / 面议" />
+          </Form.Item>
+        </Col>
+        <Col span={8}>
+          <Form.Item name={['intention', 'available_date']} label="可到岗时间">
+            <DatePicker picker="month" style={{ width: '100%' }} />
           </Form.Item>
         </Col>
       </Row>

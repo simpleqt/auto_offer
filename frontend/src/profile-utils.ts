@@ -38,6 +38,8 @@ export function emptyProfile(id = ''): Profile {
       native_place: null,
       current_city: null,
       political_status: null,
+      nationality: null,
+      work_years: null,
       id_number: null,
     },
     intention: null,

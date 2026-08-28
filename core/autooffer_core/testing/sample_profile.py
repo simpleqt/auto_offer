@@ -37,11 +37,15 @@ def build_sample_profile() -> Profile:
             native_place="四川成都",
             current_city="成都",
             political_status="共青团员",
+            nationality="中国",
+            work_years="应届毕业生",
         ),
         intention=JobIntention(
             position="算法工程师",
             city=["成都", "北京"],
             salary_expectation="20-30K",
+            current_salary="3K",
+            expected_industry="人工智能",
             available_date=DateYM(year=2026, month=7),
         ),
         education=[

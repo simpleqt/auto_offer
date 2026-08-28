@@ -44,6 +44,13 @@ def test_flat_default_excludes_sensitive(client: TestClient) -> None:
     assert basic["姓名"] == "张三"
     assert basic["手机号码"] == "13800001111"
     assert basic["出生日期"] == "2002-05-12"
+    assert basic["国籍"] == "中国"
+    assert basic["工作年限"] == "应届毕业生"
+
+    intention = next(s for s in body["sections"] if s["key"] == "intention")["values"]
+    assert intention["期望从事行业"] == "人工智能"
+    assert intention["现月薪(税前)"] == "3K"
+    assert intention["期望月薪(税前)"] == "20-30K"
 
     edu = next(s for s in body["sections"] if s["key"] == "education")["items"][0]
     assert edu["学校"] == "示例大学"
