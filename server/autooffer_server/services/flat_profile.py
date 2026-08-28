@@ -44,11 +44,18 @@ def _fmt_date(d: DateYM | None) -> str:
     return f"{d.year:04d}"
 
 
+def _fmt_month(d: DateYM | None) -> str:
+    """年月精度（教育/经历时段的站点控件均为月份选择器，日为解析噪音）。"""
+    if d is None:
+        return ""
+    return f"{d.year:04d}-{d.month or 1:02d}"
+
+
 def _period_values(period: DateRange | None) -> dict[str, str]:
     if period is None:
         return {}
-    out = {"开始时间": _fmt_date(period.start)}
-    out["结束时间"] = _fmt_date(period.end) if period.end else "至今"
+    out = {"开始时间": _fmt_month(period.start)}
+    out["结束时间"] = _fmt_month(period.end) if period.end else "至今"
     return out
 
 

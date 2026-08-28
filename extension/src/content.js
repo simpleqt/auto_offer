@@ -37,11 +37,12 @@
     '[role="checkbox"]',
   ].join(",");
 
-  // 面板（下拉/弹层/选择器）。选项常渲染在 body 下的 portal 里。
+  // 面板（下拉/弹层/选择器/日历）。选项常渲染在 body 下的 portal 里。
   const PANEL_SELECTOR = [
     '[role="listbox"]',
+    ".common-unmodeled-layer",
+    '[class*="unmodeled-layer"]',
     '[class*="select-dropdown"]',
-    '[class*="select-dropdown-hidden"]',
     '[class*="cascader"]',
     '[class*="picker-dropdown"]',
     '[class*="dropdown"]',
@@ -84,9 +85,9 @@
       name: "智易/北森 ATS",
       urlPattern: /(?:^|\.)(?:zhiye\.com|beisen\.com|italent\.cn|italentx\.cn|italentx\.com)$/i,
       confidence: 0.94,
-      indicators: [".ant-form-item", ".ant-select", '[class*="form-item"]', '[class*="formItem"]', '[class*="bs-"]'],
-      containerSelector: ".ant-form-item,.el-form-item,.form-item,[class*='formItem'],[class*='FormItem'],[class*='field'],[class*='Field']",
-      labelSelector: ".ant-form-item-label,.el-form-item__label,label,[class*='label'],[class*='Label'],[class*='formLabel']",
+      indicators: [".ant-form-item", ".ant-select", ".form-item--phoenix", ".phoenix-select", ".phoenix-radio", '[class*="form-item"]'],
+      containerSelector: ".ant-form-item,.el-form-item,.form-item--phoenix,.form-item,.form-item,[class*='formItem'],[class*='FormItem'],[class*='field'],[class*='Field']",
+      labelSelector: ".ant-form-item-label,.el-form-item__label,.form-item__text,label,[class*='label'],[class*='Label'],[class*='formLabel']",
       sectionSelector: ".ant-card-head-title,.el-card__header,.form-section-title,[class*='sectionTitle'],[class*='module-title'],h2,h3,h4",
       repeatItemSelector: ".ant-card,.ant-collapse-item,.el-card,[class*='list-item'],[class*='resume-item'],[class*='record-item']",
     },
@@ -657,7 +658,71 @@
         required: Boolean(container && container.querySelector(".ant-form-item-required,[class*='required'],[required]")),
       });
     }
+    /**
+     * 自绘单选/复选组扫描（北森 Phoenix 等无原生 input 的组件）。
+     * 容器类名含 radio-group/checkbox-group，选项为带短文本的子项；
+     * 含原生 input 的组走通用控件路径，此处跳过避免重复。
+     */
+    const seenGroups = new Set();
+    for (const group of document.querySelectorAll('[class*="radio-group"],[class*="checkbox-group"]')) {
+      if (!isVisible(group) || seenGroups.has(group)) {
+        continue;
+      }
+      if (group.parentElement && group.parentElement.closest('[class*="radio-group"],[class*="checkbox-group"]')) {
+        continue;
+      }
+      if (group.querySelector('input[type="radio"],input[type="checkbox"]')) {
+        continue;
+      }
+      seenGroups.add(group);
+      const items = Array.from(group.children).filter((c) => {
+        const t = norm(c.textContent, 30);
+        return isVisible(c) && t && t.length <= 20;
+      });
+      if (items.length < 2) {
+        continue;
+      }
+      const row =
+        group.closest('[class*="form-item"],[class*="field"],.form-group') || group.parentElement;
+      // [class*="form-item"] 会子串命中 form-item__control 等内层，向上取最外层
+      let outer = row;
+      for (let i = 0; i < 5 && outer.parentElement; i += 1) {
+        if (String(outer.parentElement.className || "").includes("form-item")) {
+          outer = outer.parentElement;
+        } else {
+          break;
+        }
+      }
+      const rowOuter = outer;
+      let label = "";
+      const titleEl =
+        rowOuter &&
+        (rowOuter.querySelector('[class*="__title"]') ||
+          rowOuter.querySelector('[class*="-label"],label'));
+      if (titleEl && !titleEl.contains(group)) {
+        label = norm(titleEl.textContent, 60);
+      }
+      fields.push({
+        element: items[0],
+        items,
+        groupEl: group,
+        container: rowOuter,
+        label,
+        section: findSectionText(group, sectionSelector),
+        nearbyText: norm(rowOuter ? rowOuter.textContent : group.textContent, 160),
+        optionText: items.map((i) => norm(i.textContent, 10)).join(" "),
+        currentValue: readGroupCheckedText(group),
+        kind: "custom-group",
+        required: Boolean(rowOuter && rowOuter.querySelector("[class*='required'],[required]")),
+      });
+    }
     return { fields, uploads };
+  }
+
+  /** 自绘组当前选中项文本（无选中返回空串）。 */
+  function readGroupCheckedText(group) {
+    const checked = group.querySelector('[class*="checked"],[class*="selected"],[class*="active"]');
+    return checked ? norm(checked.textContent, 40) : "";
   }
 
   // ---------- 档案条目 ----------
@@ -810,20 +875,79 @@
     return container || el.parentElement || el;
   }
 
-  /** 收集可见选项：容器内优先，随后全局 portal 面板。 */
+  /** 收集当前可见弹层（portal 渲染的下拉/日历/级联）。 */
+  function findPopupLayers() {
+    const layers = [];
+    for (const el of document.querySelectorAll(PANEL_SELECTOR)) {
+      if (!isVisible(el)) {
+        continue;
+      }
+      const r = el.getBoundingClientRect();
+      if (r.width < 30 || r.height < 20) {
+        continue;
+      }
+      // 跳过嵌套层：祖先弹层已覆盖
+      if (layers.some((x) => x.contains(el))) {
+        continue;
+      }
+      layers.push(el);
+    }
+    return layers;
+  }
+
+  /**
+   * 收集叶子选项：无文本子节点的元素（图标 svg/i 不算文本）。
+   * 兜底覆盖无语义类名的自定义面板（如北森学历下拉的裸 div 选项）。
+   */
+  function collectLeafOptions(root, out, seen) {
+    let count = 0;
+    for (const el of root.querySelectorAll("*")) {
+      if (count > 400 || seen.has(el) || !isVisible(el)) {
+        continue;
+      }
+      const hasTextualChild = Array.from(el.children).some(
+        (c) => norm(c.textContent, 10).length > 0
+      );
+      if (hasTextualChild) {
+        continue;
+      }
+      const text = norm(el.textContent, 40);
+      if (!text || text.length > 25) {
+        continue;
+      }
+      const r = el.getBoundingClientRect();
+      if (r.height === 0 || r.height > 60 || r.width === 0) {
+        continue;
+      }
+      seen.add(el);
+      out.push(el);
+      count += 1;
+    }
+  }
+
+  /** 收集可见选项：语义选择器优先，弹层叶子兜底，最后容器内叶子（内联下拉）。 */
   function findVisibleChoiceOptions(container) {
     const found = [];
     const seen = new Set();
-    const roots = [container, document.body];
+    const semantic = [
+      '[role="option"]',
+      "[aria-selected]",
+      '[class*="option"]',
+      '[class*="area-text-label"]',
+      "li",
+      ".ant-select-item-option",
+      ".el-select-dropdown__item",
+      ".arco-select-option",
+      ".t-select-option",
+    ].join(",");
+    const roots = [container, ...findPopupLayers()];
     for (const root of roots) {
       if (!root) {
         continue;
       }
       let nodes = [];
       try {
-        nodes = root.querySelectorAll(
-          '[role="option"],[aria-selected],[class*="option"],li,.ant-select-item-option,.el-select-dropdown__item,.arco-select-option,.t-select-option'
-        );
+        nodes = root.querySelectorAll(semantic);
       } catch {
         continue;
       }
@@ -831,7 +955,6 @@
         if (seen.has(node) || !isVisible(node)) {
           continue;
         }
-        // 必须位于可见面板（或无面板祖先）内，避免命中隐藏下拉模板
         const panel = node.closest(PANEL_SELECTOR);
         if (panel && !isVisible(panel)) {
           continue;
@@ -848,7 +971,143 @@
         found.push(node);
       }
     }
+    for (const layer of findPopupLayers()) {
+      collectLeafOptions(layer, found, seen);
+    }
+    if (container) {
+      collectLeafOptions(container, found, seen);
+    }
     return found;
+  }
+
+  // ---------- 日历日期（北森 Phoenix / 通用年月箭头导航） ----------
+
+  function findCalendarPanel() {
+    const candidates = document.querySelectorAll(
+      '.common-unmodeled-layer,[class*="calendar"],[class*="picker-dropdown"],[role="listbox"]'
+    );
+    for (const el of candidates) {
+      if (!isVisible(el)) {
+        continue;
+      }
+      const text = norm(el.textContent, 400);
+      if (/(\d{4})\s*年\s*(\d{1,2})\s*月/.test(text) && el.querySelector('[class*="year-btn"],[class*="month-btn"],td,[class*="cell"],[class*="day"]')) {
+        return el;
+      }
+    }
+    return null;
+  }
+
+  function readCalendarYm(panel) {
+    const t = norm(panel.textContent, 400);
+    const m = t.match(/(\d{4})\s*年\s*(\d{1,2})\s*月/);
+    return m ? [Number(m[1]), Number(m[2])] : null;
+  }
+
+  async function clickCalendarArrow(panel, kind) {
+    const btn = panel.querySelector(`[class*="${kind}-year-btn"],[class*="${kind}-month-btn"]`);
+    if (btn) {
+      clickActionElement(btn);
+      await sleep(140);
+    }
+  }
+
+  /**
+   * 日历控件填日期：年/月箭头导航到位后点日格。
+   * value 形如 YYYY / YYYY-MM / YYYY-MM-DD。
+   */
+  async function tryFillDatePicker(field, value) {
+    const m = String(value).match(/^(\d{4})(?:-(\d{1,2}))?(?:-(\d{1,2}))?$/);
+    if (!m) {
+      return { ok: false, reason: "非日期值" };
+    }
+    const year = Number(m[1]);
+    const month = m[2] ? Number(m[2]) : null;
+    const day = m[3] ? Number(m[3]) : null;
+
+    const trigger =
+      field.element.closest('[class*="select"],[class*="date"],[class*="picker"]') || field.element;
+    clickActionElement(trigger);
+    await sleep(320);
+    let panel = findCalendarPanel();
+    if (!panel) {
+      return { ok: false, reason: "日历面板未出现" };
+    }
+
+    let guard = 0;
+    const maxSteps = 240;
+    while (guard < maxSteps) {
+      const fresh = findCalendarPanel();
+      if (fresh) {
+        panel = fresh;
+      }
+      const cur = readCalendarYm(panel);
+      if (!cur) {
+        break;
+      }
+      // 纯月份选择器只需年份到位（月份直接点格子）；日历需年月均到位
+      const ymOk = cur[0] === year && (day === null || cur[1] === month);
+      if (ymOk) {
+        break;
+      }
+      if (cur[0] !== year) {
+        await clickCalendarArrow(panel, cur[0] > year ? "prev" : "next");
+      } else {
+        await clickCalendarArrow(panel, cur[1] > month ? "prev" : "next");
+      }
+      guard += 1;
+      await sleep(110);
+    }
+    const finalPanel = findCalendarPanel() || panel;
+    const finalYm = readCalendarYm(finalPanel);
+    if (!finalYm || finalYm[0] !== year || (day !== null && finalYm[1] !== month)) {
+      return { ok: false, reason: `年月导航未到位(${finalYm ? finalYm.join("-") : "?"})` };
+    }
+
+    if (day === null) {
+      // 纯月份选择器：点月格（文本「9月」样式）
+      const monCell = findVisibleChoiceOptions(finalPanel).find((o) => {
+        const t = norm(o.textContent, 8);
+        return (
+          t === `${month}月` ||
+          t === `${String(month).padStart(2, "0")}月` ||
+          (/month/i.test(String(o.className)) && t === String(month))
+        );
+      });
+      if (!monCell) {
+        return { ok: false, reason: `月格 ${month} 未找到` };
+      }
+      clickActionElement(monCell);
+      await sleep(180);
+      return { ok: true };
+    }
+    // 日格：叶子文本恰为日期数字（优先 td/cell/day 语义节点）
+    const dayNodes = Array.from(
+      finalPanel.querySelectorAll('td,[class*="cell"],[class*="day"],[class*="date"]')
+    ).filter((n) => norm(n.textContent, 6) === String(day) && isVisible(n));
+    const target =
+      dayNodes[0] ||
+      findVisibleChoiceOptions(finalPanel).find((o) => norm(o.textContent, 6) === String(day));
+    if (!target) {
+      // 降级：值带日但控件是纯月份选择器 → 点月格
+      const monCell = findVisibleChoiceOptions(finalPanel).find((o) => {
+        const t = norm(o.textContent, 8);
+        return (
+          t === `${month}月` ||
+          t === `${String(month).padStart(2, "0")}月` ||
+          (/month/i.test(String(o.className)) && t === String(month))
+        );
+      });
+      if (monCell) {
+        clickActionElement(monCell);
+        await sleep(180);
+        return { ok: true };
+      }
+      return { ok: false, reason: `日格 ${day} 未找到` };
+    }
+    clickActionElement(target);
+    await sleep(180);
+    return { ok: true };
   }
 
   async function tryFillCustomChoiceField(field, value) {
@@ -856,10 +1115,18 @@
     const container = findChoiceFieldContainer(el, field.container);
     container.scrollIntoView({ block: "center", inline: "nearest" });
     clickActionElement(el instanceof Element ? el : container);
-    if (container !== el) {
-      clickActionElement(container);
+    await sleep(260);
+    // 面板未出现时补点选择器包装层（点 form-item 容器会触发外部点击关闭）
+    if (findPopupLayers().length === 0) {
+      const wrapper =
+        el instanceof Element
+          ? el.closest('[class*="select"],[class*="picker"],[class*="combo"]')
+          : null;
+      if (wrapper && wrapper !== el) {
+        clickActionElement(wrapper);
+        await sleep(260);
+      }
     }
-    await sleep(220);
 
     const options = findVisibleChoiceOptions(container);
     const matched = options.find(
@@ -898,10 +1165,74 @@
 
   // ---------- 填写与校验 ----------
 
-  async function fillOne(item) {
-    const { field, entry } = item;
-    const el = field.element;
+  /** 元素失效时按 标签+控件类型 重定位（React 重渲染）。 */
+  function refreshField(item, adapter) {
+    const field = item.field;
+    if (!field.element || field.element.isConnected) {
+      return field;
+    }
+    const fresh = scanFields(adapter)
+      .fields.filter(
+        (f) =>
+          f.kind === field.kind &&
+          f.label === field.label &&
+          f.element &&
+          f.element.isConnected
+      )
+      .pop();
+    if (fresh) {
+      item.field = fresh;
+      return fresh;
+    }
+    return field;
+  }
+
+  /** 找「至今」类自绘开关：全页收集可见候选，按与字段的几何距离取最近。 */
+  function findSiblingToggle(field, text) {
+    const anchor = field.element && field.element.isConnected ? field.element : field.container;
+    if (!anchor) {
+      return null;
+    }
+    const ar = anchor.getBoundingClientRect();
+    let best = null;
+    let bestDist = Number.MAX_VALUE;
+    for (const el of document.querySelectorAll(
+      '[class*="checkbox"],[class*="toggle"],[class*="switch"]'
+    )) {
+      if (!isVisible(el) || !norm(el.textContent, 20).includes(text)) {
+        continue;
+      }
+      const r = el.getBoundingClientRect();
+      const dist = Math.abs(r.top + r.height / 2 - (ar.top + ar.height / 2)) +
+        Math.abs(r.left + r.width / 2 - (ar.left + ar.width / 2));
+      if (dist < bestDist) {
+        bestDist = dist;
+        best = el;
+      }
+    }
+    return best;
+  }
+
+  async function fillOne(item, adapter) {
+    const entry = item.entry;
     try {
+      const field = refreshField(item, adapter);
+      const el = field.element;
+      if (!el || !el.isConnected) {
+        return { ok: false, reason: "元素已失效(页面重渲染)" };
+      }
+      if (field.kind === "custom-group") {
+        const items = field.items || [];
+        const matched = items.find((it) =>
+          choiceTextMatches(norm(it.textContent, 30), entry.value)
+        );
+        if (!matched) {
+          return { ok: false, reason: "选项组中未找到匹配项" };
+        }
+        clickActionElement(matched);
+        await sleep(140);
+        return { ok: true };
+      }
       if (field.kind === "radio" || field.kind === "checkbox") {
         const ok = setCheckboxOrRadio(el, entry.value);
         return ok ? { ok: true } : { ok: false, reason: "未找到匹配选项" };
@@ -916,6 +1247,27 @@
         return { ok: true };
       }
       if (field.kind === "custom-choice") {
+        // 「至今」：结束时间类字段的伴随开关（自绘 checkbox），点开关而非面板
+        if (norm(entry.value, 6) === "至今") {
+          const toggle = findSiblingToggle(field, "至今");
+          if (toggle) {
+            clickActionElement(toggle);
+            await sleep(220);
+            return { ok: true, trust: true };
+          }
+        }
+        // 日期形状的值先走日历控件（年月导航 + 日格/月格），失败再退回普通下拉路径
+        if (/^\d{4}(-\d{1,2}){0,2}$/.test(entry.value)) {
+          const cal = await tryFillDatePicker(field, entry.value);
+          if (cal.ok) {
+            return cal;
+          }
+          const choice = await tryFillCustomChoiceField(field, entry.value);
+          if (choice.ok) {
+            return choice;
+          }
+          return { ok: false, reason: `日历:${cal.reason}；下拉:${choice.reason}` };
+        }
         return await tryFillCustomChoiceField(field, entry.value);
       }
       if (el.isContentEditable || el.getAttribute("role") === "textbox") {
@@ -931,6 +1283,9 @@
 
   function readBack(field) {
     const el = field.element;
+    if (field.kind === "custom-group") {
+      return readGroupCheckedText(field.groupEl || el.closest('[class*="radio-group"],[class*="checkbox-group"]'));
+    }
     if (field.kind === "radio") {
       const group = el.name
         ? Array.from(document.querySelectorAll(`input[type="radio"][name="${CSS.escape(el.name)}"]`))
@@ -959,9 +1314,10 @@
       );
     }
     if (el.isContentEditable) {
-      return norm(el.textContent, 60);
+      return norm(el.textContent, 400);
     }
-    return norm(el.value || "", 60);
+    // 回读上限要大于常见长文本（自我评价/项目描述 100+ 字），否则校验恒假
+    return norm(el.value || "", 400);
   }
 
   // ---------- 主入口 ----------
@@ -974,11 +1330,33 @@
 
     const filled = [];
     const failed = [];
+    const normDate = (s) =>
+      String(s)
+        .replace(/(\d{4})年(\d{1,2})月(?:(\d{1,2})日?)?/g, (_, y, mo, d) =>
+          d ? `${y}-${mo}-${d}` : `${y}-${mo}`
+        )
+        .replace(/-/g, "");
     for (const item of plan) {
-      const result = await fillOne(item);
-      const readBackValue = readBack(item.field);
+      const result = await fillOne(item, adapter);
+      refreshField(item, adapter);
+      let readBackValue = readBack(item.field);
+      let verified =
+        item.field.kind === "checkbox" ||
+        item.field.kind === "custom-group" ||
+        result.trust ||
+        readBackValue.includes(String(item.entry.value)) ||
+        normDate(readBackValue).includes(normDate(item.entry.value));
+      // 文本类回读竞态：React 提交有延迟，稍候重读一次
+      if (!verified && result.ok) {
+        await sleep(280);
+        refreshField(item, adapter);
+        readBackValue = readBack(item.field);
+        verified =
+          readBackValue.includes(String(item.entry.value)) ||
+          normDate(readBackValue).includes(normDate(item.entry.value));
+      }
       const label = item.field.label || item.field.nearbyText || "(无标签)";
-      if (result.ok && (readBackValue.includes(String(item.entry.value)) || item.field.kind === "checkbox")) {
+      if (result.ok && verified) {
         filled.push({ label, field: label, value: String(item.entry.value).slice(0, 60) });
       } else if (result.ok) {
         failed.push({ label, field: label, value: item.entry.value, reason: "已执行但回读不一致" });
@@ -1021,6 +1399,7 @@
     buildEntries,
     buildPlan,
     scoreField,
+    tryFillDatePicker,
   };
 
   if (typeof chrome !== "undefined" && chrome.runtime && chrome.runtime.onMessage) {

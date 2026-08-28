@@ -31,3 +31,6 @@ browser_profiles/
 .vscode/
 Thumbs.db
 .venv-ci/
+
+# 本地测试浏览器登录态
+.browser-profile/
