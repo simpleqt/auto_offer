@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <link rel="stylesheet" href="popup.css" />
+</head>
+<body>
+  <header>
+    <span class="brand">AutoOffer 简历助手</span>
+    <span id="status-dot" class="dot off" title="本地服务状态"></span>
+  </header>
+
+  <section id="server-line">
+    <span id="server-state">检查本地服务…</span>
+    <button id="btn-grant" class="mini hidden">授权连接</button>
+  </section>
+
+  <label class="row">
+    <span>档案</span>
+    <select id="profile-select" disabled></select>
+  </label>
+
+  <label class="row checkbox">
+    <input type="checkbox" id="opt-sensitive" />
+    <span>包含敏感字段（身份证号、家庭情况等）</span>
+  </label>
+
+  <button id="btn-fill" disabled>开始填写</button>
+  <div id="hint" class="hint">填写前请先在页面打开目标表单。</div>
+
+  <section id="report" class="hidden">
+    <div id="report-title"></div>
+    <ul id="report-list"></ul>
+  </section>
+
+  <footer>
+    <label class="row">
+      <span>服务地址</span>
+      <input id="api-base" type="text" spellcheck="false" />
+    </label>
+    <button id="btn-save-api" class="mini">保存</button>
+  </footer>
+
+  <script src="popup.js"></script>
+</body>
+</html>

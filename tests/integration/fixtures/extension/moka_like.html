@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <title>申请表单（Moka/Element 风格）</title>
+  <style>
+    body { font: 14px/1.6 system-ui, "Microsoft YaHei"; padding: 24px; }
+    .el-form { max-width: 560px; margin: 0 auto; }
+    .el-form-item { margin-bottom: 14px; }
+    .el-form-item__label { display: block; color: #333; margin-bottom: 4px; }
+    input[type="text"], input[type="email"], input[type="tel"] {
+      width: 100%; box-sizing: border-box; padding: 6px 10px; border: 1px solid #dcdfe6; border-radius: 4px;
+    }
+    .el-select { width: 100%; }
+    .el-input__inner { width: 100%; box-sizing: border-box; padding: 6px 10px; border: 1px solid #dcdfe6; border-radius: 4px; }
+    .el-select-dropdown {
+      position: absolute; left: 40%; top: 300px; width: 220px; background: #fff; z-index: 2000;
+      border: 1px solid #e4e7ed; border-radius: 4px; box-shadow: 0 6px 16px rgba(0,0,0,.1); padding: 4px 0;
+    }
+    .el-select-dropdown__item { padding: 6px 12px; cursor: pointer; }
+    .el-select-dropdown__item:hover { background: #f5f7fa; }
+    label.inline { display: inline-flex; align-items: center; gap: 4px; }
+  </style>
+</head>
+<body>
+  <form class="el-form" id="the-form">
+    <div class="el-form-item">
+      <div class="el-form-item__label">姓名</div>
+      <input id="m-name" type="text" />
+    </div>
+    <div class="el-form-item">
+      <div class="el-form-item__label">电话</div>
+      <input id="m-phone" type="tel" />
+    </div>
+    <div class="el-form-item">
+      <div class="el-form-item__label">邮箱</div>
+      <input id="m-email" type="email" />
+    </div>
+    <div class="el-form-item">
+      <div class="el-form-item__label">学历</div>
+      <div class="el-select" id="m-edu">
+        <div class="el-input">
+          <input class="el-input__inner" readonly data-options="本科,硕士,博士" />
+        </div>
+      </div>
+    </div>
+    <div class="el-form-item">
+      <div class="el-form-item__label">接受调剂</div>
+      <label class="inline"><input id="m-agree" type="checkbox" /><span>是</span></label>
+    </div>
+  </form>
+
+  <script>
+    // 模拟 el-select
+    document.querySelectorAll(".el-select").forEach((sel) => {
+      const input = sel.querySelector("input");
+      const options = (input.dataset.options || "").split(",");
+      sel.addEventListener("click", () => {
+        if (document.querySelector(".el-select-dropdown")) return;
+        const dd = document.createElement("div");
+        dd.className = "el-select-dropdown";
+        for (const o of options) {
+          const it = document.createElement("div");
+          it.className = "el-select-dropdown__item";
+          it.textContent = o;
+          it.addEventListener("click", (e) => {
+            e.stopPropagation();
+            input.value = o;
+            sel.dataset.value = o;
+            dd.remove();
+          });
+          dd.appendChild(it);
+        }
+        document.body.appendChild(dd);
+      });
+    });
+  </script>
+</body>
+</html>

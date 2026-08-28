@@ -1,0 +1,158 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <title>示例公司 - 基本信息填写（智易/Ant 风格）</title>
+  <style>
+    body { font: 14px/1.6 system-ui, "Microsoft YaHei"; padding: 24px; background: #f5f6f8; }
+    .card { max-width: 640px; margin: 0 auto; background: #fff; padding: 20px 28px; border-radius: 8px; }
+    h3.section { font-size: 16px; margin: 18px 0 10px; }
+    .ant-form-item { display: flex; align-items: center; margin-bottom: 14px; }
+    .ant-form-item-label { width: 110px; color: #333; text-align: right; padding-right: 12px; }
+    .ant-form-item-control { flex: 1; }
+    input[type="text"], input[type="email"], input[type="tel"], textarea, select {
+      width: 100%; box-sizing: border-box; padding: 6px 10px; border: 1px solid #d9d9d9; border-radius: 6px;
+    }
+    textarea { height: 64px; }
+    .ant-radio-wrapper { margin-right: 16px; }
+    .ant-select { position: relative; width: 100%; }
+    .ant-select-selector {
+      border: 1px solid #d9d9d9; border-radius: 6px; padding: 5px 10px; min-height: 30px; cursor: pointer;
+      display: flex; align-items: center;
+    }
+    .ant-select-selection-search-input { border: 0; outline: none; flex: 1; width: 100%; }
+    .ant-select-dropdown {
+      position: absolute; left: 40%; top: 360px; width: 260px; background: #fff; z-index: 1050;
+      border: 1px solid #e5e6eb; border-radius: 6px; box-shadow: 0 6px 16px rgba(0,0,0,.08); padding: 4px 0;
+    }
+    .ant-select-item-option { padding: 6px 12px; cursor: pointer; }
+    .ant-select-item-option:hover { background: #f5f6f8; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h3 class="section">基本信息</h3>
+    <form id="the-form">
+      <div class="ant-form-item">
+        <div class="ant-form-item-label"><label>姓名</label></div>
+        <div class="ant-form-item-control"><input id="name" type="text" /></div>
+      </div>
+      <div class="ant-form-item">
+        <div class="ant-form-item-label"><label>性别</label></div>
+        <div class="ant-form-item-control ant-radio-group">
+          <label class="ant-radio-wrapper"><input type="radio" name="gender" value="1" /><span>男</span></label>
+          <label class="ant-radio-wrapper"><input type="radio" name="gender" value="2" /><span>女</span></label>
+        </div>
+      </div>
+      <div class="ant-form-item">
+        <div class="ant-form-item-label"><label>出生日期</label></div>
+        <div class="ant-form-item-control"><input id="birth" type="text" placeholder="年/月/日" /></div>
+      </div>
+      <div class="ant-form-item">
+        <div class="ant-form-item-label"><label>手机号码</label></div>
+        <div class="ant-form-item-control"><input id="phone" type="tel" /></div>
+      </div>
+      <div class="ant-form-item">
+        <div class="ant-form-item-label"><label>电子邮箱</label></div>
+        <div class="ant-form-item-control"><input id="email" type="email" /></div>
+      </div>
+      <div class="ant-form-item">
+        <div class="ant-form-item-label"><label>政治面貌</label></div>
+        <div class="ant-form-item-control">
+          <select id="political">
+            <option value="">请选择</option>
+            <option value="01">中共党员</option>
+            <option value="02">共青团员</option>
+            <option value="03">群众</option>
+            <option value="04">民进会员</option>
+          </select>
+        </div>
+      </div>
+      <div class="ant-form-item">
+        <div class="ant-form-item-label"><label>现居住城市</label></div>
+        <div class="ant-form-item-control">
+          <div class="ant-select" id="city-select">
+            <div class="ant-select-selector">
+              <span class="ant-select-selection-item" style="display:none"></span>
+              <input type="text" role="combobox" class="ant-select-selection-search-input"
+                     data-options="成都市,北京市,上海市,杭州市" />
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="ant-form-item">
+        <div class="ant-form-item-label"><label>体重（公斤）</label></div>
+        <div class="ant-form-item-control"><input id="weight" type="text" /></div>
+      </div>
+
+      <h3 class="section">教育经历</h3>
+      <div class="ant-form-item">
+        <div class="ant-form-item-label"><label>最高学历</label></div>
+        <div class="ant-form-item-control">
+          <div class="ant-select" id="edu-select">
+            <div class="ant-select-selector">
+              <span class="ant-select-selection-item" style="display:none"></span>
+              <input type="text" role="combobox" class="ant-select-selection-search-input" readonly
+                     data-options="高中,大专,本科,硕士,博士" />
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="ant-form-item">
+        <div class="ant-form-item-label"><label>毕业院校</label></div>
+        <div class="ant-form-item-control"><input id="school" type="text" /></div>
+      </div>
+
+      <h3 class="section">其他</h3>
+      <div class="ant-form-item">
+        <div class="ant-form-item-label"><label>自我评价</label></div>
+        <div class="ant-form-item-control"><textarea id="self-eval"></textarea></div>
+      </div>
+      <div class="ant-form-item">
+        <div class="ant-form-item-label"><label>上传简历附件</label></div>
+        <div class="ant-form-item-control"><input id="resume-file" type="file" accept=".pdf,.doc,.docx" /></div>
+      </div>
+    </form>
+  </div>
+
+  <script>
+    // 模拟 ant-select：点击展开 portal 下拉，点击选项回填展示文本
+    document.querySelectorAll(".ant-select").forEach((sel) => {
+      const input = sel.querySelector("input");
+      const item = sel.querySelector(".ant-select-selection-item");
+      const options = (input.dataset.options || "").split(",");
+      const open = () => {
+        if (document.querySelector(".ant-select-dropdown[data-for='" + sel.id + "']")) return;
+        const dd = document.createElement("div");
+        dd.className = "ant-select-dropdown";
+        dd.setAttribute("data-for", sel.id);
+        for (const o of options) {
+          const it = document.createElement("div");
+          it.className = "ant-select-item-option";
+          it.setAttribute("role", "option");
+          it.textContent = o;
+          it.addEventListener("click", (e) => {
+            e.stopPropagation();
+            item.textContent = o;
+            item.style.display = "inline-block";
+            sel.dataset.value = o;
+            dd.remove();
+          });
+          dd.appendChild(it);
+        }
+        document.body.appendChild(dd);
+      };
+      sel.addEventListener("click", open);
+      // 带搜索的 select：输入过滤选项
+      input.addEventListener("input", () => {
+        const dd = document.querySelector(".ant-select-dropdown[data-for='" + sel.id + "']");
+        if (!dd) { open(); return; }
+        const kw = (input.value || "").trim();
+        dd.querySelectorAll(".ant-select-item-option").forEach((it) => {
+          it.style.display = !kw || it.textContent.includes(kw) ? "" : "none";
+        });
+      });
+    });
+  </script>
+</body>
+</html>

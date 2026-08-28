@@ -1,0 +1,147 @@
+:root {
+  color-scheme: light;
+}
+
+body {
+  width: 320px;
+  margin: 0;
+  padding: 10px;
+  font: 13px/1.5 system-ui, "Segoe UI", "Microsoft YaHei", sans-serif;
+  color: #1f2329;
+}
+
+header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.brand {
+  font-weight: 600;
+}
+
+.dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  display: inline-block;
+}
+
+.dot.on {
+  background: #22c55e;
+}
+
+.dot.off {
+  background: #d0d3d9;
+}
+
+#server-line {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  color: #646a73;
+  margin-bottom: 8px;
+  min-height: 20px;
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.row > span:first-child {
+  flex: 0 0 56px;
+  color: #646a73;
+}
+
+select,
+input[type="text"] {
+  flex: 1;
+  min-width: 0;
+  padding: 4px 6px;
+  border: 1px solid #d0d3d9;
+  border-radius: 6px;
+}
+
+.row.checkbox span {
+  color: #1f2329;
+}
+
+button {
+  width: 100%;
+  padding: 7px 0;
+  border: 0;
+  border-radius: 6px;
+  background: #3370ff;
+  color: #fff;
+  cursor: pointer;
+}
+
+button:disabled {
+  background: #a8c0ff;
+  cursor: not-allowed;
+}
+
+button.mini {
+  width: auto;
+  padding: 2px 8px;
+  font-size: 12px;
+  background: #eef0f5;
+  color: #3370ff;
+}
+
+.hint {
+  margin-top: 6px;
+  font-size: 12px;
+  color: #8f959e;
+}
+
+#report {
+  margin-top: 10px;
+  border-top: 1px solid #e5e6eb;
+  padding-top: 8px;
+  max-height: 220px;
+  overflow-y: auto;
+}
+
+#report-title {
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+
+#report-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: 12px;
+}
+
+#report-list li {
+  padding: 2px 0;
+  word-break: break-all;
+}
+
+#report-list li.filled {
+  color: #22c55e;
+}
+
+#report-list li.failed {
+  color: #f54a45;
+}
+
+#report-list li.skipped {
+  color: #8f959e;
+}
+
+footer {
+  margin-top: 10px;
+  border-top: 1px solid #e5e6eb;
+  padding-top: 8px;
+}
+
+.hidden {
+  display: none;
+}

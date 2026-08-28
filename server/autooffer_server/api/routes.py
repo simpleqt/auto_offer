@@ -171,6 +171,23 @@ async def get_profile(request: Request, profile_id: str) -> dict[str, Any]:
     return row
 
 
+@router.get("/profiles/{profile_id}/flat")
+async def get_profile_flat(
+    request: Request, profile_id: str, sensitive: bool = False
+) -> dict[str, Any]:
+    """扁平档案（浏览器插件规则直填引擎消费）。
+
+    sensitive=true 时输出 schema 标注的敏感/受限字段（身份证号、家庭情况等），
+    由插件弹窗单独授权后携带；默认剔除。
+    """
+    from autooffer_server.services.flat_profile import flatten_profile
+
+    payload: dict[str, Any] | None = await _ctx(request).repo.get_profile(profile_id)
+    if payload is None:
+        raise HTTPException(404, f"档案不存在: {profile_id}")
+    return flatten_profile(payload, include_sensitive=sensitive)
+
+
 @router.put("/profiles/{profile_id}")
 async def put_profile(request: Request, profile_id: str, body: ProfileIn) -> dict[str, Any]:
     from autooffer_core.profile.schema import Profile
