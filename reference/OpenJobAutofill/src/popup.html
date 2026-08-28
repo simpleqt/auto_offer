@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>OpenJobAutofill</title>
+    <link rel="stylesheet" href="./popup.css" />
+  </head>
+  <body>
+    <main class="shell">
+      <header class="topbar">
+        <div>
+          <h1>OpenJobAutofill</h1>
+          <p class="repo-note">开源不易，如果这个工具帮到你，欢迎给项目点个 Star。</p>
+          <a class="repo-link" href="https://github.com/Br1an67/OpenJobAutofill" target="_blank" rel="noopener">github.com/Br1an67/OpenJobAutofill</a>
+        </div>
+        <button id="openOptions" class="ghost" type="button">设置</button>
+      </header>
+
+      <section class="panel">
+        <button id="startAutofillBtn" type="button">开始填写</button>
+        <button id="showProfilePanelBtn" class="secondary" type="button">打开资料面板</button>
+        <button id="clearMarksBtn" class="ghost full" type="button">清除颜色标记</button>
+      </section>
+
+      <section class="panel">
+        <h2>版本更新</h2>
+        <div id="updateStatus" class="update-status">正在读取更新状态...</div>
+        <button id="checkUpdateBtn" class="secondary" type="button">检查更新</button>
+        <button id="openUpdateBtn" class="ghost full" type="button">打开 Release 页面</button>
+      </section>
+
+      <section class="panel muted">
+        <div id="status">点击开始填写后会在页面右下角显示进度。绿色表示已填写，橙色表示待处理。</div>
+      </section>
+
+      <section class="panel">
+        <h2>怎么用</h2>
+        <p class="hint">在设置页维护本机资料。AI 只辅助识别表单字段，不接收简历具体值；资料面板用于查看、搜索和复制待处理字段需要的内容。</p>
+      </section>
+    </main>
+
+    <script src="./popup.js"></script>
+  </body>
+</html>
