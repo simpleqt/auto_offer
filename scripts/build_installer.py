@@ -81,6 +81,21 @@ def _playwright_browsers_dir() -> Path | None:
     return Path.home() / ".cache" / "ms-playwright"
 
 
+def sync_iss_version() -> None:
+    """把 autooffer_core.__version__ 注入 Inno Setup 脚本，避免手抄版本号漂移。"""
+    import re
+
+    from autooffer_core import __version__
+
+    iss = ROOT / "scripts" / "AutoOffer.iss"
+    text = iss.read_text(encoding="utf-8")
+    new = f'#define MyAppVersion "{__version__}"'
+    updated, count = re.subn(r'#define MyAppVersion "[^"]*"', new, text)
+    if count and updated != text:
+        iss.write_text(updated, encoding="utf-8")
+        print(f"  AutoOffer.iss 版本已同步为 {__version__}")
+
+
 def build_installer() -> None:
     print("== 4/4 编译 Inno Setup 安装程序 ==")
     iss = ROOT / "scripts" / "AutoOffer.iss"
@@ -91,6 +106,7 @@ def build_installer() -> None:
     if not iscc or not Path(iscc).exists():
         print("  未找到 Inno Setup（iscc.exe），跳过编译。请安装后重试。")
         return
+    sync_iss_version()
     _run([iscc, str(iss)])
 
 
