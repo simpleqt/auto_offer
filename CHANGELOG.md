@@ -3,6 +3,17 @@
 本项目遵循 [Conventional Commits](https://www.conventionalcommits.org/)，版本策略为 SemVer。
 由 `git-cliff` 从提交历史生成（配置见 `cliff.toml`；本文件在无 git-cliff 环境下按同格式手动维护）。
 
+## [v0.2.2] - 2026-08-28
+
+**跨站泛化修复版**：非北森平台（Moka）真实站点实测暴露的适配缺口全修复。
+
+### Bug Fixes
+
+- (**extension**) Moka 自研 sd-* 组件适配：`apply-field` 行容器进适配器选择器；候选 label 属于含其他控件的行时拒绝（爬公共祖先抓到别人的 label）；纯数字标签（如手机区号 +86）剔除；行首裸文本与「请输入 X」型 placeholder 作为标签兜底；区号前缀选择器（空触发器且同行另有正文输入框）不再成为可填字段
+- 真实站点验证：知乎（推荐算法工程师 27 届）与乐元素（AI 算法工程师）两个 Moka 租户，规则直填 3（姓名/手机/邮箱）+ PDF 附件注入 1，0 失败 0 错填
+- 新增 moka_apply 基准页回归用例；牛客实测为选简历直投模式（无表单）
+- (**release**) Release 附件新增浏览器扩展 zip（`AutoOffer-Extension-<版本>.zip`，Edge/Chrome 解压加载即用，Edge 实测安装通过）
+
 ## [v0.2.1] - 2026-08-28
 
 **真实站点复验修复版**：针对柏楚电子（北森 Phoenix 表单）实测暴露的两个问题修复。
