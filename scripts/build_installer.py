@@ -31,7 +31,9 @@ def _run(cmd: list[str], *, cwd: Path | None = None) -> None:
 
 def build_frontend() -> None:
     print("== 1/4 构建前端 ==")
-    _run(["npm", "run", "build"], cwd=FRONTEND)
+    # Windows 下 npm 是 npm.cmd，subprocess 不带 shell 解析不了裸 "npm"
+    npm = "npm.cmd" if sys.platform == "win32" else "npm"
+    _run([npm, "run", "build"], cwd=FRONTEND)
 
 
 def build_pyinstaller() -> None:
