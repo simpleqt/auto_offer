@@ -5,11 +5,15 @@
  * 1. 代理本地服务访问（http://127.0.0.1:8765）—— 拿档案列表 / 扁平档案。
  *    在 SW 中 fetch，配合已授权的 host permission 不受页面 CORS 约束，
  *    且内容脚本永远不直接接触本地服务。
- * 2. 按需注入内容脚本并转发档案，回收填写报告。
+ * 2. 两段式填写编排：
+ *    第一段 本地规则直填（零 LLM）；
+ *    第二段 未命中的字段走 AI 标签映射（仅标签），固定选项字段走
+ *    AI 选选项（含值，与简历解析同信任域），附件经字节下载注入。
  * 3. 本地留痕：最近 20 次填写记录存 chrome.storage.local。
  */
 
 const DEFAULT_API = "http://127.0.0.1:8765";
+const MAX_ATTACHMENT_BYTES = 8 * 1024 * 1024;
 
 async function apiBase() {
   const { aoApiBase } = await chrome.storage.local.get("aoApiBase");
@@ -30,6 +34,73 @@ async function fetchJson(url, init = undefined, timeoutMs = 8000) {
   }
 }
 
+function bufToB64(buffer) {
+  const bytes = new Uint8Array(buffer);
+  let bin = "";
+  const chunk = 0x8000;
+  for (let i = 0; i < bytes.length; i += chunk) {
+    bin += String.fromCharCode(...bytes.subarray(i, i + chunk));
+  }
+  return btoa(bin);
+}
+
+async function fetchAttachments(base, profileId, attachments) {
+  const out = [];
+  for (let i = 0; i < attachments.length && i < 5; i += 1) {
+    const meta = attachments[i];
+    try {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 20000);
+      const resp = await fetch(
+        `${base}/api/v1/profiles/${encodeURIComponent(profileId)}/attachments/${i}`,
+        { signal: controller.signal }
+      );
+      clearTimeout(timer);
+      if (!resp.ok) {
+        continue;
+      }
+      const buf = await resp.arrayBuffer();
+      if (buf.byteLength > MAX_ATTACHMENT_BYTES) {
+        continue;
+      }
+      out.push({
+        kind: meta.kind,
+        label: meta.label,
+        filename: meta.filename,
+        language: meta.language || null,
+        b64: bufToB64(buf),
+      });
+    } catch {
+      /* 单个附件失败不影响整体 */
+    }
+  }
+  return out;
+}
+
+/** 扁平档案 → 标签首值映射（供选选项通道查值）。 */
+function flatValueMap(flat) {
+  const map = {};
+  const put = (k, v) => {
+    if (k && !(k in map) && v != null && String(v)) {
+      map[k] = String(v);
+    }
+  };
+  for (const s of (flat && flat.sections) || []) {
+    if (s.kind === "simple") {
+      for (const [k, v] of Object.entries(s.values || {})) {
+        put(k, v);
+      }
+    } else {
+      for (const item of (s.items || []).slice(0, 1)) {
+        for (const [k, v] of Object.entries(item)) {
+          put(k, v);
+        }
+      }
+    }
+  }
+  return map;
+}
+
 async function handleStatus() {
   const base = await apiBase();
   try {
@@ -46,11 +117,11 @@ async function handleStatus() {
   }
 }
 
-async function runFillPass(tabId, flat, mapping) {
+async function runFillPass(tabId, flat, options) {
   const report = await chrome.tabs.sendMessage(tabId, {
     type: "autooffer:fill",
     profile: flat,
-    mapping,
+    ...options,
   });
   if (!report || report.error) {
     throw new Error((report && report.error) || "内容脚本未返回报告");
@@ -74,7 +145,40 @@ function mergeReports(primary, secondary) {
     failed: [...primary.failed, ...newFailed],
     skipped: secondary.skipped,
     unmatched: secondary.unmatched || [],
+    optionFields: secondary.optionFields || [],
   };
+}
+
+/** 组装 AI 选选项请求：选项未匹配的失败字段 + 映射命中但值不贴选项的字段。 */
+function buildOptionPicks(first, mapping, values) {
+  const picks = [];
+  const seen = new Set();
+  const optionsByLabel = new Map(
+    ((first && first.optionFields) || []).map((f) => [f.label, f.options])
+  );
+  const looseMatch = (value, option) => {
+    const v = String(value || "");
+    const o = String(option || "");
+    return v === o || v.includes(o) || o.includes(v.slice(0, 8));
+  };
+  for (const row of (first && first.failed) || []) {
+    if (row.options && row.options.length > 1 && !seen.has(row.label)) {
+      seen.add(row.label);
+      picks.push({ label: row.label, options: row.options, value: row.value });
+    }
+  }
+  for (const [fieldLabel, profileLabel] of Object.entries(mapping || {})) {
+    if (seen.has(fieldLabel)) {
+      continue;
+    }
+    const options = optionsByLabel.get(fieldLabel);
+    const value = values[profileLabel];
+    if (options && options.length > 1 && value && !options.some((o) => looseMatch(value, o))) {
+      seen.add(fieldLabel);
+      picks.push({ label: fieldLabel, options, value });
+    }
+  }
+  return picks;
 }
 
 async function handleAutofill(msg) {
@@ -93,12 +197,14 @@ async function handleAutofill(msg) {
   });
 
   // 第一段：本地规则直填（零 LLM）
-  let report = await runFillPass(tabId, flat, null);
+  let report = await runFillPass(tabId, flat, {});
 
-  // 第二段：规则未命中的字段交 AI 映射（仅标签，不含任何值）
-  const unmatched = report.unmatched || [];
-  if (unmatched.length > 0 && msg.aiMapping !== false) {
-    try {
+  const values = flatValueMap(flat);
+  try {
+    // 二段-1：AI 标签映射（仅标签，不含任何值）
+    const unmatched = report.unmatched || [];
+    const mapping = {};
+    if (unmatched.length > 0 && msg.aiMapping !== false) {
       const mappingResp = await fetchJson(
         `${base}/api/v1/mapping`,
         {
@@ -108,21 +214,78 @@ async function handleAutofill(msg) {
         },
         60000
       );
-      const matches = (mappingResp && mappingResp.matches) || [];
-      if (matches.length > 0) {
-        const mappingUsed = {};
-        for (const m of matches) {
-          mappingUsed[m.field_label] = m.profile_label;
-        }
-        const second = await runFillPass(tabId, flat, mappingUsed);
-        for (const row of second.filled) {
+      for (const m of (mappingResp && mappingResp.matches) || []) {
+        mapping[m.field_label] = m.profile_label;
+      }
+    }
+
+    // 二段-2：附件字节下载（插件侧 DataTransfer 注入）
+    let attachments = [];
+    if (
+      Array.isArray(flat.attachments) &&
+      flat.attachments.length > 0 &&
+      msg.uploadAttachments !== false
+    ) {
+      attachments = await fetchAttachments(base, msg.profileId, flat.attachments);
+    }
+
+    const secondBase = {};
+    if (Object.keys(mapping).length > 0) {
+      secondBase.mapping = mapping;
+    }
+    if (attachments.length > 0) {
+      secondBase.attachments = attachments;
+    }
+    if (Object.keys(secondBase).length > 0) {
+      const second = await runFillPass(tabId, flat, secondBase);
+      for (const row of second.filled) {
+        if (!row.via) {
           row.via = "ai";
+        }
+      }
+      report = mergeReports(report, second);
+    }
+
+    // 二段-3：AI 选选项循环（级联选择器逐层下钻，最多 3 轮）。
+    // 每轮：失败字段收割选项 → AI 挑选项 → override 补填 → 级联展开出新选项再下一轮。
+    if (msg.aiMapping !== false) {
+      for (let round = 0; round < 3; round += 1) {
+        const picks = buildOptionPicks(report, round === 0 ? mapping : {}, values);
+        if (picks.length === 0) {
+          break;
+        }
+        let overrides = {};
+        try {
+          const choiceResp = await fetchJson(
+            `${base}/api/v1/option-match`,
+            {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ picks }),
+            },
+            60000
+          );
+          for (const c of (choiceResp && choiceResp.choices) || []) {
+            overrides[c.label] = c.option;
+          }
+        } catch (err) {
+          report.mappingError = String((err && err.message) || err);
+          break;
+        }
+        if (Object.keys(overrides).length === 0) {
+          break;
+        }
+        const second = await runFillPass(tabId, flat, { overrides });
+        for (const row of second.filled) {
+          if (!row.via) {
+            row.via = "ai";
+          }
         }
         report = mergeReports(report, second);
       }
-    } catch (err) {
-      report.mappingError = String((err && err.message) || err);
     }
+  } catch (err) {
+    report.mappingError = String((err && err.message) || err);
   }
 
   const { aoHistory = [] } = await chrome.storage.local.get("aoHistory");

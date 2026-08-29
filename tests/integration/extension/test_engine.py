@@ -182,6 +182,93 @@ async def test_ai_mapping_pass_fills_leftover(page: Page) -> None:
     assert any(f["label"] == "应聘方向" for f in second["filled"])
 
 
+async def test_repeat_blocks_add_and_fill(page: Page) -> None:
+    """教育经历多条目：自动点「添加教育经历」补块，第 N 块配第 N 条档案。"""
+    await page.goto(fixture_url("repeat_upload.html"))
+    flat: dict[str, Any] = {
+        "schema": 1,
+        "profile": {"id": "demo", "label": "示例"},
+        "sections": [
+            {
+                "key": "education",
+                "title": "教育经历",
+                "kind": "repeat",
+                "items": [
+                    {"学校": "示例大学", "专业": "大数据技术与工程"},
+                    {"学校": "示例理工大学", "专业": "计算机科学与技术"},
+                ],
+            }
+        ],
+    }
+    report = await autofill(page, flat)
+    assert report["counts"]["failed"] == 0, report["failed"]
+    schools = await page.eval_on_selector_all(
+        ".edu-school", "els => els.map(e => e.value)"
+    )
+    assert schools == ["示例大学", "示例理工大学"]
+    majors = await page.eval_on_selector_all(".edu-major", "els => els.map(e => e.value)")
+    assert majors == ["大数据技术与工程", "计算机科学与技术"]
+
+
+async def test_attachment_upload(page: Page) -> None:
+    """附件通道：File 构造 + DataTransfer 注入触发 change。"""
+    await page.goto(fixture_url("repeat_upload.html"))
+    flat: dict[str, Any] = {
+        "schema": 1,
+        "profile": {"id": "demo", "label": "示例"},
+        "sections": [],
+    }
+    import base64
+
+    b64 = base64.b64encode("name: 张三\nmajor: 大数据\n".encode()).decode("ascii")
+    report = await autofill(
+        page,
+        flat,
+        {
+            "attachments": [
+                {
+                    "kind": "resume",
+                    "label": "中文简历",
+                    "filename": "resume_cn.md",
+                    "language": "zh",
+                    "b64": b64,
+                }
+            ]
+        },
+    )
+    status = await page.text_content("#upload-status")
+    assert "resume_cn.md" in (status or "")
+    rows = [r for r in report["filled"] if r.get("via") == "附件"]
+    assert rows and rows[0]["value"] == "resume_cn.md"
+
+
+async def test_option_override_fills_custom_select(page: Page) -> None:
+    """AI 选选项覆盖：选项值不匹配时用 override 替换后点中。"""
+    await page.goto(fixture_url("zhiye_like.html"))
+    flat: dict[str, Any] = {
+        "schema": 1,
+        "profile": {"id": "demo", "label": "示例"},
+        "sections": [
+            {
+                "key": "education",
+                "title": "教育经历",
+                "kind": "repeat",
+                "items": [{"学历": "LLM 应用开发相关"}],  # 选项里没有该文本
+            }
+        ],
+    }
+    first = await autofill(page, flat)
+    assert first["counts"]["failed"] >= 1  # 选项未匹配
+    row = next(r for r in first["failed"] if r["label"] == "最高学历")
+    assert "硕士" in row.get("options", [])  # 失败时收割到选项
+
+    await autofill(page, flat, {"overrides": {"最高学历": "博士"}})
+    edu = await page.eval_on_selector(
+        "#edu-select .ant-select-selection-item", "el => el.textContent.trim()"
+    )
+    assert edu == "博士"
+
+
 async def test_hard_vetoes(page: Page) -> None:
     """硬否决：家庭域条目禁入普通字段；邮箱形状的值禁入电话类标签。"""
     await page.goto(fixture_url("moka_like.html"))

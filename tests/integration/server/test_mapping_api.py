@@ -9,7 +9,6 @@ from typing import Any
 import pytest
 from fastapi.testclient import TestClient
 
-from autooffer_core.testing import FakeLLMClient
 from autooffer_server.config import ServerConfig
 from autooffer_server.context import AppContext
 from autooffer_server.main import create_app
@@ -31,6 +30,20 @@ FAKE_LLM_JSON = json.dumps(
     ensure_ascii=False,
 )
 
+FAKE_LLM_OPTION_JSON = json.dumps(
+    {
+        "choices": [
+            # 正确挑选（逐字使用选项）
+            {"label": "期望从事职业", "option": "算法工程师", "confidence": 0.9},
+            # 改写了选项原文 → 丢弃
+            {"label": "现月薪(税前)", "option": "5000元", "confidence": 0.9},
+            # 低置信度 → 丢弃
+            {"label": "工作年限", "option": "应届毕业生", "confidence": 0.2},
+        ]
+    },
+    ensure_ascii=False,
+)
+
 
 @pytest.fixture
 def mapping_client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> TestClient:
@@ -38,7 +51,18 @@ def mapping_client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> TestClien
     ctx = AppContext(config, runner=FakeRunner(), keystore=MemoryKeyStore())
 
     async def fake_build_llm(self: AppContext, role: str = "actor") -> Any:
-        return FakeLLMClient(FAKE_LLM_JSON)
+        # 映射与选选项按提示词内容区分返回不同脚本
+        async def complete(messages: list) -> Any:
+            from autooffer_core.llm.interfaces import LLMResponse, LLMUsage
+
+            text = messages[-1].content
+            script = FAKE_LLM_OPTION_JSON if "选项匹配引擎" in text else FAKE_LLM_JSON
+            return LLMResponse(
+                text=script,
+                usage=LLMUsage(prompt_tokens=10, completion_tokens=5, total_tokens=15),
+            )
+
+        return type("LLM", (), {"complete": staticmethod(complete)})()
 
     monkeypatch.setattr(AppContext, "build_llm", fake_build_llm)
     app = create_app(ctx=ctx)
@@ -122,3 +146,32 @@ def test_mapping_requires_endpoint(tmp_path: Path) -> None:
             json={"profile_id": "demo-profile", "fields": [{"label": "姓名"}]},
         )
     assert resp.status_code == 503
+
+
+def test_option_match_picks_and_filters(mapping_client: TestClient) -> None:
+    """AI 选选项：逐字选项校验 + 置信度门槛。"""
+    resp = mapping_client.post(
+        "/api/v1/option-match",
+        json={
+            "picks": [
+                {
+                    "label": "期望从事职业",
+                    "options": ["算法工程师", "前端工程师", "测试工程师"],
+                    "value": "LLM 应用开发 / RAG 工程",
+                },
+                {"label": "现月薪(税前)", "options": ["5K以下", "5-10K", "10-20K"], "value": "3K"},
+                {"label": "工作年限", "options": ["应届毕业生", "1-3年"], "value": "应届"},
+                {"label": "无选项字段", "options": [], "value": "x"},
+            ]
+        },
+    )
+    assert resp.status_code == 200
+    assert resp.json()["choices"] == [
+        {"label": "期望从事职业", "option": "算法工程师", "confidence": 0.9}
+    ]
+
+
+def test_option_match_empty(mapping_client: TestClient) -> None:
+    resp = mapping_client.post("/api/v1/option-match", json={"picks": []})
+    assert resp.status_code == 200
+    assert resp.json()["choices"] == []

@@ -21,6 +21,8 @@ from autooffer_server.api.schemas import (
     EndpointOut,
     MappingIn,
     MappingOut,
+    OptionMatchIn,
+    OptionMatchOut,
     ProfileIn,
     ProfileSummary,
     RoutingIn,
@@ -215,6 +217,45 @@ async def map_fields_api(request: Request, body: MappingIn) -> dict[str, Any]:
     ]
     matches = await map_fields(page_fields, flat, llm)
     return {"matches": [m.model_dump() for m in matches]}
+
+
+@router.post("/option-match", response_model=OptionMatchOut)
+async def option_match_api(request: Request, body: OptionMatchIn) -> dict[str, Any]:
+    """AI 选选项（M3）：固定选项字段中为档案值挑最接近的选项。
+
+    隐私说明：字段值会进入 LLM 提示词——与简历解析同一信任域
+    （该值本就要写入目标页面），且仅逐字段发送。
+    """
+    from autooffer_server.services.mapping import OptionPick, match_options
+
+    ctx = _ctx(request)
+    if not body.picks:
+        return {"choices": []}
+    try:
+        llm = await ctx.build_llm("profile_parser")
+    except LookupError as exc:
+        raise HTTPException(503, f"选选项需要可用的模型端点: {exc}") from exc
+    picks = [OptionPick(label=p.label, options=p.options, value=p.value) for p in body.picks]
+    choices = await match_options(picks, llm)
+    return {"choices": [c.model_dump() for c in choices]}
+
+
+@router.get("/profiles/{profile_id}/attachments/{index}")
+async def download_attachment(request: Request, profile_id: str, index: int) -> Any:
+    """下载档案附件字节（插件上传通道用；仅限档案登记过的路径）。"""
+    import anyio
+    from fastapi.responses import FileResponse
+
+    payload: dict[str, Any] | None = await _ctx(request).repo.get_profile(profile_id)
+    if payload is None:
+        raise HTTPException(404, f"档案不存在: {profile_id}")
+    attachments = payload.get("attachments", [])
+    if index < 0 or index >= len(attachments):
+        raise HTTPException(404, f"附件不存在: index={index}")
+    path = Path(str(attachments[index].get("path", "")))
+    if not await anyio.to_thread.run_sync(path.is_file):
+        raise HTTPException(410, f"附件文件已丢失: {path.name}")
+    return FileResponse(path, filename=path.name)
 
 
 @router.put("/profiles/{profile_id}")

@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <title>教育经历多区块基准页（Ant 风格 + 添加按钮）</title>
+  <style>
+    body { font: 14px/1.6 system-ui, "Microsoft YaHei"; padding: 24px; }
+    .ant-form-item { display: flex; align-items: center; margin-bottom: 10px; }
+    .ant-form-item-label { width: 110px; text-align: right; padding-right: 12px; }
+    .ant-form-item-control { flex: 1; }
+    input[type="text"] { width: 100%; box-sizing: border-box; padding: 6px 10px; border: 1px solid #d9d9d9; border-radius: 6px; }
+    #add-edu { margin: 8px 0 16px 122px; padding: 4px 14px; cursor: pointer; border: 1px dashed #3370ff; color: #3370ff; width: auto; display: inline-block; }
+    .edu-block { border: 1px solid #eee; padding: 10px; margin-bottom: 10px; border-radius: 6px; }
+    h3 { margin: 10px 0; }
+    #upload-status { color: #666; font-size: 13px; }
+  </style>
+</head>
+<body>
+  <h3>教育经历</h3>
+  <div id="edu-blocks">
+    <div class="edu-block">
+      <div class="ant-form-item">
+        <div class="ant-form-item-label"><label>学校名称</label></div>
+        <div class="ant-form-item-control"><input type="text" class="edu-school" /></div>
+      </div>
+      <div class="ant-form-item">
+        <div class="ant-form-item-label"><label>专业名称</label></div>
+        <div class="ant-form-item-control"><input type="text" class="edu-major" /></div>
+      </div>
+    </div>
+  </div>
+  <span id="add-edu">添加教育经历</span>
+
+  <h3>附件</h3>
+  <div class="ant-form-item">
+    <div class="ant-form-item-label"><label>上传简历附件</label></div>
+    <div class="ant-form-item-control"><input id="resume-file" type="file" accept=".pdf,.doc,.docx,.txt,.md" /></div>
+  </div>
+  <div id="upload-status">未上传</div>
+
+  <script>
+    let seq = 1;
+    document.getElementById("add-edu").addEventListener("click", () => {
+      seq += 1;
+      const block = document.createElement("div");
+      block.className = "edu-block";
+      block.innerHTML = `
+        <div class="ant-form-item">
+          <div class="ant-form-item-label"><label>学校名称</label></div>
+          <div class="ant-form-item-control"><input type="text" class="edu-school" /></div>
+        </div>
+        <div class="ant-form-item">
+          <div class="ant-form-item-label"><label>专业名称</label></div>
+          <div class="ant-form-item-control"><input type="text" class="edu-major" /></div>
+        </div>`;
+      document.getElementById("edu-blocks").appendChild(block);
+    });
+    // 模拟真实上传器：读 input.files[0] 展示文件名
+    document.getElementById("resume-file").addEventListener("change", (e) => {
+      const f = e.target.files && e.target.files[0];
+      document.getElementById("upload-status").textContent = f
+        ? `已选择: ${f.name} (${f.size}B)`
+        : "未上传";
+    });
+  </script>
+</body>
+</html>

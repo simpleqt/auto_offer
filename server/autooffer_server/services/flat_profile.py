@@ -10,6 +10,7 @@ repeat 段 items[] 每条含独立 values。
 
 from __future__ import annotations
 
+import re
 from typing import Any
 
 from pydantic import BaseModel
@@ -301,10 +302,23 @@ class _Flattener:
                     sec["values"] = _clean(sec["values"])
                     break
         self._other(p, ext)
+        attachments = [
+            {
+                "kind": a.kind,
+                "label": a.label,
+                # 去掉落盘时加的 uuid 前缀（如 003bf0e8_简历.pdf → 简历.pdf）
+                "filename": re.sub(
+                    r"^[0-9a-f]{8}_", "", a.path.replace("\\", "/").rsplit("/", 1)[-1]
+                ),
+                "language": a.language,
+            }
+            for a in p.attachments
+        ]
         return {
             "schema": 1,
             "profile": {"id": p.id, "label": p.label},
             "sections": self.sections,
+            "attachments": attachments,
         }
 
 

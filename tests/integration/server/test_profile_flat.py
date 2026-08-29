@@ -88,3 +88,30 @@ def test_flat_sensitive_opt_in(client: TestClient) -> None:
 def test_flat_unknown_profile_404(client: TestClient) -> None:
     resp = client.get("/api/v1/profiles/no-such/flat")
     assert resp.status_code == 404
+
+
+def test_flat_lists_attachments(client: TestClient) -> None:
+    put_sample(client)
+    body = client.get("/api/v1/profiles/demo-profile/flat").json()
+    names = [a["filename"] for a in body.get("attachments", [])]
+    assert "zhangsan_cn.pdf" in names
+    kinds = {a["kind"] for a in body["attachments"]}
+    assert kinds >= {"resume", "photo"}
+
+
+def test_attachment_download(client: TestClient, tmp_path: Any) -> None:
+    """附件字节下载：真实文件可下载；丢失文件 410；越界 404。"""
+    file = tmp_path / "resume_cn.pdf"
+    file.write_bytes(b"%PDF-1.4 fake resume bytes")
+    payload = sample_profile_payload()
+    payload["attachments"][0]["path"] = str(file)
+    client.put("/api/v1/profiles/demo-profile", json={"label": "x", "payload": payload})
+
+    ok = client.get("/api/v1/profiles/demo-profile/attachments/0")
+    assert ok.status_code == 200
+    assert ok.content.startswith(b"%PDF")
+
+    missing = client.get("/api/v1/profiles/demo-profile/attachments/1")  # 英文简历路径不存在
+    assert missing.status_code == 410
+    oob = client.get("/api/v1/profiles/demo-profile/attachments/99")
+    assert oob.status_code == 404

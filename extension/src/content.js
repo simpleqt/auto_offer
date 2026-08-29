@@ -519,6 +519,28 @@
     return norm(text, 60);
   }
 
+  // 已知区块标题（Phoenix 等自研框架的标题是无语义类名的裸 DIV，按文本识别）
+  const SECTION_TITLE_RE =
+    /^(基本信息|个人信息|求职意向|教育经历|实习经历|工作经历|项目经历|语言能力|外语能力|专业技能|计算机技能|证书|奖惩情况|家庭情况|家庭成员|其他信息|附加信息|自我评价|自我描述|论文著作|专利成果)$/;
+  let sectionTitleCache = null;
+
+  function collectSectionTitles() {
+    const titles = [];
+    for (const el of document.querySelectorAll("h2,h3,h4,section,div,span")) {
+      if (el.children.length > 0) {
+        continue;
+      }
+      const t = norm(el.textContent, 12);
+      if (SECTION_TITLE_RE.test(t) && isVisible(el)) {
+        if (el.closest('[class*="anchor" i],nav')) {
+          continue; // 锚点导航不算
+        }
+        titles.push({ el, text: t });
+      }
+    }
+    return titles;
+  }
+
   /** 最近区块标题：自内向外，取「文档顺序在字段之前」的最后一个标题。 */
   function findSectionText(el, sectionSelector) {
     let node = el.parentElement;
@@ -542,7 +564,17 @@
         return best;
       }
     }
-    return "";
+    // 兜底：按已知标题文本识别（样式组件无语义类名）
+    if (!sectionTitleCache) {
+      sectionTitleCache = collectSectionTitles();
+    }
+    let bestTitle = "";
+    for (const t of sectionTitleCache) {
+      if (t.el.isConnected && t.el.compareDocumentPosition(el) & Node.DOCUMENT_POSITION_FOLLOWING) {
+        bestTitle = t.text;
+      }
+    }
+    return bestTitle;
   }
 
   function isCustomChoiceControl(el, container) {
@@ -563,6 +595,19 @@
     return /select|picker|dropdown|combobox|cascader/i.test(String(probe.className || ""));
   }
 
+  /** 文件输入常以 opacity:0 隐藏在可见上传区内，用「可见祖先」判断。 */
+  function hasVisibleAncestor(el, hops = 5) {
+    let node = el.parentElement;
+    while (node && hops > 0) {
+      if (isVisible(node)) {
+        return true;
+      }
+      node = node.parentElement;
+      hops -= 1;
+    }
+    return false;
+  }
+
   /**
    * 扫描页面可填字段。
    * 返回 { fields, uploads }；fields 含 label/section/nearbyText/control 元数据。
@@ -573,6 +618,8 @@
     const fields = [];
     const uploads = [];
     const seenRadioGroups = new Set();
+    const labelCounts = new Map(); // 同区块同标签出现序号（repeat 多区块配对用）
+    sectionTitleCache = null; // 页面重渲染后标题元素可能失效，重扫时重建
 
     let controls = [];
     try {
@@ -582,14 +629,20 @@
     }
 
     for (const el of controls) {
-      if (!isVisible(el) || el.disabled) {
+      if (el.disabled) {
         continue;
       }
       const tag = el.tagName.toLowerCase();
       const type = (el.getAttribute("type") || "").toLowerCase();
 
+      // 文件输入宽松可见性（本身常 opacity:0，只要求在可见上传区内）
       if (tag === "input" && (type === "file" || UPLOAD_RE.test(el.accept || ""))) {
-        uploads.push(el);
+        if (uploads.length < 10 && hasVisibleAncestor(el)) {
+          uploads.push(el);
+        }
+        continue;
+      }
+      if (!isVisible(el)) {
         continue;
       }
       if (tag === "input" && ["button", "submit", "reset", "image", "hidden"].includes(type)) {
@@ -655,6 +708,11 @@
           ? norm(Array.from(el.options || []).map((o) => o.textContent).join(" "), 160)
           : "";
 
+      // occurrence 按「区块+标签」计数：不同区块（工作/项目经历）各自从 0 起
+      const labelKey = `${section}|${kind}|${label}`;
+      const occurrenceIndex = labelCounts.get(labelKey) || 0;
+      labelCounts.set(labelKey, occurrenceIndex + 1);
+
       fields.push({
         element: el,
         container,
@@ -664,6 +722,7 @@
         optionText,
         currentValue,
         kind,
+        occurrenceIndex,
         required: Boolean(container && container.querySelector(".ant-form-item-required,[class*='required'],[required]")),
       });
     }
@@ -736,28 +795,27 @@
 
   // ---------- 档案条目 ----------
 
-  /** 扁平档案 → 匹配条目。M1 只取 repeat 段第一条（多条为 M3 范围）。 */
+  /** 扁平档案 → 匹配条目。repeat 段带 itemIndex 供多条目区块配对（每段上限 4 条）。 */
   function buildEntries(flatProfile) {
     const entries = [];
     for (const section of (flatProfile && flatProfile.sections) || []) {
       if (section.kind === "repeat") {
-        const item = (section.items || [])[0];
-        if (!item) {
-          continue;
-        }
-        for (const [label, value] of Object.entries(item)) {
-          pushEntry(entries, label, value, section.title);
-        }
+        const items = (section.items || []).slice(0, 4);
+        items.forEach((item, itemIndex) => {
+          for (const [label, value] of Object.entries(item)) {
+            pushEntry(entries, label, value, section.title, itemIndex);
+          }
+        });
       } else {
         for (const [label, value] of Object.entries(section.values || {})) {
-          pushEntry(entries, label, value, section.title);
+          pushEntry(entries, label, value, section.title, 0);
         }
       }
     }
     return entries;
   }
 
-  function pushEntry(entries, label, value, category) {
+  function pushEntry(entries, label, value, category, itemIndex) {
     const stringValue = value == null ? "" : String(value).trim();
     if (!stringValue) {
       return;
@@ -766,6 +824,7 @@
       label,
       value: stringValue,
       category,
+      itemIndex,
       aliases: LABEL_ALIASES[label] || [],
     });
   }
@@ -856,7 +915,11 @@
       }
       for (let ei = 0; ei < entries.length; ei += 1) {
         const entry = entries[ei];
-        const score = scoreField(field, entry);
+        let score = scoreField(field, entry);
+        // repeat 多区块：第 N 个同标签字段优先配第 N 条档案条目
+        if (score > 0 && field.occurrenceIndex === entry.itemIndex) {
+          score += 6;
+        }
         const threshold = field.currentValue ? SCORE_THRESHOLD_PREFILLED : SCORE_THRESHOLD;
         if (score >= threshold) {
           candidates.push({ fi, ei, score });
@@ -893,7 +956,9 @@
     return container || el.parentElement || el;
   }
 
-  /** 收集当前可见弹层（portal 渲染的下拉/日历/级联）。 */
+  /** 收集当前可见弹层（portal 渲染的下拉/日历/级联）。
+   *  高度门槛 60：Phoenix 会把每个 select 触发器也渲染成 32px 的
+   *  phoenix-unmodeled-layer 小条，真面板（下拉/日历）都在 200px+。 */
   function findPopupLayers() {
     const layers = [];
     for (const el of document.querySelectorAll(PANEL_SELECTOR)) {
@@ -901,7 +966,7 @@
         continue;
       }
       const r = el.getBoundingClientRect();
-      if (r.width < 30 || r.height < 20) {
+      if (r.width < 60 || r.height < 60) {
         continue;
       }
       // 跳过嵌套层：祖先弹层已覆盖
@@ -1265,10 +1330,18 @@
         return { ok: true };
       }
       if (field.kind === "custom-choice") {
-        // 「至今」：结束时间类字段的伴随开关（自绘 checkbox），点开关而非面板
+        // 「至今」：结束时间类字段的伴随开关（自绘 checkbox）；已勾选则跳过（幂等）
         if (norm(entry.value, 6) === "至今") {
           const toggle = findSiblingToggle(field, "至今");
           if (toggle) {
+            const cls = String(toggle.className || "");
+            const alreadyOn =
+              /checked|active|selected/i.test(cls) ||
+              toggle.getAttribute("aria-checked") === "true" ||
+              Boolean(toggle.querySelector('[class*="checked"],[class*="active"]'));
+            if (alreadyOn) {
+              return { ok: true, trust: true };
+            }
             clickActionElement(toggle);
             await sleep(220);
             return { ok: true, trust: true };
@@ -1338,14 +1411,277 @@
     return norm(el.value || "", 400);
   }
 
+  // ---------- repeat 多区块（教育经历自动补块；项目/工作经历只填现存块） ----------
+
+  const REPEAT_ADD_RULES = [
+    { category: /教育经历/, anchor: /学校|院校/, btn: /添加.*教育|新增.*教育/ },
+  ];
+
+  function findAddButton(re) {
+    return Array.from(document.querySelectorAll("button,a,span,div")).find((el) => {
+      const hasTextualChild = Array.from(el.children).some((c) => norm(c.textContent, 5));
+      if (hasTextualChild || !isVisible(el)) {
+        return false;
+      }
+      const t = norm(el.textContent, 14);
+      return re.test(t) && t.length <= 12;
+    });
+  }
+
+  function countAnchorFields(rule) {
+    return scanFields(detectSiteAdapter()).fields.filter((f) =>
+      rule.anchor.test(f.label || "")
+    ).length;
+  }
+
+  async function waitFor(predicate, timeoutMs) {
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      if (predicate()) {
+        return true;
+      }
+      await sleep(150);
+    }
+    return predicate();
+  }
+
+  /** 档案条目多于页面区块时点「添加XX经历」补足（仅教育经历，最多补 3 块）。 */
+  async function ensureRepeatBlocks(flatProfile, options) {
+    if (options && options.noAddBlocks) {
+      return;
+    }
+    for (const section of (flatProfile && flatProfile.sections) || []) {
+      if (section.kind !== "repeat") {
+        continue;
+      }
+      const need = (section.items || []).length;
+      if (need <= 1) {
+        continue;
+      }
+      const rule = REPEAT_ADD_RULES.find((r) => r.category.test(section.title));
+      if (!rule) {
+        continue;
+      }
+      for (let added = 0; added < Math.min(need - 1, 3); added += 1) {
+        const blocks = countAnchorFields(rule);
+        if (blocks >= need) {
+          break;
+        }
+        const btn = findAddButton(rule.btn);
+        if (!btn) {
+          break;
+        }
+        clickActionElement(btn);
+        const grew = await waitFor(() => countAnchorFields(rule) > blocks, 3500);
+        if (!grew) {
+          break;
+        }
+        await sleep(250);
+      }
+    }
+  }
+
+  /** 找面板内的滚动容器（虚拟列表常在 200-300px 高的内层滚动）。 */
+  function findScroller(layer) {
+    if (layer.scrollHeight > layer.clientHeight + 10) {
+      return layer;
+    }
+    for (const c of layer.querySelectorAll("*")) {
+      if (c.scrollHeight > c.clientHeight + 10 && c.clientHeight > 40) {
+        return c;
+      }
+    }
+    return null;
+  }
+
+  /** 逐屏滚动收割选项（虚拟滚动列表只渲染可视区）。 */
+  async function sweepLayerOptions(layer, out, seen) {
+    const scroller = findScroller(layer);
+    if (!scroller) {
+      collectLeafOptions(layer, out, seen);
+      return;
+    }
+    const step = Math.max(60, Math.floor(scroller.clientHeight * 0.8));
+    for (const y of [0, step, step * 2, step * 3, step * 4, step * 5, step * 6]) {
+      if (y > scroller.scrollHeight) {
+        break;
+      }
+      scroller.scrollTop = y;
+      await sleep(140); // 等虚拟列表渲染（重页面需要更久）
+      collectLeafOptions(layer, out, seen);
+    }
+    // 第二程兜底：首程虚拟行未渲染完时补收
+    for (let y = scroller.scrollHeight; y >= 0; y -= step) {
+      scroller.scrollTop = y;
+      await sleep(120);
+      collectLeafOptions(layer, out, seen);
+    }
+    scroller.scrollTop = 0;
+    await sleep(80);
+  }
+
+  /** 收割固定选项字段的选项清单（native select 直接读；自定义下拉取新出现的弹层）。 */
+  async function harvestFieldOptions(field) {
+    try {
+      if (field.kind === "select") {
+        return Array.from(field.element.options || [])
+          .map((o) => norm(o.textContent, 30))
+          .filter((t) => t && t !== "请选择");
+      }
+      if (field.kind !== "custom-choice") {
+        return [];
+      }
+      const trigger =
+        field.element.closest('[class*="select"],[class*="picker"]') || field.element;
+      // 清空搜索词（失败尝试可能把选项过滤隐藏）
+      if (field.element instanceof HTMLInputElement && field.element.value) {
+        setNativeValue(field.element, "");
+        await sleep(150);
+      }
+      // 失败尝试后面板往往仍开着：直接收割，避免再点触发器把面板关掉
+      let layers = findPopupLayers();
+      if (layers.length === 0) {
+        clickActionElement(trigger);
+        await sleep(300);
+        layers = findPopupLayers();
+      }
+      const noise = /^(请选择|删除|全部|确定|取消)$|^\d{4}-\d{1,2}(-\d{1,2})?$/;
+      const nodes = [];
+      const seen = new Set();
+      for (const layer of layers) {
+        await sweepLayerOptions(layer, nodes, seen);
+      }
+      const opts = [];
+      const seenText = new Set();
+      for (const node of nodes) {
+        const t = norm(node.textContent, 40);
+        if (t && t.length <= 25 && !noise.test(t) && !seenText.has(t)) {
+          seenText.add(t);
+          opts.push(t);
+        }
+      }
+      // 关面板：模拟外部点击
+      document.body.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
+      document.body.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
+      await sleep(150);
+      return opts;
+    } catch {
+      return [];
+    }
+  }
+
+  // ---------- 附件上传（File 构造 + DataTransfer 注入） ----------
+
+  const FILE_MIME = {
+    pdf: "application/pdf",
+    doc: "application/msword",
+    docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    xls: "application/vnd.ms-excel",
+    xlsx: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    ppt: "application/vnd.ms-powerpoint",
+    pptx: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+    jpg: "image/jpeg",
+    jpeg: "image/jpeg",
+    png: "image/png",
+    gif: "image/gif",
+    txt: "text/plain",
+    md: "text/markdown",
+    html: "text/html",
+    htm: "text/html",
+  };
+
+  function b64ToFile(b64, filename) {
+    const bin = atob(b64);
+    const arr = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i += 1) {
+      arr[i] = bin.charCodeAt(i);
+    }
+    const ext = (filename.split(".").pop() || "").toLowerCase();
+    return new File([arr], filename, { type: FILE_MIME[ext] || "application/octet-stream" });
+  }
+
+  /** 按字段文本挑选档案附件（简历/证件照/成绩单…，中英文再细分）。 */
+  function pickAttachment(fieldText, attachments) {
+    let best = null;
+    let bestScore = 0;
+    for (const a of attachments) {
+      if (!a.b64) {
+        continue;
+      }
+      let s = 0;
+      if (/简历/.test(fieldText) && a.kind === "resume") s += 5;
+      if (/证件照|照片/.test(fieldText) && a.kind === "photo") s += 5;
+      if (/成绩单/.test(fieldText) && a.kind === "transcript") s += 5;
+      if (/证书/.test(fieldText) && a.kind === "certificate") s += 5;
+      if (/作品集/.test(fieldText) && a.kind === "portfolio") s += 5;
+      if (/英文|english/i.test(fieldText) && a.language === "en") s += 2;
+      if (/中文|中文简历/.test(fieldText) && a.language === "zh") s += 1;
+      if (s > bestScore) {
+        bestScore = s;
+        best = a;
+      }
+    }
+    return bestScore >= 5 ? best : null;
+  }
+
+  async function fillUploads(uploads, attachments, adapter) {
+    const results = [];
+    if (!Array.isArray(attachments) || attachments.length === 0 || uploads.length === 0) {
+      return results;
+    }
+    const { containerSelector: cs } = getAdapterSelectors(adapter);
+    for (const up of uploads) {
+      let row = findContainer(up, cs) || up.closest("label") || up;
+      // [class*="form-item"] 会子串命中内层容器，向上取最外层表单行
+      while (
+        row.parentElement &&
+        String(row.parentElement.className || "").includes("form-item")
+      ) {
+        row = row.parentElement;
+      }
+      const fieldText = norm(row.textContent, 80);
+      const picked = pickAttachment(fieldText, attachments);
+      if (!picked) {
+        results.push({ label: fieldText || "附件", ok: false, reason: "无匹配附件" });
+        continue;
+      }
+      try {
+        const file = b64ToFile(picked.b64, picked.filename);
+        const dt = new DataTransfer();
+        dt.items.add(file);
+        up.files = dt.files;
+        up.dispatchEvent(new Event("input", { bubbles: true }));
+        up.dispatchEvent(new Event("change", { bubbles: true }));
+        results.push({ label: fieldText || "附件", ok: true, value: picked.filename });
+      } catch (err) {
+        results.push({
+          label: fieldText || "附件",
+          ok: false,
+          reason: String((err && err.message) || err).slice(0, 80),
+        });
+      }
+      await sleep(250);
+    }
+    return results;
+  }
+
   // ---------- 主入口 ----------
 
   async function autofill(flatProfile, options) {
     const adapter = detectSiteAdapter();
+    await ensureRepeatBlocks(flatProfile, options);
     const { fields, uploads } = scanFields(adapter);
     const entries = buildEntries(flatProfile);
     const mapping = (options && options.mapping) || null;
     const { plan, usedFields } = buildPlan(fields, entries, mapping);
+    // AI 选选项覆盖：字段标签 → 选中的选项值
+    const overrides = (options && options.overrides) || {};
+    for (const item of plan) {
+      const ov = overrides[item.field.label];
+      if (ov) {
+        item.entry = { ...item.entry, value: String(ov) };
+      }
+    }
 
     const filled = [];
     const failed = [];
@@ -1380,7 +1716,26 @@
       } else if (result.ok) {
         failed.push({ label, field: label, value: item.entry.value, reason: "已执行但回读不一致" });
       } else {
-        failed.push({ label, field: label, value: item.entry.value, reason: result.reason || "执行失败" });
+        const row = {
+          label,
+          field: label,
+          value: item.entry.value,
+          reason: result.reason || "执行失败",
+        };
+        // 选项未匹配类失败：收割选项清单，供 AI 选选项通道二段使用
+        if (/未匹配到选项/.test(row.reason) && item.field.kind !== "radio") {
+          let opts = await harvestFieldOptions(item.field);
+          if (opts.length > 0 && opts.length < 30) {
+            // 虚拟列表首收常不全：面板已渲染后再收一次合并
+            await sleep(400);
+            const more = await harvestFieldOptions(item.field);
+            opts = Array.from(new Set([...opts, ...more]));
+          }
+          if (opts.length > 1) {
+            row.options = opts.slice(0, 60);
+          }
+        }
+        failed.push(row);
       }
       await sleep(30);
     }
@@ -1410,10 +1765,58 @@
         }
       }
     }
-    for (const up of uploads) {
-      const { containerSelector: cs } = getAdapterSelectors(adapter);
-      const row = findContainer(up, cs) || up.closest("label") || up;
-      skipped.push({ field: norm(row.textContent, 60) || "附件", reason: "附件需手动上传" });
+    const { containerSelector: cs } = getAdapterSelectors(adapter);
+    const hasAttachments = Array.isArray(options && options.attachments) && options.attachments.length > 0;
+    if (!hasAttachments) {
+      for (const up of uploads) {
+        let row = findContainer(up, cs) || up.closest("label") || up;
+        while (
+          row.parentElement &&
+          String(row.parentElement.className || "").includes("form-item")
+        ) {
+          row = row.parentElement;
+        }
+        skipped.push({ field: norm(row.textContent, 60) || "附件", reason: "附件需手动上传" });
+      }
+    } else {
+      const uploadRows = await fillUploads(uploads, options.attachments, adapter);
+      for (const r of uploadRows) {
+        if (r.ok) {
+          filled.push({ label: r.label, field: r.label, value: r.value, via: "附件" });
+        } else {
+          skipped.push({ field: r.label, reason: r.reason || "附件上传失败" });
+        }
+      }
+    }
+
+    // 固定选项字段上报（供 AI 选选项通道）：native select 直接读，
+    // 自定义下拉沿用失败时收割到的选项清单
+    const optionFields = [];
+    const seenOptLabels = new Set();
+    const addOptField = (label, options) => {
+      if (
+        label &&
+        !seenOptLabels.has(label) &&
+        Array.isArray(options) &&
+        options.length > 1 &&
+        optionFields.length < 40
+      ) {
+        seenOptLabels.add(label);
+        optionFields.push({ label, options: options.slice(0, 60) });
+      }
+    };
+    for (const f of fields) {
+      if (f.kind === "select" && f.optionText && f.optionText.length > 1) {
+        addOptField(
+          f.label,
+          String(f.optionText).split(/[\s,，、]+/).filter(Boolean)
+        );
+      }
+    }
+    for (const r of failed) {
+      if (r.options) {
+        addOptField(r.label, r.options);
+      }
     }
 
     return {
@@ -1423,6 +1826,7 @@
       failed,
       skipped,
       unmatched,
+      optionFields,
     };
   }
 
@@ -1436,12 +1840,17 @@
     buildPlan,
     scoreField,
     tryFillDatePicker,
+    harvestFieldOptions,
   };
 
   if (typeof chrome !== "undefined" && chrome.runtime && chrome.runtime.onMessage) {
     chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
       if (msg && msg.type === "autooffer:fill") {
-        autofill(msg.profile || {}, { mapping: msg.mapping || null })
+        autofill(msg.profile || {}, {
+          mapping: msg.mapping || null,
+          overrides: msg.overrides || null,
+          attachments: msg.attachments || null,
+        })
           .then(sendResponse)
           .catch((err) => sendResponse({ error: String((err && err.message) || err) }));
         return true; // 异步响应

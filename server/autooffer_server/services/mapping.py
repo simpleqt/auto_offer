@@ -49,6 +49,85 @@ class MappingMatch(BaseModel):
     confidence: float
 
 
+class OptionPick(BaseModel):
+    """待选选项的固定选项字段（页面标签 + 选项 + 档案值）。
+
+    隐私说明：value 会进入 LLM 提示词——与简历解析同一信任域
+    （该值本就要写入公开页面），且仅逐字段发送。
+    """
+
+    label: str
+    options: list[str] = []
+    value: str = ""
+
+
+class OptionChoice(BaseModel):
+    label: str
+    option: str
+    confidence: float
+
+
+OPTION_MATCH_PROMPT = """你是招聘表单的选项匹配引擎。给你若干「字段标签 + 候选选项 + 求职者的值」，
+为每个值从对应选项中选出语义最接近的一项。
+
+规则：
+1. 只输出 JSON：{"choices": [{"label": "字段标签", "option": "选中的选项原文", "confidence": 0到1}]}
+2. option 必须逐字使用候选选项之一，不得改写。
+3. 没有接近的选项（完全不同的语义）就不要输出该字段。
+4. confidence 低于 0.55 的不要输出。"""
+
+
+async def match_options(picks: list[OptionPick], llm: Any) -> list[OptionChoice]:
+    """为固定选项字段挑选项（值 → 选项）。模型偶发拒答时空结果重试一次。"""
+    valid = [p for p in picks if p.options and p.value]
+    if not valid:
+        return []
+    payload = [
+        {"label": p.label, "options": p.options[:60], "value": p.value[:80]}
+        for p in valid[:60]
+    ]
+    from autooffer_core.llm.interfaces import ChatMessage
+
+    def build_prompt(extra: str = "") -> str:
+        return (
+            OPTION_MATCH_PROMPT
+            + "\n\n输入：\n"
+            + json.dumps(payload, ensure_ascii=False)
+            + extra
+        )
+
+    def filter_choices(raw: Any) -> list[OptionChoice]:
+        by_label = {p.label: set(p.options) for p in valid}
+        out: list[OptionChoice] = []
+        for item in raw.get("choices", []):
+            try:
+                c = OptionChoice.model_validate(
+                    {
+                        "label": str(item.get("label", "")),
+                        "option": str(item.get("option", "")),
+                        "confidence": float(item.get("confidence", 0)),
+                    }
+                )
+            except (ValueError, TypeError):
+                continue
+            if c.confidence >= 0.55 and c.option in by_label.get(c.label, set()):
+                out.append(c)
+        return out
+
+    response = await llm.complete([ChatMessage(role="user", content=build_prompt())])
+    choices = filter_choices(_extract_json(response.text))
+    if not choices:
+        # 具体职位/方向 → 职业大类 的归类是合法匹配，追加提示重试一次
+        extra = (
+            "\n\n注意：若选项是大类（如「计算机·网络·技术类」）"
+            "而值是具体职位/方向，请选择所属大类。"
+        )
+        response = await llm.complete([ChatMessage(role="user", content=build_prompt(extra))])
+        choices = filter_choices(_extract_json(response.text))
+    log.info("option_match.done", picks=len(valid), choices=len(choices))
+    return choices
+
+
 def _extract_json(text: str) -> Any:
     """从模型输出中提取 JSON（容忍代码围栏与前后缀文本）。"""
     cleaned = re.sub(r"```(?:json)?|```", "", text).strip()

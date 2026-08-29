@@ -34,3 +34,6 @@ Thumbs.db
 
 # 本地测试浏览器登录态
 .browser-profile/
+
+# 真实站点测试截图（含个人信息，不入库）
+artifacts/

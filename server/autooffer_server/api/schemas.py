@@ -145,3 +145,25 @@ class MappingOut(BaseModel):
     """AI 字段映射结果：页面标签 → 档案标签。"""
 
     matches: list[MappingMatchOut] = []
+
+
+class OptionPickIn(BaseModel):
+    """固定选项字段：页面选项 + 档案值（值会进 LLM，与简历解析同信任域）。"""
+
+    label: str
+    options: list[str] = []
+    value: str = ""
+
+
+class OptionMatchIn(BaseModel):
+    picks: list[OptionPickIn] = []
+
+
+class OptionChoiceOut(BaseModel):
+    label: str
+    option: str
+    confidence: float
+
+
+class OptionMatchOut(BaseModel):
+    choices: list[OptionChoiceOut] = []
