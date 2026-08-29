@@ -3,6 +3,16 @@
 本项目遵循 [Conventional Commits](https://www.conventionalcommits.org/)，版本策略为 SemVer。
 由 `git-cliff` 从提交历史生成（配置见 `cliff.toml`；本文件在无 git-cliff 环境下按同格式手动维护）。
 
+## [v0.2.3] - 2026-08-28
+
+**飞书招聘（jobs.feishu.cn）适配版**：第四个真实平台实测驱动。
+
+### Features
+
+- (**extension**) 飞书 ud-formily 适配器：`jobs.feishu.cn` 域名识别；字段标签优先读行元素自带的 `data-form-field-i18n-name`（最可靠标签源）；区块标题 `applyFormModuleWrapper-title` 识别
+- (**extension**) 通用能力增强（飞书实测暴露）：表单内 `type=search` 输入归为自定义下拉；自定义下拉回读认识 `selectItem`（ud Select 选中值载体）并逐层扩大回读范围（search 外壳 → 表单行）；起止时间区间配对（页面把起止合并为同标签两个输入时，与档案 开始时间/结束时间 按区块分组顺序配对）；findSectionText 爬升上限 12→18 层（数组卡片多嵌套）；repeat 区块内裸「添加」按钮支持（按区块标题圈定搜索范围，防误点相邻模块；合成 click 无效时补发指针序列）
+- 真实站点验证（微克之家·对话智能算法专家申请表）：**规则直填 12 项 0 失败**——教育经历自动补块到 2 条（学校/学历/专业/起止区间全对）+ 姓名/邮箱 + PDF 附件注入；新增 feishu_like 基准页回归
+
 ## [v0.2.2] - 2026-08-28
 
 **跨站泛化修复版**：非北森平台（Moka）真实站点实测暴露的适配缺口全修复。

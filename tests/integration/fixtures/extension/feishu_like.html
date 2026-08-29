@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>飞书招聘申请表单基准页（ud-formily 结构）</title>
+<style>
+  body { font-family: "Microsoft YaHei", sans-serif; margin: 24px; max-width: 720px; }
+  .applyFormModuleWrapper { border: 1px solid #eee; border-radius: 8px; margin: 14px 0; padding: 12px; }
+  .applyFormModuleWrapper-title { font-weight: 600; margin-bottom: 8px; }
+  .ud-formily-item { display: flex; align-items: center; margin: 8px 0; }
+  .ud-formily-item-layout-vertical { flex-direction: column; align-items: stretch; }
+  .ud-formily-item-label { width: 100px; color: #333; }
+  .ud-formily-item-control { flex: 1; }
+  .ud-formily-item-control input { border: 1px solid #ccc; padding: 6px 8px; width: 90%; }
+  .apply-form-array-card { border: 1px dashed #ccc; padding: 8px; margin: 8px 0; }
+  .add-btn { cursor: pointer; color: #3370ff; }
+  .edu-panel { display: none; border: 1px solid #ccc; background: #fff; margin-top: 4px; }
+  .edu-panel.open { display: block; }
+  .edu-panel div { padding: 6px 10px; cursor: pointer; }
+  .edu-panel div:hover { background: #f0f4ff; }
+</style>
+</head>
+<body>
+<h2>对话智能算法专家 - 申请</h2>
+
+<div class="applyFormModuleWrapper">
+  <div class="applyFormModuleWrapper-title">基本信息</div>
+  <div data-form-field-id="name" data-form-field-name="name" data-form-field-i18n-name="姓名"
+       class="ud-formily-item ud-formily-item-layout-vertical">
+    <div class="ud-formily-item-label"><div class="ud-formily-item-label-content"><span><label>姓名</label></span></div></div>
+    <div class="ud-formily-item-control"><div class="ud-formily-item-control-content"><input type="text"></div></div>
+  </div>
+  <div data-form-field-i18n-name="手机号码" class="ud-formily-item ud-formily-item-layout-vertical">
+    <div class="ud-formily-item-label"><label>手机号码</label></div>
+    <div class="ud-formily-item-control"><input type="text" value="13800001111" readonly></div>
+  </div>
+  <div data-form-field-i18n-name="邮箱" class="ud-formily-item ud-formily-item-layout-vertical">
+    <div class="ud-formily-item-label"><label>邮箱</label></div>
+    <div class="ud-formily-item-control"><input type="text"></div>
+  </div>
+</div>
+
+<div class="applyFormModuleWrapper" id="edu-module">
+  <div class="applyFormModuleWrapper-title">教育经历</div>
+  <div id="edu-blocks">
+    <div class="apply-form-array-card">
+      <div class="register-form-group-wrapper">
+        <div data-form-field-i18n-name="学校名称" class="ud-formily-item ud-formily-item-layout-vertical">
+          <div class="ud-formily-item-label"><label>学校名称</label></div>
+          <div class="ud-formily-item-control"><input type="text" class="school-input"></div>
+        </div>
+        <div data-form-field-i18n-name="学历" class="ud-formily-item ud-formily-item-layout-vertical">
+          <div class="ud-formily-item-label"><label>学历</label></div>
+          <div class="ud-formily-item-control">
+            <input type="search" class="edu-select-trigger" placeholder="请选择">
+            <div class="edu-panel">
+              <div>本科</div><div>硕士研究生</div><div>博士研究生</div>
+            </div>
+          </div>
+        </div>
+        <div data-form-field-i18n-name="专业" class="ud-formily-item ud-formily-item-layout-vertical">
+          <div class="ud-formily-item-label"><label>专业</label></div>
+          <div class="ud-formily-item-control"><input type="text" class="major-input"></div>
+        </div>
+        <div data-form-field-i18n-name="起止时间" class="ud-formily-item ud-formily-item-layout-vertical">
+          <div class="ud-formily-item-label"><label>起止时间</label></div>
+          <div class="ud-formily-item-control">
+            <input type="text" class="range-start"> ~ <input type="text" class="range-end">
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <button class="add-btn" id="edu-add">添加</button>
+</div>
+
+<div class="applyFormModuleWrapper" id="social-module">
+  <div class="applyFormModuleWrapper-title">社交账号</div>
+  <div id="social-empty">（暂无内容）</div>
+  <button class="add-btn" id="social-add">添加</button>
+</div>
+
+<script>
+  // 教育经历：裸「添加」克隆一个新块
+  var seq = 1;
+  document.getElementById("edu-add").addEventListener("click", function () {
+    seq += 1;
+    var first = document.querySelector(".apply-form-array-card");
+    var clone = first.cloneNode(true);
+    clone.querySelectorAll("input").forEach(function (i) { i.value = ""; });
+    document.getElementById("edu-blocks").appendChild(clone);
+  });
+  // 社交账号：自己的添加按钮（引擎不得误点）
+  document.getElementById("social-add").addEventListener("click", function () {
+    var d = document.createElement("div");
+    d.className = "social-added";
+    d.innerText = "social-" + (++window.__socialSeq || (window.__socialSeq = 1));
+    document.getElementById("social-empty").appendChild(d);
+  });
+  // 学历：search 触发器 → 面板选项点击选中
+  document.addEventListener("click", function (e) {
+    document.querySelectorAll(".edu-select-trigger").forEach(function (t) {
+      var panel = t.parentElement.querySelector(".edu-panel");
+      if (e.target === t) {
+        panel.classList.add("open");
+      } else if (!panel.contains(e.target)) {
+        panel.classList.remove("open");
+      }
+    });
+    if (e.target.parentElement && e.target.parentElement.classList.contains("edu-panel")) {
+      var trig = e.target.closest(".ud-formily-item-control").querySelector(".edu-select-trigger");
+      trig.value = e.target.innerText.trim();
+      e.target.parentElement.classList.remove("open");
+    }
+  });
+</script>
+</body>
+</html>

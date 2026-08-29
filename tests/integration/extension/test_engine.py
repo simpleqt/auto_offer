@@ -373,3 +373,45 @@ async def test_moka_apply_real_structure(page: Page) -> None:
     assert (await page.eval_on_selector(".area-code", "el => el.innerText")) == "+86"
     # 推荐码无对应档案字段 → 跳过而非误填
     assert await page.input_value('input[placeholder="推荐码"]') == ""
+
+
+async def test_feishu_ud_formily(page: Page) -> None:
+    """飞书 ud-formily：data-form-field-i18n-name 标签、search 型学历选择器、
+    区块内裸「添加」补教育块（不得误点相邻模块的添加按钮）。"""
+    await page.goto(fixture_url("feishu_like.html"))
+    report = await autofill(page, {
+        "schema": 1,
+        "profile": {"id": "demo", "label": "示例"},
+        "sections": [
+            {"key": "basic", "title": "基本信息", "kind": "simple",
+             "values": {"姓名": "张三", "电子邮箱": "zhangsan@example.com"}},
+            {"key": "education", "title": "教育经历", "kind": "repeat", "items": [
+                {"学校名称": "示例大学", "学历": "硕士研究生", "专业": "计算机",
+                 "开始时间": "2024-09", "结束时间": "2027-06"},
+                {"学校名称": "示例理工大学", "学历": "本科", "专业": "软件工程",
+                 "开始时间": "2020-09", "结束时间": "2024-06"},
+            ]},
+        ],
+    })
+
+    assert report["counts"]["failed"] == 0, report["failed"]
+    assert await page.input_value('[data-form-field-i18n-name="姓名"] input') == "张三"
+    assert (
+        await page.input_value('[data-form-field-i18n-name="邮箱"] input')
+        == "zhangsan@example.com"
+    )
+    # 教育经历自动补到 2 块并按序配对
+    schools = await page.eval_on_selector_all(
+        ".school-input", "els => els.map(e => e.value)")
+    assert schools == ["示例大学", "示例理工大学"]
+    # search 型学历走面板选项路径
+    edus = await page.eval_on_selector_all(
+        ".edu-select-trigger", "els => els.map(e => e.value)")
+    assert edus == ["硕士研究生", "本科"]
+    # 相邻模块的「添加」没被误点
+    assert await page.locator(".social-added").count() == 0
+    # 起止时间区间：第 k 组输入 ↔ 第 k 条档案的 开始/结束时间
+    starts = await page.eval_on_selector_all(".range-start", "els => els.map(e => e.value)")
+    ends = await page.eval_on_selector_all(".range-end", "els => els.map(e => e.value)")
+    assert starts == ["2024-09", "2020-09"]
+    assert ends == ["2027-06", "2024-06"]

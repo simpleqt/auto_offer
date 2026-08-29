@@ -81,6 +81,17 @@
 
   const SITE_ADAPTERS = [
     {
+      id: "feishu",
+      name: "飞书招聘",
+      urlPattern: /(?:^|\.)feishu\.cn$/i,
+      confidence: 0.92,
+      indicators: ["[class*='ud-formily-item']", "[class*='applyFormModule']"],
+      containerSelector: ".ud-formily-item",
+      labelSelector: ".ud-formily-item-label label,[class*='ud-formily-item-label'],label",
+      sectionSelector: "[class*='applyFormModuleWrapper-title'],[class*='module-title'],h2,h3,h4",
+      repeatItemSelector: "[class*='apply-form-array-card'],[class*='register-form-group-wrapper']",
+    },
+    {
       id: "zhiye",
       name: "智易/北森 ATS",
       urlPattern: /(?:^|\.)(?:zhiye\.com|beisen\.com|italent\.cn|italentx\.cn|italentx\.com)$/i,
@@ -495,6 +506,14 @@
   }
 
   function inferFieldLabel(el, container, labelSelector, containerSelector) {
+    // 0) 飞书 formily：行元素自带 data-form-field-i18n-name（最可靠标签源）
+    const i18nRow = el.closest("[data-form-field-i18n-name]");
+    if (i18nRow) {
+      const i18nName = norm(i18nRow.getAttribute("data-form-field-i18n-name"), 60);
+      if (i18nName) {
+        return i18nName;
+      }
+    }
     // 1) label[for=id]
     if (el.id) {
       const byFor = document.querySelector(`label[for="${CSS.escape(el.id)}"]`);
@@ -617,7 +636,8 @@
   /** 最近区块标题：自内向外，取「文档顺序在字段之前」的最后一个标题。 */
   function findSectionText(el, sectionSelector) {
     let node = el.parentElement;
-    for (let depth = 0; node && depth < 12; depth += 1, node = node.parentElement) {
+    // 上限 18：数组卡片（教育经历等）比普通字段多嵌 3-4 层（飞书 formily array-card）
+    for (let depth = 0; node && depth < 18; depth += 1, node = node.parentElement) {
       let headers = [];
       try {
         headers = Array.from(node.querySelectorAll(sectionSelector));
@@ -652,6 +672,10 @@
 
   function isCustomChoiceControl(el, container) {
     if (el.getAttribute("role") === "combobox") {
+      return true;
+    }
+    // 表单里的 search 型输入基本是选择器的搜索框（飞书 formily Select）
+    if (el.tagName === "INPUT" && (el.getAttribute("type") || "") === "search") {
       return true;
     }
     if (/select|picker|dropdown|combobox|cascader/i.test(String(el.className || ""))) {
@@ -781,7 +805,7 @@
         currentValue = readCheckedLabel(el, kind);
       } else if (kind === "custom-choice") {
         const sel = (container || el).querySelector(
-          '[class*="selection-item"],[class*="selected-item"],[class*="selected"]:not([class*="unselected"])'
+          '[class*="selection-item"],[class*="selected-item"],[class*="selectItem"],[class*="selected"]:not([class*="unselected"])'
         );
         // Phoenix 等组件会把选中值写进内嵌 input 的 value
         currentValue = norm(el.value || (sel ? sel.textContent : ""), 80);
@@ -988,8 +1012,57 @@
 
   function buildPlan(fields, entries, mapping) {
     const candidates = [];
+    // 区间字段预配对：页面把起止合并为同标签的两个输入（如飞书「起止时间」），
+    // 与档案的 开始时间/结束时间 按区块分组顺序一一对应（第 k 组 ↔ 第 k 条经历）
+    const RANGE_FIELD_RE = /^(起止时间|起止日期|时间区间|时间段)$/;
+    const rangeHandled = new Set();
+    const rangeFields = fields
+      .map((f, fi) => ({ f, fi }))
+      .filter((x) => RANGE_FIELD_RE.test(x.f.label || "") && !x.f.currentValue);
+    if (rangeFields.length >= 2) {
+      const bySection = new Map();
+      for (const x of rangeFields) {
+        const key = x.f.section || "";
+        if (!bySection.has(key)) {
+          bySection.set(key, []);
+        }
+        bySection.get(key).push(x);
+      }
+      for (const [, group] of bySection) {
+        const startEntries = new Map(); // itemIndex -> entryIndex
+        const endEntries = new Map();
+        entries.forEach((e, ei) => {
+          if ((e.category || "") !== (group[0].f.section || "")) {
+            return;
+          }
+          if (/^开始/.test(e.label || "")) {
+            startEntries.set(e.itemIndex, ei);
+          } else if (/^结束/.test(e.label || "")) {
+            endEntries.set(e.itemIndex, ei);
+          }
+        });
+        const itemIdxs = [...startEntries.keys()].sort((a, b) => a - b);
+        itemIdxs.forEach((idx, k) => {
+          const fStart = group[k * 2];
+          const fEnd = group[k * 2 + 1];
+          const eiStart = startEntries.get(idx);
+          const eiEnd = endEntries.get(idx);
+          if (fStart && eiStart !== undefined) {
+            candidates.push({ fi: fStart.fi, ei: eiStart, score: 90 });
+            rangeHandled.add(fStart.fi);
+          }
+          if (fEnd && eiEnd !== undefined) {
+            candidates.push({ fi: fEnd.fi, ei: eiEnd, score: 90 });
+            rangeHandled.add(fEnd.fi);
+          }
+        });
+      }
+    }
     for (let fi = 0; fi < fields.length; fi += 1) {
       const field = fields[fi];
+      if (rangeHandled.has(fi)) {
+        continue;
+      }
       // AI 映射直通：页面标签 → 档案标签（仍过值形否决保险）
       const mappedLabel = mapping && field.label ? mapping[field.label] : null;
       if (mappedLabel) {
@@ -1505,17 +1578,26 @@
     }
     if (field.kind === "custom-choice") {
       // 值可能在：内嵌 input.value、展示元素文本、或选择器容器文本
-      // 注意从父级开始找：输入框自身类名常含 "select"，会误匹配到自身
-      const wrapper = findChoiceFieldContainer(el.parentElement || el, null);
-      const display =
-        wrapper &&
-        wrapper.querySelector(
-          '[class*="selection-item"],[class*="selected-item"],[class*="selected"]:not([class*="unselected"])'
+      // 逐层扩大范围：search 外壳 → 表单行容器（飞书 selectItem 在 search 的兄弟节点）
+      const scopes = [
+        findChoiceFieldContainer(el.parentElement || el, null),
+        field.container,
+        el.closest('[class*="formily-item"],[class*="form-item"],[class*="field"]'),
+      ];
+      for (const scope of scopes) {
+        if (!scope) {
+          continue;
+        }
+        const display = scope.querySelector(
+          '[class*="selection-item"],[class*="selected-item"],[class*="selectItem"],[class*="selected"]:not([class*="unselected"])'
         );
-      return norm(
-        el.value || (display ? display.textContent : "") || (wrapper ? wrapper.textContent : ""),
-        60
-      );
+        const text = norm(el.value || (display ? display.textContent : ""), 60);
+        if (text) {
+          return text;
+        }
+      }
+      const wrapper = scopes[0];
+      return norm((wrapper && wrapper.textContent) || "", 60);
     }
     if (el.isContentEditable) {
       return norm(el.textContent, 400);
@@ -1527,7 +1609,12 @@
   // ---------- repeat 多区块（教育经历自动补块；项目/工作经历只填现存块） ----------
 
   const REPEAT_ADD_RULES = [
-    { category: /教育经历/, anchor: /学校|院校/, btn: /添加.*教育|新增.*教育/ },
+    {
+      category: /教育经历/,
+      anchor: /学校|院校/,
+      btn: /添加.*教育|新增.*教育/,
+      btnScoped: /^(添加|新增|\+)$/,
+    },
   ];
 
   function findAddButton(re) {
@@ -1539,6 +1626,42 @@
       const t = norm(el.textContent, 14);
       return re.test(t) && t.length <= 12;
     });
+  }
+
+  /**
+   * 区块内添加按钮（飞书等：按钮文案是区块里裸的「添加」，须按标题圈定范围，
+   * 否则会误点其他模块的添加按钮）。
+   */
+  function findScopedAddButton(categoryRe, btnRe) {
+    const titles = Array.from(
+      document.querySelectorAll("[class*='title'],[class*='Title'],h2,h3,h4")
+    ).filter((e) => isVisible(e) && categoryRe.test(norm(e.textContent, 20)));
+    for (const t of titles) {
+      let module = t.parentElement;
+      for (let i = 0; i < 7 && module; i += 1, module = module.parentElement) {
+        // 容器已跨多个模块（含多个已知区块标题）说明爬过头，停止
+        // （先于搜索，防误点相邻模块按钮；只认 SECTION_TITLE_RE 防工具提示类误伤）
+        if (
+          Array.from(module.querySelectorAll("[class*='title'],[class*='Title'],h2,h3,h4")).filter(
+            (e) => isVisible(e) && SECTION_TITLE_RE.test((e.textContent || "").trim())
+          ).length > 1
+        ) {
+          break;
+        }
+        const btns = Array.from(module.querySelectorAll("button,a,span,div")).filter((el) => {
+          const hasTextualChild = Array.from(el.children).some((c) => norm(c.textContent, 5));
+          if (hasTextualChild || !isVisible(el)) {
+            return false;
+          }
+          const txt = norm(el.textContent, 14);
+          return btnRe.test(txt) && txt.length <= 6;
+        });
+        if (btns.length) {
+          return btns[0];
+        }
+      }
+    }
+    return null;
   }
 
   function countAnchorFields(rule) {
@@ -1580,12 +1703,17 @@
         if (blocks >= need) {
           break;
         }
-        const btn = findAddButton(rule.btn);
+        const btn = findAddButton(rule.btn) || findScopedAddButton(rule.category, rule.btnScoped);
         if (!btn) {
           break;
         }
         clickActionElement(btn);
-        const grew = await waitFor(() => countAnchorFields(rule) > blocks, 3500);
+        let grew = await waitFor(() => countAnchorFields(rule) > blocks, 3500);
+        if (!grew) {
+          // 部分自绘按钮（飞书 ud）不认合成 click：补发指针序列再等一次
+          dispatchPointerSeq(btn);
+          grew = await waitFor(() => countAnchorFields(rule) > blocks, 3500);
+        }
         if (!grew) {
           break;
         }
