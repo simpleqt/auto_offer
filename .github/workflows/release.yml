@@ -55,6 +55,10 @@ jobs:
             exit 1
           }
 
+      - name: Package browser extension
+        shell: pwsh
+        run: python scripts/package_extension.py
+
       - name: Compute SHA256
         shell: pwsh
         run: |
@@ -70,3 +74,4 @@ jobs:
           files: |
             dist/AutoOffer-Setup.exe
             dist/AutoOffer-Setup.exe.sha256
+            dist/AutoOffer-Extension-*.zip

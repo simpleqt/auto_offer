@@ -10,7 +10,7 @@ AutoOffer 是一款基于多智能体（Multi-Agent）架构的**桌面软件**�
 
 | 特性 | 说明 |
 | --- | --- |
-| **浏览器插件直填（推荐）** | Chrome 加载 `extension/` 即用：站点适配器（智易/北森 Phoenix、Moka、牛客、智联 + Ant/Element 兜底）+ 本地标签评分直填（含学历下拉、自绘单选、日历/月份选择器、「至今」开关）+ 多条教育经历自动补块 + 附件注入 |
+| **浏览器插件直填（推荐）** | Edge/Chrome 加载 `extension/` 即用：站点适配器（智易/北森 Phoenix、Moka、牛客、智联 + Ant/Element 兜底）+ 本地标签评分直填（含学历下拉、自绘单选、日历/月份选择器、「至今」开关）+ 多条教育经历自动补块 + 附件注入 |
 | 规则优先、AI 兜底 | 两段式填写：第一段本地规则直填（零 LLM、零数据外发）；未命中字段送 AI 标签映射（LLM 只见标签不见值），固定选项字段由 AI 选选项（级联逐层下钻） |
 | 通用表单泛化 | DOM 结构化感知 + 截图视觉辅助（Set-of-Marks），适配任意招聘网站，无需为单站写脚本（传统模式） |
 | 多智能体协作 | Planner（任务拆分）/ Actor（执行）/ Validator（校验）三角色循环（传统模式） |
@@ -58,7 +58,9 @@ AutoOffer 是一款基于多智能体（Multi-Agent）架构的**桌面软件**�
 ## 浏览器插件快速上手（推荐）
 
 1. 启动本地服务：`python -m app.launcher`（健康检查 http://127.0.0.1:8765/api/v1/system/health）。
-2. Chrome → `chrome://extensions` → 开发者模式 → 「加载已解压的扩展程序」→ 选择仓库 `extension/` 目录。
+2. 安装插件（Edge / Chrome 通用，二选一）：
+   - **加载仓库目录**（开发推荐）：Edge 打开 `edge://extensions`（Chrome 为 `chrome://extensions`）→ 开「开发人员模式」→「加载解压缩的扩展」→ 选择仓库 `extension/` 目录。
+   - **安装打包 zip**：`python scripts/package_extension.py` 生成（或从 GitHub Release 附件下载）`dist/AutoOffer-Extension-<版本>.zip`，解压到固定目录后按上法加载该目录。
 3. 打开目标招聘表单页 → 点插件图标 → 「授权连接」→ 选档案 → 「开始填写」。只填不提交，检查无误后手动提交。
 
 权限模型：`activeTab + scripting + storage`，站点源与本地服务源均在点击时按需申请；微信扫码/验证码类登录由用户人工完成。详见 [extension/README.md](extension/README.md)。
