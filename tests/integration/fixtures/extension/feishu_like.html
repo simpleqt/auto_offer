@@ -80,6 +80,12 @@
   <button class="add-btn" id="proj-add">添加</button>
 </div>
 
+<div class="applyFormModuleWrapper" id="research-module">
+  <div class="applyFormModuleWrapper-title">科研经历</div>
+  <div id="research-blocks"></div>
+  <button class="add-btn" id="research-add">添加</button>
+</div>
+
 <div class="applyFormModuleWrapper" id="social-module">
   <div class="applyFormModuleWrapper-title">社交账号</div>
   <div id="social-empty">（暂无内容）</div>
@@ -116,6 +122,24 @@
       '<div class="ud-formily-item-control"><input type="text" class="proj-desc"></div></div>' +
       "</div></div>";
     document.getElementById("proj-blocks").appendChild(card);
+  });
+  // 科研经历：初始零区块，点「添加」创建（与项目模块字段同名，考察域隔离）
+  document.getElementById("research-add").addEventListener("click", function () {
+    var card = document.createElement("div");
+    card.className = "apply-form-array-card";
+    card.innerHTML =
+      '<div class="register-form-group-wrapper">' +
+      '<div data-form-field-i18n-name="项目名称" class="ud-formily-item ud-formily-item-layout-vertical">' +
+      '<div class="ud-formily-item-label"><label>项目名称</label></div>' +
+      '<div class="ud-formily-item-control"><input type="text" class="res-name"></div></div>' +
+      '<div data-form-field-i18n-name="项目角色" class="ud-formily-item ud-formily-item-layout-vertical">' +
+      '<div class="ud-formily-item-label"><label>项目角色</label></div>' +
+      '<div class="ud-formily-item-control"><input type="text" class="res-role"></div></div>' +
+      '<div data-form-field-i18n-name="描述" class="ud-formily-item ud-formily-item-layout-vertical">' +
+      '<div class="ud-formily-item-label"><label>描述</label></div>' +
+      '<div class="ud-formily-item-control"><input type="text" class="res-desc"></div></div>' +
+      "</div></div>";
+    document.getElementById("research-blocks").appendChild(card);
   });
   // 社交账号：自己的添加按钮（引擎不得误点）
   document.getElementById("social-add").addEventListener("click", function () {

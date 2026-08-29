@@ -76,6 +76,7 @@ export const EXPERIENCE_KIND_LABELS: Record<string, string> = {
   internship: '实习经历',
   work: '工作经历',
   project: '项目经历',
+  research: '科研经历',
 };
 
 export const DEGREE_OPTIONS = ['高中', '大专', '本科', '硕士', '博士', '其他'];

@@ -47,3 +47,27 @@ def test_project_title_strips_leading_numbering() -> None:
     assert item["项目名称"] == "示例平台"
     item2 = _project_item(_profile_payload(title="2、示例平台"))
     assert item2["项目名称"] == "示例平台"
+
+
+def test_research_section_separate_and_last() -> None:
+    payload = _profile_payload()
+    payload["experiences"] = payload["experiences"] + [  # type: ignore[union-attr]
+        {
+            "kind": "research",
+            "organization": "示例工业学院",
+            "title": "1. 示例科研课题",
+            "period": {"start": {"year": 2024, "month": 9}, "end": None},
+            "description": "课题研究内容",
+            "highlights": ["课题骨干"],
+        }
+    ]
+    flat = flatten_profile(payload)
+    titles = [s["title"] for s in flat["sections"] if s["kind"] == "repeat"]
+    assert titles == ["项目经历", "科研经历"]  # 科研排最后（优先级最低）
+    research = next(s for s in flat["sections"] if s["key"] == "research")
+    assert research["items"][0]["项目名称"] == "示例科研课题"  # 编号剥离同样生效
+
+
+def test_no_research_section_when_absent() -> None:
+    flat = flatten_profile(_profile_payload())
+    assert all(s["key"] != "research" for s in flat["sections"])

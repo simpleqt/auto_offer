@@ -37,7 +37,8 @@ class Education(BaseModel):
 
 
 class Experience(BaseModel):
-    kind: Literal["internship", "work", "project"]
+    kind: Literal["internship", "work", "project", "research"]
+    """实习/工作/工程项目/科研项目。科研单列：站点有专门科研模块才使用，优先级最低。"""
     organization: str
     title: str | None = None
     period: DateRange

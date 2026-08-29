@@ -193,10 +193,11 @@
     期望从事行业: ["期望行业", "意向行业", "期望行业方向", "希望从事行业"],
     国籍: ["nationality", "国家", "国籍（国家或地区）"],
     工作年限: ["工作年数", "参加工作年限", "年限", "工作经历年限"],
-    项目职务: ["项目角色", "担任角色", "项目职责", "项目内职务"],
+    项目职务: ["项目角色", "担任角色", "项目职责", "项目内职务", "课题角色"],
+    项目名称: ["科研项目名称", "课题名称", "项目课题名称"],
     项目链接: ["项目地址", "项目主页", "项目网址", "项目URL", "仓库地址", "github地址", "GitHub 地址", "作品链接"],
-    项目描述: ["描述", "项目简介", "项目详情", "项目内容"],
-    项目成果: ["项目业绩", "成果", "项目成绩"],
+    项目描述: ["描述", "项目简介", "项目详情", "项目内容", "课题描述", "研究内容"],
+    项目成果: ["项目业绩", "成果", "项目成绩", "课题成果"],
     工作内容: ["工作描述", "职位描述", "工作职责", "工作内容描述"],
     自我评价: ["自我描述", "个人评价", "自我介绍"],
     专业技能: ["技能特长", "IT技能", "计算机技能"],
@@ -210,6 +211,12 @@
   // 家庭域字段：只允许家庭类档案条目匹配（反之亦然）。
   const FAMILY_FIELD_RE = /家庭|亲属|父母|父亲|母亲|配偶|紧急联系|家人|家况/;
   const FAMILY_CATEGORY_RE = /家庭|紧急联系/;
+
+  // 科研域字段：只允许科研类档案条目匹配（反之亦然）。
+  // 科研与工程项目条目的标签几乎相同（项目名称/项目职务/描述），按标签分不开，
+  // 必须按模块标题硬隔离：普通「项目经历」模块不得吃掉科研条目，反之亦然。
+  const RESEARCH_FIELD_RE = /科研|课题/;
+  const RESEARCH_CATEGORY_RE = /科研|课题/;
 
   // 值形状检测（用于「值/标签语义冲突」硬否决）。
   const VALUE_SHAPES = [
@@ -622,7 +629,7 @@
 
   // 已知区块标题（Phoenix 等自研框架的标题是无语义类名的裸 DIV，按文本识别）
   const SECTION_TITLE_RE =
-    /^(基本信息|个人信息|求职意向|教育经历|实习经历|工作经历|项目经历|语言能力|外语能力|专业技能|计算机技能|证书|奖惩情况|家庭情况|家庭成员|其他信息|附加信息|自我评价|自我描述|论文著作|专利成果)$/;
+    /^(基本信息|个人信息|求职意向|教育经历|实习经历|工作经历|项目经历|科研项目经历|科研经历|科研情况|语言能力|外语能力|专业技能|计算机技能|证书|奖惩情况|家庭情况|家庭成员|其他信息|附加信息|自我评价|自我描述|论文著作|专利成果|作品|获奖)$/;
   let sectionTitleCache = null;
 
   function collectSectionTitles() {
@@ -990,6 +997,12 @@
     if (fieldFamily !== entryFamily && (fieldFamily || entryFamily)) {
       return 0;
     }
+    // 科研域双向硬约束（科研/工程项目标签相同，按模块标题隔离）
+    const fieldResearch = RESEARCH_FIELD_RE.test(fieldText);
+    const entryResearch = RESEARCH_CATEGORY_RE.test(entry.category);
+    if (fieldResearch !== entryResearch && (fieldResearch || entryResearch)) {
+      return 0;
+    }
     if (shapeConflict(field, entry)) {
       return 0;
     }
@@ -1049,8 +1062,13 @@
       for (const [, group] of bySection) {
         const startEntries = new Map(); // itemIndex -> entryIndex
         const endEntries = new Map();
+        const flatSection = compact(group[0].f.section || "");
         entries.forEach((e, ei) => {
-          if ((e.category || "") !== (group[0].f.section || "")) {
+          const cat = compact(e.category || "");
+          // 等价：全等，或双方都是科研（站点叫「科研项目经历」、档案叫「科研经历」）
+          const same = cat === flatSection ||
+            (RESEARCH_CATEGORY_RE.test(cat) && RESEARCH_CATEGORY_RE.test(flatSection));
+          if (!same) {
             return;
           }
           if (/^开始/.test(e.label || "")) {
@@ -1634,15 +1652,26 @@
       btnScoped: /^(添加|新增|\+)$/,
     },
     {
-      category: /项目经历/,
+      // (?<!科研)：站点模块叫「科研项目经历」时归科研规则管，项目规则不得越界
+      category: /(?<!科研)项目经历/,
       anchor: /^项目名称$/,
+      scope: /项目/,
+      scopeNot: /科研/,
       btn: /添加.*项目|新增.*项目/,
       btnScoped: /^(添加|新增|\+)$/,
     },
     {
       category: /工作经历|实习经历/,
       anchor: /公司|单位|企业/,
+      scope: /工作|实习/,
       btn: /添加.*工作|新增.*工作|添加.*实习/,
+      btnScoped: /^(添加|新增|\+)$/,
+    },
+    {
+      category: /科研/,
+      anchor: /^项目名称$|科研项目名称|课题名称/,
+      scope: /科研/,
+      btn: /添加.*科研|新增.*科研/,
       btnScoped: /^(添加|新增|\+)$/,
     },
   ];
@@ -1695,9 +1724,21 @@
   }
 
   function countAnchorFields(rule) {
-    return scanFields(detectSiteAdapter()).fields.filter((f) =>
-      rule.anchor.test(f.label || "")
-    ).length;
+    return scanFields(detectSiteAdapter()).fields.filter((f) => {
+      if (!rule.anchor.test(f.label || "")) {
+        return false;
+      }
+      // 科研与项目模块的锚点标签可能相同（都叫「项目名称」）：
+      // 有模块标题时按 scope 圈定，防止两个模块互相计入对方的块数
+      const sec = f.section || "";
+      if (rule.scope && sec && !rule.scope.test(sec)) {
+        return false;
+      }
+      if (rule.scopeNot && rule.scopeNot.test(sec)) {
+        return false;
+      }
+      return true;
+    }).length;
   }
 
   async function waitFor(predicate, timeoutMs) {

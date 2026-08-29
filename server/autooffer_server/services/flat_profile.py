@@ -158,13 +158,15 @@ class _Flattener:
         intern: list[dict[str, Any]] = []
         work: list[dict[str, Any]] = []
         project: list[dict[str, Any]] = []
+        research: list[dict[str, Any]] = []
         for x in p.experiences:
             base: dict[str, Any] = _period_values(x.period)
             # 简历解析常把列表编号带进标题（如「1. 核仪AI平台」），填表前剥离
             title = re.sub(r"^\s*\d+\s*[.、．)]\s*", "", x.title or "") or x.title
-            if x.kind == "project":
-                # 项目经历：title 是项目题目（项目名称），highlights 是担任角色；
-                # organization 是依托单位（学校/公司），不是项目名
+            if x.kind in ("project", "research"):
+                # 项目/科研共用条目结构：title 是项目题目，highlights 是担任角色；
+                # organization 是依托单位（学校/公司），不是项目名。
+                # 科研单列一区：只有站点有专门科研模块才会用（用户要求科研优先级最低）
                 base.update(
                     {
                         "项目名称": title,
@@ -173,7 +175,7 @@ class _Flattener:
                         "项目链接": x.link,
                     }
                 )
-                project.append(base)
+                (research if x.kind == "research" else project).append(base)
                 continue
             base.update(
                 {
@@ -184,9 +186,11 @@ class _Flattener:
                 }
             )
             (intern if x.kind == "internship" else work).append(base)
+        # 输出顺序即优先级：实习/工作/项目在前，科研最后
         self.add_repeat("internship", "实习经历", intern)
         self.add_repeat("work", "工作经历", work)
         self.add_repeat("project", "项目经历", project)
+        self.add_repeat("research", "科研经历", research)
 
     def _extended(self, ext: ExtendedInfo) -> None:
         self.add_repeat(

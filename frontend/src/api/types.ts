@@ -51,7 +51,7 @@ export type DateYM = { year: number; month: number | null; day: number | null };
 export type DateRange = { start: DateYM; end: DateYM | null };
 
 export type Degree = '高中' | '大专' | '本科' | '硕士' | '博士' | '其他';
-export type ExperienceKind = 'internship' | 'work' | 'project';
+export type ExperienceKind = 'internship' | 'work' | 'project' | 'research';
 export type AttachmentKind =
   'resume' | 'photo' | 'transcript' | 'certificate' | 'portfolio' | 'other';
 export type AttachmentLanguage = 'zh' | 'en';

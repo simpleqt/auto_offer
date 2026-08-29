@@ -440,6 +440,36 @@ async def test_feishu_ud_formily(page: Page) -> None:
     assert links == ["https://example.com/demo-assistant", "https://example.com/demo-alert"]
 
 
+async def test_research_and_project_module_isolation(page: Page) -> None:
+    """科研经历与项目经历分模块：条目同标签也不得互串；
+    两个零区块模块各自按自己的「添加」补块。"""
+    await page.goto(fixture_url("feishu_like.html"))
+    report = await autofill(page, {
+        "schema": 1,
+        "profile": {"id": "demo", "label": "示例"},
+        "sections": [
+            {"key": "projects", "title": "项目经历", "kind": "repeat", "items": [
+                {"项目名称": "示例工程平台", "项目职务": "负责人"},
+                {"项目名称": "示例日志系统", "项目职务": "开发"},
+            ]},
+            {"key": "research", "title": "科研经历", "kind": "repeat", "items": [
+                {"项目名称": "示例科研课题甲", "项目职务": "课题骨干"},
+                {"项目名称": "示例科研课题乙", "项目职务": "主持人"},
+            ]},
+        ],
+    })
+    assert report["counts"]["failed"] == 0, report["failed"]
+    # 项目模块补到 2 块、填工程项目条目；科研模块补到 2 块、填科研条目
+    assert await page.eval_on_selector_all(
+        ".proj-name", "els => els.map(e => e.value)") == ["示例工程平台", "示例日志系统"]
+    assert await page.eval_on_selector_all(
+        ".proj-role", "els => els.map(e => e.value)") == ["负责人", "开发"]
+    assert await page.eval_on_selector_all(
+        ".res-name", "els => els.map(e => e.value)") == ["示例科研课题甲", "示例科研课题乙"]
+    assert await page.eval_on_selector_all(
+        ".res-role", "els => els.map(e => e.value)") == ["课题骨干", "主持人"]
+
+
 async def test_long_text_readback_over_400_chars(page: Page) -> None:
     """超长描述（>400 字）回读被截断：按同口径比对，不得误报「回读不一致」。"""
     await page.goto(fixture_url("feishu_like.html"))
