@@ -96,8 +96,8 @@
       name: "Moka 招聘",
       urlPattern: /(?:^|\.)(?:mokahr|moka)\.com$/i,
       confidence: 0.9,
-      indicators: [".ant-form-item", "[class*='application-form']", "[class*='questionnaire']", "[class*='schema-form']"],
-      containerSelector: ".ant-form-item,[class*='form-item'],[class*='field-wrapper'],[class*='question-item'],[class*='schema-form-item']",
+      indicators: [".ant-form-item", "[class*='application-form']", "[class*='questionnaire']", "[class*='schema-form']", "[class*='apply-field']"],
+      containerSelector: ".ant-form-item,[class*='form-item'],[class*='apply-field'],[class*='field-wrapper'],[class*='question-item'],[class*='schema-form-item']",
       labelSelector: ".ant-form-item-label,label,[class*='field-label'],[class*='question-label'],[class*='question-title']",
       sectionSelector: ".ant-card-head-title,[class*='module-title'],[class*='questionnaire-title'],[class*='block-title'],h2,h3,h4",
       repeatItemSelector: ".ant-card,[class*='resume-item'],[class*='experience-item'],[class*='list-item'],[class*='card-item']",
@@ -494,7 +494,7 @@
     return el.closest('.form-group,[class*="form-item"],[class*="field"],[class*="question"]');
   }
 
-  function inferFieldLabel(el, container, labelSelector) {
+  function inferFieldLabel(el, container, labelSelector, containerSelector) {
     // 1) label[for=id]
     if (el.id) {
       const byFor = document.querySelector(`label[for="${CSS.escape(el.id)}"]`);
@@ -524,8 +524,31 @@
         ) {
           continue;
         }
+        // label 属于其他表单行（爬到公共祖先时抓到别人的 label）；
+        // 判据：二者无嵌套关系、且 label 所在行内还有其他控件（如勾选行）
+        if (container && containerSelector) {
+          try {
+            const labelRow = labelEl.closest(containerSelector);
+            if (
+              labelRow &&
+              labelRow !== container &&
+              !labelRow.contains(container) &&
+              !container.contains(labelRow)
+            ) {
+              const otherCtrl = labelRow.querySelector(
+                'input,select,textarea,[role="combobox"],[role="radio"],[role="checkbox"],[contenteditable="true"]'
+              );
+              if (otherCtrl && otherCtrl !== el && !otherCtrl.contains(el)) {
+                continue;
+              }
+            }
+          } catch {
+            /* 非法选择器时跳过该检查 */
+          }
+        }
         const text = norm(labelEl.textContent, 80);
-        if (text && text.length <= 40) {
+        // 纯数字/+数字（如手机区号 +86）不是字段标签
+        if (text && text.length <= 40 && !/^[+\d\s().-]+$/.test(text)) {
           return text;
         }
       }
@@ -535,10 +558,26 @@
         return own;
       }
     }
-    // 5) placeholder 兜底
+    // 4.5) 容器行首行文本（Moka apply-field 等：标签是行内首行裸 DIV 文本）
+    if (container) {
+      const first = (container.innerText || "").split("\n").map((s) => s.trim()).find(Boolean);
+      if (
+        first &&
+        first.length >= 2 &&
+        first.length <= 12 &&
+        !/^[+\d\s().-]+$/.test(first) &&
+        !/请输入|请选择|请填写/.test(first)
+      ) {
+        return norm(first, 30);
+      }
+    }
+    // 5) placeholder 兜底（去掉「请输入/请选择/请填写」前缀后仍可作标签）
     const ph = el.getAttribute("placeholder");
-    if (ph && !/请输入|请选择|请填写/.test(ph)) {
-      return norm(ph, 60);
+    if (ph) {
+      const stripped = ph.replace(/^请(输入|选择|填写)/, "").trim();
+      if (stripped.length >= 2 && !/^[+\d\s().-]+$/.test(stripped)) {
+        return norm(stripped, 60);
+      }
     }
     return "";
   }
@@ -694,7 +733,7 @@
       }
 
       const container = findContainer(el, containerSelector);
-      const label = inferFieldLabel(el, container, labelSelector);
+      const label = inferFieldLabel(el, container, labelSelector, containerSelector);
       const section = findSectionText(el, sectionSelector);
       const nearbyText = norm(container ? container.textContent : el.placeholder || "", 160);
 
@@ -710,6 +749,19 @@
       } else if (tag === "input" && (type === "date" || type === "month")) {
         kind = "native-date";
       } else if (isCustomChoiceControl(el, container)) {
+        // 手机区号类前缀选择器：触发器为空或纯 +数字，且同行的正文输入框另有其人
+        const trig = norm(el.value || el.textContent, 12);
+        if (!trig || /^[+]\d{1,3}$/.test(trig)) {
+          const row = container || el.parentElement;
+          if (row && row !== document.body) {
+            const siblings = [
+              ...row.querySelectorAll('input:not([type="hidden"])'),
+            ].filter((x) => x !== el && x.offsetParent && x.type !== "file");
+            if (siblings.length > 0) {
+              continue;
+            }
+          }
+        }
         kind = "custom-choice";
       }
 

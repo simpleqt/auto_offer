@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>Moka 申请表单基准页（真实 apply-field 结构）</title>
+<style>
+  body { font-family: "Microsoft YaHei", sans-serif; margin: 30px; }
+  .apply-fields > div { margin: 12px 0; }
+  .apply-field { display: flex; align-items: center; gap: 10px; }
+  .apply-field > .fld { width: 90px; color: #333; }
+  .area-code { border: 1px solid #ccc; padding: 4px 8px; cursor: pointer; min-width: 48px; }
+  input[type="text"] { border: 1px solid #ccc; padding: 6px 8px; width: 240px; }
+</style>
+</head>
+<body>
+<h2>申请信息</h2>
+<div class="apply-fields">
+  <div class="apply-field-Q2iJ7AtQGX">
+    <div class="fld">推荐码</div>
+    <input type="text" placeholder="推荐码">
+  </div>
+</div>
+
+<h2>个人信息</h2>
+<div class="apply-fields-BzcXI4i2Pm">
+  <div class="apply-field-Q2iJ7AtQGX">
+    <div class="fld">姓名</div>
+    <input type="text" placeholder="姓名">
+  </div>
+  <div class="apply-field-Q2iJ7AtQGX">
+    <div class="fld">手机号码</div>
+    <div class="area-code-wrap"><span class="area-code" role="combobox">+86</span></div>
+    <input type="text" placeholder="请输入手机号">
+  </div>
+  <div class="apply-field-Q2iJ7AtQGX">
+    <div class="fld">邮箱</div>
+    <input type="text" placeholder="邮箱">
+  </div>
+  <div class="apply-field-Q2iJ7AtQGX confirm_info">
+    <input type="checkbox" id="sync-resume"><label for="sync-resume">同步更新在线简历</label>
+  </div>
+</div>
+</body>
+</html>

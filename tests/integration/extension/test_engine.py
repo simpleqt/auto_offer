@@ -340,3 +340,36 @@ async def test_phoenix_radio_pointer_sequence(page: Page) -> None:
         " return el ? el.innerText.trim() : '(未选中)'; }"
     )
     assert checked == "男"
+
+
+async def test_moka_apply_real_structure(page: Page) -> None:
+    """真实 Moka apply-field 结构：标签是行首裸文本、placeholder 带语义、
+    +86 区号选择器不得成为可填字段（真实站实测暴露的适配缺口）。"""
+    await page.goto(fixture_url("moka_apply.html"))
+    report = await autofill(page, {
+        "schema": 1,
+        "profile": {"id": "demo", "label": "示例档案"},
+        "sections": [
+            {
+                "key": "basic",
+                "title": "个人信息",
+                "kind": "simple",
+                "values": {
+                    "姓名": "张三",
+                    "手机号码": "13800001111",
+                    "电子邮箱": "zhangsan@example.com",
+                },
+            }
+        ],
+    })
+
+    assert report["counts"]["failed"] == 0, report["failed"]
+    # 姓名行：标签在行首裸 DIV，placeholder 同名
+    assert await page.input_value('input[placeholder="姓名"]') == "张三"
+    # placeholder「请输入手机号」去前缀后命中 手机号 别名
+    assert await page.input_value('input[placeholder="请输入手机号"]') == "13800001111"
+    assert await page.input_value('input[placeholder="邮箱"]') == "zhangsan@example.com"
+    # +86 区号 combobox 未被当作字段写入（保持原文本）
+    assert (await page.eval_on_selector(".area-code", "el => el.innerText")) == "+86"
+    # 推荐码无对应档案字段 → 跳过而非误填
+    assert await page.input_value('input[placeholder="推荐码"]') == ""
