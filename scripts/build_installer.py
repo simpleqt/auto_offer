@@ -23,6 +23,11 @@ APP = ROOT / "app"
 DIST = ROOT / "dist"
 BUILD = ROOT / "build"
 
+# CI 控制台常为 cp1252/cp437，中文进度输出会 UnicodeEncodeError 崩溃
+for _stream in (sys.stdout, sys.stderr):
+    if _stream.encoding and _stream.encoding.lower() not in ("utf-8", "utf8"):
+        _stream.reconfigure(encoding="utf-8", errors="replace")  # type: ignore[attr-defined]
+
 
 def _run(cmd: list[str], *, cwd: Path | None = None) -> None:
     print("+", " ".join(cmd))
