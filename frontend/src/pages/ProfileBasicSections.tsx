@@ -258,6 +258,9 @@ export function ExperienceFields() {
               <Form.Item name={[name, 'description']} label="描述">
                 <TextArea rows={2} />
               </Form.Item>
+              <Form.Item name={[name, 'link']} label="项目链接（GitHub/主页，选填）">
+                <Input placeholder="https://github.com/..." />
+              </Form.Item>
             </Card>
           ))}
           <Button

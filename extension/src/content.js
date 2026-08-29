@@ -194,6 +194,7 @@
     国籍: ["nationality", "国家", "国籍（国家或地区）"],
     工作年限: ["工作年数", "参加工作年限", "年限", "工作经历年限"],
     项目职务: ["项目角色", "担任角色", "项目职责", "项目内职务"],
+    项目链接: ["项目地址", "项目主页", "项目网址", "项目URL", "仓库地址", "github地址", "GitHub 地址", "作品链接"],
     项目描述: ["描述", "项目简介", "项目详情", "项目内容"],
     项目成果: ["项目业绩", "成果", "项目成绩"],
     工作内容: ["工作描述", "职位描述", "工作职责", "工作内容描述"],
@@ -216,13 +217,17 @@
     ["email", (v) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v)],
     ["idcard", (v) => /^\d{17}[\dXx]$/.test(v)],
     ["date", (v) => /^\d{4}(-\d{1,2}){0,2}$/.test(v)],
+    ["url", (v) => /^https?:\/\/\S+$/.test(v)],
   ];
   const LABEL_SHAPE_RE = {
     phone: /电话|手机|联系|mobile|phone/i,
     email: /邮箱|邮件|e-?mail/i,
     idcard: /身份证|证件号/,
     date: /日期|时间|出生|年月|毕业|入职/,
+    // 链接类标签（刻意不含裸「地址」：通讯/居住地址是文本，不是 URL）
+    url: /链接|网址|项目地址|仓库|主页|github|url|link/i,
   };
+  const URL_RE = /https?:\/\/[^\s，；,;）)"'》]+/;
 
   // ---------- 基础工具 ----------
 
@@ -909,12 +914,12 @@
 
   // ---------- 档案条目 ----------
 
-  /** 扁平档案 → 匹配条目。repeat 段带 itemIndex 供多条目区块配对（每段上限 4 条）。 */
+  /** 扁平档案 → 匹配条目。repeat 段带 itemIndex 供多条目区块配对（与补块上限一致取 8）。 */
   function buildEntries(flatProfile) {
     const entries = [];
     for (const section of (flatProfile && flatProfile.sections) || []) {
       if (section.kind === "repeat") {
-        const items = (section.items || []).slice(0, 4);
+        const items = (section.items || []).slice(0, 8);
         items.forEach((item, itemIndex) => {
           for (const [label, value] of Object.entries(item)) {
             pushEntry(entries, label, value, section.title, itemIndex);
@@ -956,11 +961,20 @@
 
   /** 值/标签语义冲突硬否决：手机号形状的值遇到日期/邮箱类标签等。 */
   function shapeConflict(field, entry) {
+    const labelText = [field.label, field.nearbyText, field.placeholder, field.optionText].join(" ");
+    // 链接类字段不接受长文本：URL 埋在描述里也不能反向倾倒进链接栏
+    if (
+      LABEL_SHAPE_RE.url.test(labelText) &&
+      typeof entry.value === "string" &&
+      entry.value.length > 30 &&
+      !URL_RE.test(entry.value)
+    ) {
+      return true;
+    }
     const shape = valueShape(entry.value);
     if (!shape) {
       return false;
     }
-    const labelText = [field.label, field.nearbyText, field.placeholder, field.optionText].join(" ");
     const labelShape = Object.keys(LABEL_SHAPE_RE).find((k) => LABEL_SHAPE_RE[k].test(labelText));
     return Boolean(labelShape) && labelShape !== shape;
   }
@@ -1715,8 +1729,9 @@
       if (!rule) {
         continue;
       }
-      const target = Math.min(need, 4);
-      for (let clicks = 0; clicks < 4; clicks += 1) {
+      // 上限 8：科研+工程混合的项目档案常超过 4 条；每次点击都有锚点增长校验兜底
+      const target = Math.min(need, 8);
+      for (let clicks = 0; clicks < target + 2; clicks += 1) {
         const blocks = countAnchorFields(rule);
         if (blocks >= target) {
           break;
@@ -1954,19 +1969,27 @@
       const result = await fillOne(item, adapter);
       refreshField(item, adapter);
       let readBackValue = readBack(item.field);
+      // 长文本（项目/自我评价 400+ 字）回读被 norm 截断：按同口径截断后再比对
+      const expectValue = String(item.entry.value);
+      const expectTruncated = norm(expectValue, 400);
+      const textVerified =
+        readBackValue.includes(expectValue) ||
+        (expectValue.length > 400 && expectTruncated === readBackValue);
       let verified =
         item.field.kind === "checkbox" ||
         result.trust ||
-        readBackValue.includes(String(item.entry.value)) ||
-        normDate(readBackValue).includes(normDate(item.entry.value));
+        textVerified ||
+        normDate(readBackValue).includes(normDate(expectValue));
       // 文本类回读竞态：React 提交有延迟，稍候重读一次
       if (!verified && result.ok) {
         await sleep(280);
         refreshField(item, adapter);
         readBackValue = readBack(item.field);
         verified =
-          readBackValue.includes(String(item.entry.value)) ||
-          normDate(readBackValue).includes(normDate(item.entry.value));
+          readBackValue.includes(expectValue) ||
+          (expectValue.length > 400 &&
+            expectTruncated === readBackValue) ||
+          normDate(readBackValue).includes(normDate(expectValue));
       }
       const label = item.field.label || item.field.nearbyText || "(无标签)";
       if (result.ok && verified) {

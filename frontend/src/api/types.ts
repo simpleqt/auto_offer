@@ -72,6 +72,7 @@ export interface Experience {
   period: DateRange;
   description: string | null;
   highlights: string[];
+  link?: string | null;
 }
 
 export interface BasicInfo {

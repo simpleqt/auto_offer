@@ -160,14 +160,17 @@ class _Flattener:
         project: list[dict[str, Any]] = []
         for x in p.experiences:
             base: dict[str, Any] = _period_values(x.period)
+            # 简历解析常把列表编号带进标题（如「1. 核仪AI平台」），填表前剥离
+            title = re.sub(r"^\s*\d+\s*[.、．)]\s*", "", x.title or "") or x.title
             if x.kind == "project":
                 # 项目经历：title 是项目题目（项目名称），highlights 是担任角色；
                 # organization 是依托单位（学校/公司），不是项目名
                 base.update(
                     {
-                        "项目名称": x.title,
+                        "项目名称": title,
                         "项目职务": "；".join(x.highlights) if x.highlights else None,
                         "项目描述": x.description,
+                        "项目链接": x.link,
                     }
                 )
                 project.append(base)
@@ -175,7 +178,7 @@ class _Flattener:
             base.update(
                 {
                     "公司": x.organization,
-                    "职位": x.title,
+                    "职位": title,
                     "工作内容": x.description,
                     "工作成果": "；".join(x.highlights) if x.highlights else None,
                 }

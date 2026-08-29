@@ -419,8 +419,10 @@ async def test_feishu_ud_formily(page: Page) -> None:
     proj = {
         "key": "projects", "title": "项目经历", "kind": "repeat", "items": [
             {"项目名称": "示例AI助手平台", "项目职务": "核心开发",
-             "项目描述": "面向领域知识的智能助手开发"},
-            {"项目名称": "示例预警系统", "项目职务": "负责人", "项目描述": "示例日志数据分析"},
+             "项目描述": "面向领域知识的智能助手开发",
+             "项目链接": "https://example.com/demo-assistant"},
+            {"项目名称": "示例预警系统", "项目职务": "负责人", "项目描述": "示例日志数据分析",
+             "项目链接": "https://example.com/demo-alert"},
         ],
     }
     report2 = await autofill(page, {
@@ -433,3 +435,44 @@ async def test_feishu_ud_formily(page: Page) -> None:
     assert roles == ["核心开发", "负责人"]  # 项目职务 → 项目角色 别名
     descs = await page.eval_on_selector_all(".proj-desc", "els => els.map(e => e.value)")
     assert descs == ["面向领域知识的智能助手开发", "示例日志数据分析"]
+    # 项目链接：URL 值配对到链接栏（不被长文本守卫误杀）
+    links = await page.eval_on_selector_all(".proj-link", "els => els.map(e => e.value)")
+    assert links == ["https://example.com/demo-assistant", "https://example.com/demo-alert"]
+
+
+async def test_long_text_readback_over_400_chars(page: Page) -> None:
+    """超长描述（>400 字）回读被截断：按同口径比对，不得误报「回读不一致」。"""
+    await page.goto(fixture_url("feishu_like.html"))
+    await page.click("#proj-add")
+    long_desc = "面向核电子学领域的智能体平台描述。" * 26  # 17×26=442 字
+    assert len(long_desc) > 400
+    report = await autofill(page, {
+        "schema": 1,
+        "profile": {"id": "demo", "label": "示例"},
+        "sections": [{"key": "projects", "title": "项目经历", "kind": "repeat", "items": [
+            {"项目名称": "示例AI助手平台", "项目描述": long_desc},
+        ]}],
+    })
+    assert report["counts"]["failed"] == 0, report["failed"]
+    assert report["counts"]["filled"] >= 1
+    assert len(await page.input_value(".proj-desc")) == len(long_desc)
+
+
+async def test_link_field_rejects_long_text(page: Page) -> None:
+    """链接栏守卫：档案里链接字段的值若是一段长文本（无 URL），不得灌进链接输入框。"""
+    await page.goto(fixture_url("feishu_like.html"))
+    await page.click("#proj-add")  # 手动建 1 块，绕开补块逻辑单独考察守卫
+    report = await autofill(page, {
+        "schema": 1,
+        "profile": {"id": "demo", "label": "示例"},
+        "sections": [{"key": "projects", "title": "项目经历", "kind": "repeat", "items": [
+            {"项目名称": "示例AI助手平台",
+             "项目链接": "这是一个误把项目介绍当成链接填进档案字段的长文本，没有可用的网址"},
+        ]}],
+    })
+    assert await page.eval_on_selector_all(
+        ".proj-link", "els => els.map(e => e.value)") == [""]
+    assert all(r["label"] != "项目链接" for r in report["filled"])
+    # 同块其他字段不受影响
+    assert await page.eval_on_selector_all(
+        ".proj-name", "els => els.map(e => e.value)") == ["示例AI助手平台"]

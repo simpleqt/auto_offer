@@ -43,6 +43,8 @@ class Experience(BaseModel):
     period: DateRange
     description: str | None = None
     highlights: list[str] = []
+    link: str | None = None
+    """项目/作品主页或代码仓库地址（如 GitHub），对应站点「项目链接」类字段。"""
 
 
 class BasicInfo(BaseModel):
