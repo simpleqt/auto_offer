@@ -40,6 +40,12 @@ export default function SettingsPage() {
 
   return (
     <Space direction="vertical" size={16} style={{ width: '100%' }}>
+      <Alert
+        type="info"
+        showIcon
+        message="推荐使用浏览器插件填写"
+        description="在 Chrome 加载本软件目录下的 extension/ 文件夹即可一键直填招聘表单（规则直填优先，冷门问法 AI 仅做字段映射，档案值不出本机）。安装步骤见 README「浏览器插件快速上手」。下方浏览器连接方式属于传统模式，保留可用。"
+      />
       <Card title="浏览器连接方式">
         <Form
           form={form}
