@@ -24,7 +24,9 @@ ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 
 [Languages]
-Name: "chinesesimplified"; MessagesFile: "compiler:Languages\ChineseSimplified.isl"
+; 简中非 Inno Setup 自带语言（官方 Languages 目录无 ChineseSimplified.isl），
+; 已 vendor 至 scripts/innolang/，路径相对本 .iss 文件
+Name: "chinesesimplified"; MessagesFile: "innolang\ChineseSimplified.isl"
 Name: "english"; MessagesFile: "compiler:Default.isl"
 
 [Tasks]
