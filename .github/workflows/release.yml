@@ -44,8 +44,16 @@ jobs:
         run: choco install innosetup --yes --no-progress
 
       - name: Build installer
-        shell: cmd
-        run: python scripts/build_installer.py
+        shell: pwsh
+        run: |
+          # 失败时把日志尾部写入注解（公开仓库注解可匿名读取，便于排查）
+          python scripts/build_installer.py 2>&1 | Tee-Object -FilePath build.log
+          if ($LASTEXITCODE -ne 0) {
+            Get-Content build.log -Tail 8 | ForEach-Object {
+              Write-Output ("::error title=buildlog::" + ($_ -replace '\[', '(' -replace '\]', ')'))
+            }
+            exit 1
+          }
 
       - name: Compute SHA256
         shell: pwsh
