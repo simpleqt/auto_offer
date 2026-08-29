@@ -193,6 +193,10 @@
     期望从事行业: ["期望行业", "意向行业", "期望行业方向", "希望从事行业"],
     国籍: ["nationality", "国家", "国籍（国家或地区）"],
     工作年限: ["工作年数", "参加工作年限", "年限", "工作经历年限"],
+    项目职务: ["项目角色", "担任角色", "项目职责", "项目内职务"],
+    项目描述: ["描述", "项目简介", "项目详情", "项目内容"],
+    项目成果: ["项目业绩", "成果", "项目成绩"],
+    工作内容: ["工作描述", "职位描述", "工作职责", "工作内容描述"],
     自我评价: ["自我描述", "个人评价", "自我介绍"],
     专业技能: ["技能特长", "IT技能", "计算机技能"],
     开始时间: ["起始时间", "从何时开始"],
@@ -1611,8 +1615,20 @@
   const REPEAT_ADD_RULES = [
     {
       category: /教育经历/,
-      anchor: /学校|院校/,
+      anchor: /^学校名称$|学校|院校/,
       btn: /添加.*教育|新增.*教育/,
+      btnScoped: /^(添加|新增|\+)$/,
+    },
+    {
+      category: /项目经历/,
+      anchor: /^项目名称$/,
+      btn: /添加.*项目|新增.*项目/,
+      btnScoped: /^(添加|新增|\+)$/,
+    },
+    {
+      category: /工作经历|实习经历/,
+      anchor: /公司|单位|企业/,
+      btn: /添加.*工作|新增.*工作|添加.*实习/,
       btnScoped: /^(添加|新增|\+)$/,
     },
   ];
@@ -1681,7 +1697,8 @@
     return predicate();
   }
 
-  /** 档案条目多于页面区块时点「添加XX经历」补足（仅教育经历，最多补 3 块）。 */
+  /** 档案条目多于页面区块时点「添加XX经历」补足（教育/项目/工作实习，最多补到 4 块）。
+   *  支持初始零区块的模块（飞书项目/工作经历默认空，需点添加才出现字段）。 */
   async function ensureRepeatBlocks(flatProfile, options) {
     if (options && options.noAddBlocks) {
       return;
@@ -1691,16 +1708,17 @@
         continue;
       }
       const need = (section.items || []).length;
-      if (need <= 1) {
+      if (need < 1) {
         continue;
       }
       const rule = REPEAT_ADD_RULES.find((r) => r.category.test(section.title));
       if (!rule) {
         continue;
       }
-      for (let added = 0; added < Math.min(need - 1, 3); added += 1) {
+      const target = Math.min(need, 4);
+      for (let clicks = 0; clicks < 4; clicks += 1) {
         const blocks = countAnchorFields(rule);
-        if (blocks >= need) {
+        if (blocks >= target) {
           break;
         }
         const btn = findAddButton(rule.btn) || findScopedAddButton(rule.category, rule.btnScoped);

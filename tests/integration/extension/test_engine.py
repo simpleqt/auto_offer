@@ -415,3 +415,21 @@ async def test_feishu_ud_formily(page: Page) -> None:
     ends = await page.eval_on_selector_all(".range-end", "els => els.map(e => e.value)")
     assert starts == ["2024-09", "2020-09"]
     assert ends == ["2027-06", "2024-06"]
+    # 项目经历：初始零区块，自动点「添加」补块并按序填写
+    proj = {
+        "key": "projects", "title": "项目经历", "kind": "repeat", "items": [
+            {"项目名称": "示例AI助手平台", "项目职务": "核心开发",
+             "项目描述": "面向领域知识的智能助手开发"},
+            {"项目名称": "示例预警系统", "项目职务": "负责人", "项目描述": "示例日志数据分析"},
+        ],
+    }
+    report2 = await autofill(page, {
+        "schema": 1, "profile": {"id": "demo", "label": "示例"}, "sections": [proj],
+    }, {"noAddBlocks": False})
+    assert report2["counts"]["failed"] == 0, report2["failed"]
+    names = await page.eval_on_selector_all(".proj-name", "els => els.map(e => e.value)")
+    roles = await page.eval_on_selector_all(".proj-role", "els => els.map(e => e.value)")
+    assert names == ["示例AI助手平台", "示例预警系统"]
+    assert roles == ["核心开发", "负责人"]  # 项目职务 → 项目角色 别名
+    descs = await page.eval_on_selector_all(".proj-desc", "els => els.map(e => e.value)")
+    assert descs == ["面向领域知识的智能助手开发", "示例日志数据分析"]

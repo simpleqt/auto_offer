@@ -161,12 +161,13 @@ class _Flattener:
         for x in p.experiences:
             base: dict[str, Any] = _period_values(x.period)
             if x.kind == "project":
+                # 项目经历：title 是项目题目（项目名称），highlights 是担任角色；
+                # organization 是依托单位（学校/公司），不是项目名
                 base.update(
                     {
-                        "项目名称": x.organization,
-                        "项目职务": x.title,
+                        "项目名称": x.title,
+                        "项目职务": "；".join(x.highlights) if x.highlights else None,
                         "项目描述": x.description,
-                        "项目成果": "；".join(x.highlights) if x.highlights else None,
                     }
                 )
                 project.append(base)
