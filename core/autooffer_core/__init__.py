@@ -14,7 +14,7 @@
 - testing/     供各 Workstream 自测的 mock/fake 实现
 """
 
-__version__ = "0.2.0"
+__version__ = "0.2.1"
 
 from autooffer_core.errors import (
     ActionError,

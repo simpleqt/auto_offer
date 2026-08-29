@@ -3,6 +3,16 @@
 本项目遵循 [Conventional Commits](https://www.conventionalcommits.org/)，版本策略为 SemVer。
 由 `git-cliff` 从提交历史生成（配置见 `cliff.toml`；本文件在无 git-cliff 环境下按同格式手动维护）。
 
+## [v0.2.1] - 2026-08-28
+
+**真实站点复验修复版**：针对柏楚电子（北森 Phoenix 表单）实测暴露的两个问题修复。
+
+### Bug Fixes
+
+- (**extension**) 自绘单选组误报成功：Phoenix 单选的手势监听挂在内部 wrapper 上，普通 mousedown/mouseup/click 合成序列选不中（页面实际未选中，报告却计为已填）。现对内部节点补发完整指针序列（pointerdown/up + 坐标）并核验选中态 class，选中态与期望不符时报失败；无选中态标记的组件保持「已执行」兜底。附 Phoenix 单选基准页回归测试
+- (**extension**) custom-group 不再走「信任跳过核验」通道，回读不一致会在报告中如实呈现
+- (**scripts**) 新增 `md_resume_to_pdf.py`：档案 .md 简历转 PDF 附件（招聘站普遍拒收 .md），转换后自动更新档案附件清单
+
 ## [v0.2.0] - 2026-08-29
 
 **插件化架构正式版**：填写层从 Playwright 外驱迁移为浏览器插件 + 本地服务混合架构——插件为「手」（本地规则直填优先），本地服务为「脑」（LLM 降级为只做字段语义映射，档案值不出本机）。

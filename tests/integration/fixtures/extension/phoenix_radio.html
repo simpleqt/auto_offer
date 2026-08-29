@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>北森 Phoenix 自绘单选基准页</title>
+<style>
+  body { font-family: "Microsoft YaHei", sans-serif; margin: 30px; }
+  .form-item--phoenix { margin: 14px 0; display: flex; align-items: center; }
+  .form-item__title { width: 90px; color: #333; }
+  .phoenix-radio-group { display: inline-flex; gap: 18px; }
+  .phoenix-radio-group__radioItem { padding: 4px 10px; cursor: pointer; display: inline-flex; }
+  .phoenix-radio__wrapper { display: inline-flex; align-items: center; gap: 4px; }
+  .phoenix-radio__circle { width: 12px; height: 12px; border: 1px solid #999; border-radius: 50%; }
+  .phoenix-radio--checked .phoenix-radio__circle { border-color: #1ba3ff; background: #1ba3ff; }
+  .plain-radio-group { display: inline-flex; gap: 18px; }
+  .plain-radio-group__item { padding: 4px 10px; cursor: pointer; }
+</style>
+</head>
+<body>
+<h2>个人信息</h2>
+
+<div class="form-item--phoenix">
+  <div class="form-item__title">性别</div>
+  <div class="phoenix-radio-group">
+    <div class="phoenix-radio-group__radioItem"><span class="phoenix-radio"><span class="phoenix-radio__wrapper"><span class="phoenix-radio__circle-wrapper"><span class="phoenix-radio__circle"></span></span><span class="phoenix-radio__radio-text">男</span></span></span></div>
+    <div class="phoenix-radio-group__radioItem"><span class="phoenix-radio"><span class="phoenix-radio__wrapper"><span class="phoenix-radio__circle-wrapper"><span class="phoenix-radio__circle"></span></span><span class="phoenix-radio__radio-text">女</span></span></span></div>
+    <div class="phoenix-radio-group__radioItem"><span class="phoenix-radio"><span class="phoenix-radio__wrapper"><span class="phoenix-radio__circle-wrapper"><span class="phoenix-radio__circle"></span></span><span class="phoenix-radio__radio-text">保密</span></span></span></div>
+  </div>
+</div>
+
+<div class="form-item--phoenix">
+  <div class="form-item__title">出差意愿</div>
+  <div class="plain-radio-group">
+    <div class="plain-radio-group__item">接受出差</div>
+    <div class="plain-radio-group__item">不接受出差</div>
+  </div>
+</div>
+
+<script>
+  // 模拟北森 Phoenix：手势监听挂在内部 wrapper 上，仅响应 pointerdown；
+  // 普通 mousedown/mouseup/click 合成序列不会触发选中。
+  document.querySelectorAll(".phoenix-radio-group").forEach(function (g) {
+    g.querySelectorAll(".phoenix-radio__wrapper").forEach(function (w) {
+      w.addEventListener("pointerdown", function () {
+        g.querySelectorAll(".phoenix-radio").forEach(function (r) {
+          r.classList.remove("phoenix-radio--checked");
+        });
+        var radio = w.closest(".phoenix-radio");
+        if (radio) radio.classList.add("phoenix-radio--checked");
+      });
+    });
+  });
+  // 模拟不暴露任何选中态标记的自绘组：点击无可见效果
+  document.querySelectorAll(".plain-radio-group__item").forEach(function (it) {
+    it.addEventListener("click", function () { /* 无标记 */ });
+  });
+</script>
+</body>
+</html>

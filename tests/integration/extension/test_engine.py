@@ -308,3 +308,35 @@ async def test_hard_vetoes(page: Page) -> None:
     # 邮箱形状的值写入邮箱字段是正确行为
     assert await page.input_value("#m-email") == "someone@example.com"
     assert all(r["label"] != "电话" for r in report["filled"])
+
+
+async def test_phoenix_radio_pointer_sequence(page: Page) -> None:
+    """Phoenix 自绘单选的手势监听在内部 wrapper 上，只认 pointerdown。
+
+    普通 mousedown/mouseup/click 合成序列选不中——引擎必须对内部节点
+    补发指针序列并核验选中态，而不是盲报成功；无选中态标记的自绘组
+    （无法核验）仍按已执行处理。
+    """
+    await page.goto(fixture_url("phoenix_radio.html"))
+    report = await autofill(page, {
+        "schema": 1,
+        "profile": {"id": "demo", "label": "示例档案"},
+        "sections": [
+            {
+                "key": "basic",
+                "title": "个人信息",
+                "kind": "simple",
+                "values": {"性别": "男", "出差意愿": "接受出差"},
+            }
+        ],
+    })
+
+    assert report["counts"]["failed"] == 0, report["failed"]
+    filled = {r["label"] for r in report["filled"]}
+    assert "性别" in filled
+    assert "出差意愿" in filled  # 无标记组 → trust 兜底
+    checked = await page.evaluate(
+        "() => { var el = document.querySelector('.phoenix-radio--checked');"
+        " return el ? el.innerText.trim() : '(未选中)'; }"
+    )
+    assert checked == "男"

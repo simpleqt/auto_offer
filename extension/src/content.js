@@ -274,6 +274,40 @@
     return true;
   }
 
+  /**
+   * 部分自绘组件（如北森 Phoenix 单选）的手势监听挂在内部 wrapper 上，
+   * 只响应带坐标的完整指针序列（pointerdown/up），普通合成 click 无效。
+   */
+  function dispatchPointerSeq(el) {
+    if (!el || el.nodeType !== 1) {
+      return false;
+    }
+    el.scrollIntoView({ block: "center", inline: "nearest" });
+    const r = el.getBoundingClientRect();
+    const init = {
+      bubbles: true,
+      cancelable: true,
+      composed: true,
+      view: window,
+      pointerId: 1,
+      pointerType: "mouse",
+      isPrimary: true,
+      button: 0,
+      clientX: r.x + r.width / 2,
+      clientY: r.y + r.height / 2,
+    };
+    try {
+      el.dispatchEvent(new PointerEvent("pointerdown", init));
+      el.dispatchEvent(new MouseEvent("mousedown", init));
+      el.dispatchEvent(new PointerEvent("pointerup", init));
+      el.dispatchEvent(new MouseEvent("mouseup", init));
+      el.dispatchEvent(new MouseEvent("click", init));
+      return true;
+    } catch (err) {
+      return false;
+    }
+  }
+
   // ---------- 站点识别 ----------
 
   function detectSiteAdapter() {
@@ -1312,9 +1346,36 @@
         if (!matched) {
           return { ok: false, reason: "选项组中未找到匹配项" };
         }
+        const group =
+          field.groupEl || el.closest('[class*="radio-group"],[class*="checkbox-group"]');
+        const groupChecked = () => (group ? norm(readGroupCheckedText(group), 30) : "");
         clickActionElement(matched);
-        await sleep(140);
-        return { ok: true };
+        await sleep(180);
+        let checked = groupChecked();
+        if (!choiceTextMatches(checked, entry.value)) {
+          // 合成 click 对部分自绘组无效（如 Phoenix 单选监听在内部 wrapper）：
+          // 对内部节点补发完整指针序列，逐个核对选中态
+          const inners = matched.querySelectorAll(
+            '[class*="__wrapper"],[class*="__label"],[class*="__text"],' +
+              '[class*="__circle"],[class*="__box"]'
+          );
+          for (const inner of Array.from(inners).slice(0, 3)) {
+            dispatchPointerSeq(inner);
+            await sleep(200);
+            checked = groupChecked();
+            if (choiceTextMatches(checked, entry.value)) {
+              break;
+            }
+          }
+        }
+        if (choiceTextMatches(checked, entry.value)) {
+          return { ok: true };
+        }
+        if (!checked) {
+          // 组件不暴露选中态标记，无法核验，按已执行处理（保持旧行为）
+          return { ok: true, trust: true };
+        }
+        return { ok: false, reason: `选中态异常: ${checked.slice(0, 20)}` };
       }
       if (field.kind === "radio" || field.kind === "checkbox") {
         const ok = setCheckboxOrRadio(el, entry.value);
@@ -1697,7 +1758,6 @@
       let readBackValue = readBack(item.field);
       let verified =
         item.field.kind === "checkbox" ||
-        item.field.kind === "custom-group" ||
         result.trust ||
         readBackValue.includes(String(item.entry.value)) ||
         normDate(readBackValue).includes(normDate(item.entry.value));
