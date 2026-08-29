@@ -470,6 +470,67 @@ async def test_research_and_project_module_isolation(page: Page) -> None:
         ".res-role", "els => els.map(e => e.value)") == ["课题骨干", "主持人"]
 
 
+async def test_correct_mismatched_prefill(page: Page) -> None:
+    """纠偏：站点解析简历产生的乱配预填（标题带编号/角色串位/链接空）
+    与档案不一致时按普通阈值覆盖；值一致的预填不动；可关。"""
+    await page.goto(fixture_url("feishu_like.html"))
+    for _ in range(2):
+        await page.click("#proj-add")
+    # 模拟站点解析预填：块1 乱值（编号标题+串位角色），块2 名称恰好已正确
+    await page.evaluate(r"""() => {
+      const native = (el, val) => {
+        const proto = el.tagName === 'TEXTAREA' ? window.HTMLTextAreaElement.prototype
+                                                : window.HTMLInputElement.prototype;
+        Object.getOwnPropertyDescriptor(proto, 'value').set.call(el, val);
+        el.dispatchEvent(new Event('input', {bubbles: true}));
+      };
+      const names = document.querySelectorAll('.proj-name');
+      const roles = document.querySelectorAll('.proj-role');
+      native(names[0], '1. 示例ai助手平台');
+      native(roles[0], '大数据开发负责人');
+      native(names[1], '示例预警系统');
+    }""")
+    profile: dict[str, Any] = {
+        "schema": 1,
+        "profile": {"id": "demo", "label": "示例"},
+        "sections": [{"key": "projects", "title": "项目经历", "kind": "repeat", "items": [
+            {"项目名称": "示例AI助手平台", "项目职务": "核心开发", "项目链接": "https://example.com/a"},
+            {"项目名称": "示例预警系统", "项目职务": "负责人"},
+        ]}],
+    }
+    report = await autofill(page, profile, {"noAddBlocks": True})
+    assert report["counts"]["failed"] == 0, report["failed"]
+    # 块1 乱值被纠正（含链接补上）
+    assert await page.eval_on_selector_all(
+        ".proj-name", "els => els.map(e => e.value)") == ["示例AI助手平台", "示例预警系统"]
+    assert await page.eval_on_selector_all(
+        ".proj-role", "els => els.map(e => e.value)") == ["核心开发", "负责人"]
+    assert await page.eval_on_selector_all(
+        ".proj-link", "els => els.map(e => e.value)") == ["https://example.com/a", ""]
+    corrected = [r for r in report["filled"] if r.get("corrected")]
+    assert {r["label"] for r in corrected} == {"项目名称", "项目角色"}  # 块2 正确值未重写
+
+    # 关闭纠偏：乱值保留
+    await page.goto(fixture_url("feishu_like.html"))
+    for _ in range(2):
+        await page.click("#proj-add")
+    await page.evaluate(r"""() => {
+      const native = (el, val) => {
+        const proto = el.tagName === 'TEXTAREA' ? window.HTMLTextAreaElement.prototype
+                                                : window.HTMLInputElement.prototype;
+        Object.getOwnPropertyDescriptor(proto, 'value').set.call(el, val);
+        el.dispatchEvent(new Event('input', {bubbles: true}));
+      };
+      const names = document.querySelectorAll('.proj-name');
+      native(names[0], '1. 示例ai助手平台');
+    }""")
+    report2 = await autofill(page, profile, {"noAddBlocks": True, "correctPrefilled": False})
+    assert report2["counts"]["failed"] == 0
+    names2 = await page.eval_on_selector_all(
+        ".proj-name", "els => els.map(e => e.value)")
+    assert names2[0] == "1. 示例ai助手平台"  # 关闭纠偏：乱值原样保留
+
+
 async def test_long_text_readback_over_400_chars(page: Page) -> None:
     """超长描述（>400 字）回读被截断：按同口径比对，不得误报「回读不一致」。"""
     await page.goto(fixture_url("feishu_like.html"))

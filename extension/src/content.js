@@ -1041,7 +1041,7 @@
   const SCORE_THRESHOLD = 55;
   const SCORE_THRESHOLD_PREFILLED = 84;
 
-  function buildPlan(fields, entries, mapping) {
+  function buildPlan(fields, entries, mapping, options) {
     const candidates = [];
     // 区间字段预配对：页面把起止合并为同标签的两个输入（如飞书「起止时间」），
     // 与档案的 开始时间/结束时间 按区块分组顺序一一对应（第 k 组 ↔ 第 k 条经历）
@@ -1115,7 +1115,17 @@
         if (score > 0 && field.occurrenceIndex === entry.itemIndex) {
           score += 6;
         }
-        const threshold = field.currentValue ? SCORE_THRESHOLD_PREFILLED : SCORE_THRESHOLD;
+        let threshold = field.currentValue ? SCORE_THRESHOLD_PREFILLED : SCORE_THRESHOLD;
+        // 纠偏：预填值与档案不一致（多为站点解析简历产生的乱配预填）时按普通阈值覆盖，
+        // 值一致则不写（本就正确）。options.correctPrefilled=false 可关。
+        if (
+          field.currentValue &&
+          threshold === SCORE_THRESHOLD_PREFILLED &&
+          options && options.correctPrefilled !== false &&
+          String(entry.value).trim() !== String(field.currentValue).trim()
+        ) {
+          threshold = SCORE_THRESHOLD;
+        }
         if (score >= threshold) {
           candidates.push({ fi, ei, score });
         }
@@ -1988,7 +1998,7 @@
     const { fields, uploads } = scanFields(adapter);
     const entries = buildEntries(flatProfile);
     const mapping = (options && options.mapping) || null;
-    const { plan, usedFields } = buildPlan(fields, entries, mapping);
+    const { plan, usedFields } = buildPlan(fields, entries, mapping, options);
     // AI 选选项覆盖：字段标签 → 选中的选项值
     const overrides = (options && options.overrides) || {};
     for (const item of plan) {
@@ -2007,6 +2017,7 @@
         )
         .replace(/-/g, "");
     for (const item of plan) {
+      const wasPrefilled = Boolean(item.field.currentValue && item.field.currentValue.length > 0);
       const result = await fillOne(item, adapter);
       refreshField(item, adapter);
       let readBackValue = readBack(item.field);
@@ -2034,7 +2045,12 @@
       }
       const label = item.field.label || item.field.nearbyText || "(无标签)";
       if (result.ok && verified) {
-        filled.push({ label, field: label, value: String(item.entry.value).slice(0, 60) });
+        filled.push({
+          label, field: label,
+          value: String(item.entry.value).slice(0, 60),
+          // 纠偏：覆盖了站点解析预填的乱值（原值与档案不一致）
+          ...(wasPrefilled ? { corrected: true, oldValue: String(item.field.currentValue).slice(0, 40) } : {}),
+        });
       } else if (result.ok) {
         failed.push({ label, field: label, value: item.entry.value, reason: "已执行但回读不一致" });
       } else {
