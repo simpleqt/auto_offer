@@ -184,6 +184,27 @@ def _set_window_icon(window: Any, icon_path: Path) -> None:
     import ctypes
 
     def _apply() -> None:
+        # 1) Form.Icon（任务栏按钮官方来源）：WinForms 控件非线程安全，
+        #    必须经 Form.Invoke 封送到 UI 线程执行（直接跨线程赋值会死锁）
+        try:
+            import clr
+
+            clr.AddReference("System.Drawing")
+            import System.Drawing
+
+            native = window.native
+            if native.InvokeRequired:
+
+                def _set() -> None:
+                    native.Icon = System.Drawing.Icon(str(icon_path))
+
+                native.Invoke(System.Action(_set))
+            else:
+                native.Icon = System.Drawing.Icon(str(icon_path))
+            log.info("app.icon_winforms ok")
+        except Exception:
+            log.exception("app.icon_winforms_failed")
+        # 2) WM_SETICON 兜底（小图标=标题栏，大图标=任务栏/Alt-Tab）
         try:
             # pywebview Windows 后端 native 是 .NET WinForms BrowserForm；
             # Handle 是 .NET IntPtr，需 ToInt64() 转 Python int
@@ -210,7 +231,7 @@ def _set_window_icon(window: Any, icon_path: Path) -> None:
         ]
         user32.SendMessageW.restype = ctypes.c_void_p
         image_icon, load_from_file = 1, 0x10
-        big = user32.LoadImageW(None, str(icon_path), image_icon, 32, 32, load_from_file)
+        big = user32.LoadImageW(None, str(icon_path), image_icon, 48, 48, load_from_file)
         small = user32.LoadImageW(None, str(icon_path), image_icon, 16, 16, load_from_file)
         log.info("app.icon_load big=%s small=%s", big, small)
         # WM_SETICON: wParam 1=大图标(Alt-Tab/任务栏) 0=小图标(标题栏)
@@ -257,6 +278,17 @@ def main(argv: list[str] | None = None) -> int:
         log.error("AutoOffer 已在运行，本次启动退出（单实例）")
         print("AutoOffer 已在运行，本次启动退出。", file=sys.stderr)
         return 1
+
+    # 显式 AppUserModelID：任务栏按 AppID 分组并缓存图标；python.exe 无显式
+    # AppID 时会沿用默认组的旧图标缓存（Form.Icon/WM_SETICON 设了也不刷新）。
+    # 设置独立 AppID 后任务栏视为独立应用，重新读取窗口图标。
+    if sys.platform == "win32":
+        import contextlib
+
+        with contextlib.suppress(Exception):
+            import ctypes
+
+            ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("AutoOffer.Desktop")
 
     try:
         config = ServerConfig.create(

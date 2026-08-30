@@ -3,6 +3,18 @@
 本项目遵循 [Conventional Commits](https://www.conventionalcommits.org/)，版本策略为 SemVer。
 由 `git-cliff` 从提交历史生成（配置见 `cliff.toml`；本文件在无 git-cliff 环境下按同格式手动维护）。
 
+## [v0.2.18] - 2026-08-30
+
+**任务栏图标版**：任务栏按钮也换上品牌图标。
+
+### Bug Fixes
+
+- (**app**) 任务栏按钮此前仍显示 Python 默认图标——三重修复：
+  1. `Form.Icon` 经 `Form.Invoke` 封送到 UI 线程设置（WinForms 控件非线程安全，跨线程直接赋值会死锁整个进程）；
+  2. 进程显式 `AppUserModelID`（AutoOffer.Desktop）——无显式 AppID 时任务栏沿用默认组的旧图标缓存，设置后按独立应用重新取图标；
+  3. `WM_SETICON` 大图标升 48px（任务栏/Alt-Tab 用）
+- (**app**) 修复一次引入的死锁事故：图标属性跨线程赋值导致窗口与服务全部挂起，已回退并改用官方 Invoke 模式
+
 ## [v0.2.17] - 2026-08-30
 
 **窗口图标版**：桌面窗口标题栏/任务栏换成品牌图标。
