@@ -20,8 +20,11 @@ const AO_LOG_MAX = 300;
 async function aoLog(level, msg, extra = undefined) {
   try {
     const { aoLog: entries = [] } = await chrome.storage.local.get("aoLog");
+    const ts = new Date();
+    const pad = (n) => String(n).padStart(2, "0");
     entries.unshift({
-      ts: new Date().toISOString().slice(0, 19).replace("T", " "),
+      ts: `${ts.getFullYear()}-${pad(ts.getMonth() + 1)}-${pad(ts.getDate())} ` +
+          `${pad(ts.getHours())}:${pad(ts.getMinutes())}:${pad(ts.getSeconds())}`,
       level,
       msg,
       ...(extra || {}),
@@ -155,6 +158,9 @@ function mergeReports(primary, secondary) {
   const newFailed = secondary.failed.filter((r) => !filledLabels.has(r.label));
   return {
     site: primary.site || secondary.site,
+    // 页面元信息随第一段报告透传（投递上报要靠 pageTitle 提取公司名）
+    pageTitle: primary.pageTitle || secondary.pageTitle,
+    url: primary.url || secondary.url,
     counts: {
       filled: primary.counts.filled + newFilled.length,
       failed: primary.counts.failed + newFailed.length,
