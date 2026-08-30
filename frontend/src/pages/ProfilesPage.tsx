@@ -3,6 +3,7 @@ import {
   Button,
   Card,
   Col,
+  Empty,
   List,
   message,
   Modal,
@@ -129,6 +130,21 @@ export default function ProfilesPage() {
         >
           {isLoading ? (
             <Spin />
+          ) : (profiles ?? []).length === 0 ? (
+            <Empty
+              image={Empty.PRESENTED_IMAGE_SIMPLE}
+              description="还没有档案：上传简历自动解析，或新建空白档案"
+            >
+              <Upload
+                accept=".pdf,.docx,.doc,.txt,.md"
+                showUploadList={false}
+                beforeUpload={handleParse}
+              >
+                <Button type="primary" icon={<UploadOutlined />} loading={uploading}>
+                  解析第一份简历
+                </Button>
+              </Upload>
+            </Empty>
           ) : (
             <List
               dataSource={profiles ?? []}
@@ -136,7 +152,11 @@ export default function ProfilesPage() {
                 <List.Item
                   style={{
                     cursor: 'pointer',
-                    background: p.id === selectedId ? '#f0f5ff' : undefined,
+                    background: p.id === selectedId ? '#eef3ff' : undefined,
+                    borderInlineStart:
+                      p.id === selectedId ? '3px solid #2e5be6' : '3px solid transparent',
+                    paddingInlineStart: 10,
+                    borderRadius: 6,
                   }}
                   onClick={() =>
                     p.id !== selectedId &&
@@ -176,9 +196,10 @@ export default function ProfilesPage() {
           ) : activeProfile ? (
             <ProfileEditor key={activeProfile.id} profile={activeProfile} />
           ) : (
-            <Typography.Paragraph type="secondary">
-              从左侧选择一个档案，或上传简历 PDF/Word 自动解析、或新建空白档案。
-            </Typography.Paragraph>
+            <Empty
+              image={Empty.PRESENTED_IMAGE_SIMPLE}
+              description="从左侧选择一个档案，或上传简历 PDF/Word 自动解析、或新建空白档案。"
+            />
           )}
         </Card>
       </Col>

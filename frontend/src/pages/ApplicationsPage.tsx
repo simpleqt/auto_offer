@@ -2,6 +2,7 @@ import { useState } from 'react';
 import {
   Button,
   Card,
+  Empty,
   Input,
   message,
   Popconfirm,
@@ -15,10 +16,34 @@ import { DeleteOutlined } from '@ant-design/icons';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { deleteApplication, listApplications, updateApplication } from '../api/client';
 import type { ApplicationRecord, ApplicationStatus } from '../api/types';
-import { APP_STATUS_LABELS } from '../constants';
+import { APP_STATUS_COLORS, APP_STATUS_LABELS } from '../constants';
 import { fmtTime } from '../profile-utils';
 
 const STATUS_OPTIONS = Object.keys(APP_STATUS_LABELS) as ApplicationStatus[];
+
+/** 状态色点：Select 收起态与下拉项统一带色，扫一眼即可分辨投递阶段。 */
+function statusDot(color: string) {
+  return (
+    <span
+      style={{
+        display: 'inline-block',
+        width: 8,
+        height: 8,
+        borderRadius: '50%',
+        background: color,
+        flex: 'none',
+      }}
+    />
+  );
+}
+
+function urlHost(url: string): string {
+  try {
+    return new URL(url).host;
+  } catch {
+    return url;
+  }
+}
 
 export default function ApplicationsPage() {
   const qc = useQueryClient();
@@ -52,7 +77,16 @@ export default function ApplicationsPage() {
     {
       title: '公司',
       dataIndex: 'company',
-      render: (v: string) => v || <Typography.Text type="secondary">待补</Typography.Text>,
+      render: (v: string, r: ApplicationRecord) =>
+        v ? (
+          <a href={r.url} target="_blank" rel="noreferrer">
+            {v}
+          </a>
+        ) : (
+          <a href={r.url} target="_blank" rel="noreferrer" style={{ opacity: 0.65 }}>
+            {urlHost(r.url) || '待补'}
+          </a>
+        ),
     },
     {
       title: '岗位',
@@ -67,7 +101,15 @@ export default function ApplicationsPage() {
           size="small"
           value={s}
           style={{ width: 110 }}
-          options={STATUS_OPTIONS.map((v) => ({ value: v, label: APP_STATUS_LABELS[v] }))}
+          options={STATUS_OPTIONS.map((v) => ({
+            value: v,
+            label: (
+              <Space size={6}>
+                {statusDot(APP_STATUS_COLORS[v])}
+                {APP_STATUS_LABELS[v]}
+              </Space>
+            ),
+          }))}
           onChange={(v) => update.mutate({ id: r.id, status: v })}
         />
       ),
@@ -110,6 +152,15 @@ export default function ApplicationsPage() {
     },
   ];
 
+  // 顶部统计：按状态聚合计数，跟踪求职进度
+  const counts = (data ?? []).reduce(
+    (acc, r) => {
+      acc[r.status] = (acc[r.status] ?? 0) + 1;
+      return acc;
+    },
+    {} as Record<string, number>,
+  );
+
   return (
     <Card
       title="投递列表"
@@ -124,12 +175,30 @@ export default function ApplicationsPage() {
         />
       }
     >
+      {(data ?? []).length > 0 && (
+        <Space size={8} wrap style={{ marginBottom: 16 }}>
+          <Typography.Text type="secondary">共 {data?.length} 条</Typography.Text>
+          {STATUS_OPTIONS.filter((s) => counts[s]).map((s) => (
+            <Tag key={s} color={APP_STATUS_COLORS[s]}>
+              {APP_STATUS_LABELS[s]} {counts[s]}
+            </Tag>
+          ))}
+        </Space>
+      )}
       <Table
         rowKey="id"
         loading={isLoading}
         columns={columns}
         dataSource={data ?? []}
         pagination={{ pageSize: 20 }}
+        locale={{
+          emptyText: (
+            <Empty
+              image={Empty.PRESENTED_IMAGE_SIMPLE}
+              description="暂无投递记录：浏览器插件每次填写完成后会自动登记到这里"
+            />
+          ),
+        }}
       />
     </Card>
   );

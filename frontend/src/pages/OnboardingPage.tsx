@@ -1,4 +1,4 @@
-import { Button, Card, Result, Space, Steps, Typography } from 'antd';
+import { Alert, Button, Card, Result, Space, Steps, Typography } from 'antd';
 import { useQuery } from '@tanstack/react-query';
 import { listModels, listProfiles } from '../api/client';
 import type { PageKey } from '../App';
@@ -47,16 +47,32 @@ export default function OnboardingPage({ goTo }: { goTo: (p: PageKey) => void })
           />
         )}
         {current === 2 && (
-          <Result
-            status="success"
-            title="准备就绪"
-            subTitle="模型与档案都已配置完成，可以发起你的第一个自动填写任务了。"
-            extra={
-              <Button type="primary" onClick={() => goTo('tasks')}>
-                发起任务
-              </Button>
-            }
-          />
+          <>
+            <Result
+              status="success"
+              title="准备就绪"
+              subTitle="模型与档案都已配置完成，可以发起你的第一个自动填写任务了。"
+              extra={
+                <Button type="primary" onClick={() => goTo('tasks')}>
+                  发起任务
+                </Button>
+              }
+            />
+            <Alert
+              type="info"
+              showIcon
+              message="推荐使用浏览器插件填写（更快、更稳）"
+              description={
+                <Typography.Paragraph style={{ marginBottom: 0 }}>
+                  Edge/Chrome 打开 <Typography.Text code>edge://extensions</Typography.Text>（Chrome
+                  为 <Typography.Text code>chrome://extensions</Typography.Text>）→
+                  开启「开发人员模式」→ 「加载解压缩的扩展」→ 选择本软件目录下的{' '}
+                  <Typography.Text code>extension/</Typography.Text>{' '}
+                  文件夹。之后在任意招聘表单页点插件图标即可一键直填，填写记录自动汇总到「投递列表」。
+                </Typography.Paragraph>
+              }
+            />
+          </>
         )}
         <Typography.Paragraph type="secondary" style={{ textAlign: 'center' }}>
           提示：填写完成后浏览器窗口会保留，请人工核对报告后再自行提交。

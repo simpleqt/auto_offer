@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Layout, Menu, Modal, Space, Typography } from 'antd';
+import { Badge, Layout, Menu, Modal, Space, Tag, Typography } from 'antd';
 import {
   AimOutlined,
   DatabaseOutlined,
@@ -23,7 +23,7 @@ import SettingsPage from './pages/SettingsPage';
 export type PageKey =
   'onboarding' | 'profiles' | 'models' | 'tasks' | 'replay' | 'applications' | 'settings';
 
-const { Sider, Content } = Layout;
+const { Sider, Content, Header } = Layout;
 
 const MENU_ITEMS: { key: PageKey; icon: React.ReactNode; label: string }[] = [
   { key: 'onboarding', icon: <RocketOutlined />, label: '首次引导' },
@@ -38,7 +38,13 @@ const MENU_ITEMS: { key: PageKey; icon: React.ReactNode; label: string }[] = [
 export default function App() {
   const [page, setPage] = useState<PageKey>('onboarding');
   const [collapsed, setCollapsed] = useState(false);
-  const { data } = useQuery({ queryKey: ['health'], queryFn: health });
+  const { data } = useQuery({
+    queryKey: ['health'],
+    queryFn: health,
+    // 顶栏服务状态徽标的数据源：周期刷新，本地服务起停能及时反映
+    refetchInterval: 30_000,
+    retry: 0,
+  });
 
   function switchPage(next: PageKey) {
     if (next === page) return;
@@ -101,6 +107,30 @@ export default function App() {
         />
       </Sider>
       <Layout>
+        <Header
+          style={{
+            background: '#fff',
+            padding: '0 24px',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            height: 52,
+            lineHeight: '52px',
+            borderBottom: '1px solid #eef0f4',
+          }}
+        >
+          <Typography.Title level={5} style={{ margin: 0 }}>
+            {MENU_ITEMS.find((m) => m.key === page)?.label}
+          </Typography.Title>
+          <Space size={12}>
+            {data?.status === 'ok' ? (
+              <Badge status="success" text={`本地服务在线 · 127.0.0.1:${data.port}`} />
+            ) : (
+              <Badge status="error" text="本地服务未运行" />
+            )}
+            {data && <Tag style={{ marginInlineEnd: 0 }}>v{data.version}</Tag>}
+          </Space>
+        </Header>
         <Content style={{ padding: 24, overflow: 'auto' }}>
           {page === 'onboarding' && <OnboardingPage goTo={switchPage} />}
           {page === 'profiles' && <ProfilesPage />}
@@ -110,19 +140,6 @@ export default function App() {
           {page === 'applications' && <ApplicationsPage />}
           {page === 'settings' && <SettingsPage />}
         </Content>
-        <Space
-          style={{
-            display: 'flex',
-            width: '100%',
-            padding: '4px 24px',
-            justifyContent: 'space-between',
-            borderTop: '1px solid #f0f0f0',
-          }}
-        >
-          <Typography.Text type="secondary" style={{ fontSize: 12 }} ellipsis>
-            {data ? `服务 v${data.version} · 数据目录 ${data.data_dir}` : '连接本地服务中…'}
-          </Typography.Text>
-        </Space>
       </Layout>
     </Layout>
   );

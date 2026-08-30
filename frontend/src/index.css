@@ -13,3 +13,26 @@ body,
 * {
   box-sizing: border-box;
 }
+
+body {
+  background: #f5f7fb;
+}
+
+/* 细滚动条：内容区大量表单/表格滚动时更轻量 */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #cdd5e3;
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #aab6cc;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}

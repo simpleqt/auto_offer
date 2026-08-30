@@ -22,7 +22,17 @@ const queryClient = new QueryClient({
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
-    <ConfigProvider locale={zhCN}>
+    <ConfigProvider
+      locale={zhCN}
+      theme={{
+        token: {
+          // 品牌色与 logo（assets/brand/autooffer.svg）渐变深端一致
+          colorPrimary: '#2e5be6',
+          colorLink: '#2e5be6',
+          borderRadius: 8,
+        },
+      }}
+    >
       <AntApp>
         <QueryClientProvider client={queryClient}>
           <App />
