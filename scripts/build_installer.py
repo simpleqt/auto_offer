@@ -56,6 +56,11 @@ def build_pyinstaller() -> None:
         f"{FRONTEND / 'dist'}{';' if sys.platform == 'win32' else ':'}frontend/dist",
         str(APP / "launcher.py"),
     ]
+    icon = ROOT / "assets" / "brand" / "autooffer.ico"
+    if icon.exists():
+        cmd[7:7] = ["--icon", str(icon)]  # exe/任务栏图标；缺失时回退 PyInstaller 默认
+    else:
+        print(f"  未找到 {icon}，exe 使用默认图标（可运行 scripts/render_logo.py 生成）")
     _run(cmd, cwd=ROOT)
 
 

@@ -17,6 +17,20 @@ header {
   margin-bottom: 8px;
 }
 
+.brand-group {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.brand-logo {
+  width: 22px;
+  height: 22px;
+  border-radius: 5px;
+  flex: none;
+}
+
 .brand {
   font-weight: 600;
 }

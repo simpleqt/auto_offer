@@ -76,6 +76,7 @@ export default function App() {
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
+            gap: 8,
             color: '#fff',
             fontWeight: 600,
             fontSize: 16,
@@ -84,7 +85,12 @@ export default function App() {
             whiteSpace: 'nowrap',
           }}
         >
-          {collapsed ? 'A' : 'AutoOffer'}
+          <img
+            src="/logo.png"
+            alt="AutoOffer"
+            style={{ width: 26, height: 26, borderRadius: 6, flex: 'none' }}
+          />
+          {!collapsed && <span>AutoOffer</span>}
         </div>
         <Menu
           theme="dark"

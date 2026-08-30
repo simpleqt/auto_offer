@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128">
+  <!-- AutoOffer 品牌主标：简历文档 + 闪电（自动/极速填写）
+       矢量源文件，由 scripts/render_logo.py 栅格化为插件/前端/安装包各尺寸图标 -->
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#5B8CFF" />
+      <stop offset="1" stop-color="#2E5BE6" />
+    </linearGradient>
+  </defs>
+  <!-- 圆角方形底（应用图标轮廓） -->
+  <rect width="128" height="128" rx="28" fill="url(#bg)" />
+  <!-- 简历文档主体 -->
+  <path d="M34 22 h36 l20 20 v64 a6 6 0 0 1 -6 6 H34 a6 6 0 0 1 -6 -6 V28 a6 6 0 0 1 6 -6 z" fill="#FFFFFF" />
+  <!-- 折角 -->
+  <path d="M70 22 v14 a6 6 0 0 0 6 6 h14 z" fill="#D9E4FF" />
+  <!-- 内容行：姓名行（主题蓝）+ 两行浅色正文 -->
+  <rect x="36" y="55" width="40" height="7" rx="3.5" fill="#2E5BE6" />
+  <rect x="36" y="71" width="36" height="6" rx="3" fill="#B9CCFF" />
+  <rect x="36" y="85" width="26" height="6" rx="3" fill="#B9CCFF" />
+  <!-- 闪电：叠在文档右下，象征自动/极速 -->
+  <path d="M90 52 L68 84 H80 L73 108 L99 74 H86 Z" fill="#FFAF26" />
+</svg>

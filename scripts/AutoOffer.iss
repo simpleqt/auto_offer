@@ -17,6 +17,8 @@ DefaultGroupName={#MyAppName}
 DisableProgramGroupPage=yes
 OutputDir=..\dist
 OutputBaseFilename=AutoOffer-Setup
+; 安装器/卸载器/开始菜单组图标（scripts/render_logo.py 生成）
+SetupIconFile=..\assets\brand\autooffer.ico
 Compression=lzma
 SolidCompression=yes
 WizardStyle=modern

@@ -3,6 +3,18 @@
 本项目遵循 [Conventional Commits](https://www.conventionalcommits.org/)，版本策略为 SemVer。
 由 `git-cliff` 从提交历史生成（配置见 `cliff.toml`；本文件在无 git-cliff 环境下按同格式手动维护）。
 
+## [v0.2.15] - 2026-08-30
+
+**品牌图标版**：软件 logo 全端落地。
+
+### Features
+
+- 品牌主标：蓝紫渐变圆角方形 + 白色简历文档（折角/姓名行/正文行）+ 琥珀闪电（自动/极速填写），矢量源 `assets/brand/autooffer.svg`
+- (**extension**) 插件图标替换占位方块（16/48/128）；弹窗头部显示 logo
+- (**frontend**) 浏览器标签 favicon + 苹果触摸图标；侧边栏品牌行显示 logo（收起时仅图标）
+- (**app**) PyInstaller `--icon` 与 Inno Setup `SetupIconFile` 接入 `assets/brand/autooffer.ico`（安装器/开始菜单/exe 图标）
+- (**scripts**) `render_logo.py`：SVG → 各端 PNG + 多尺寸 ICO 一键再生成（Playwright 渲染，渐变保真）
+
 ## [v0.2.14] - 2026-08-30
 
 **自定义端口版**：服务端口用户可配，端口冲突不再愁。
