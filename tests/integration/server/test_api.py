@@ -286,6 +286,23 @@ def test_application_404(client: TestClient) -> None:
     assert client.put("/api/v1/applications/none", json={"status": "submitted"}).status_code == 404
 
 
+def test_extension_logs_sink_to_stdlib(client: TestClient, caplog: Any) -> None:
+    """插件日志上报：条目进入 extension 记录器（生产环境由 launcher 汇入 app.log）。"""
+    with caplog.at_level("INFO", logger="extension"):
+        r = client.post("/api/v1/logs", json={"entries": [
+            {"ts": "2026-08-30 10:00:00", "level": "info", "msg": "fill.done",
+             "filled": 30, "url": "https://example.com/apply"},
+            {"level": "error", "msg": "fill.fatal", "error": "x"},
+            {"msg": ""},
+            "not-a-dict",
+        ]})
+    assert r.status_code == 200
+    assert r.json()["written"] == 2  # 空消息与非字典条目跳过
+    recs = [r for r in caplog.records if r.name == "extension"]
+    assert any("fill.done" in r.message and "filled=30" in r.message for r in recs)
+    assert any(r.levelname == "ERROR" and "fill.fatal" in r.message for r in recs)
+
+
 # ---------- 模型调用统计（FR-M5） ----------
 
 def test_usage_aggregation_by_model_and_task(client: TestClient) -> None:

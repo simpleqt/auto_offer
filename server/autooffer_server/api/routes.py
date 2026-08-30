@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import logging
 import uuid
 from pathlib import Path
 from typing import Annotated, Any
@@ -20,6 +21,7 @@ from autooffer_server.api.schemas import (
     AppSettings,
     EndpointIn,
     EndpointOut,
+    LogsIn,
     MappingIn,
     MappingOut,
     OptionMatchIn,
@@ -568,3 +570,37 @@ async def update_application(
 async def delete_application(request: Request, record_id: str) -> dict[str, bool]:
     store = _app_store(_ctx(request))
     return {"deleted": store.remove(record_id)}
+
+
+# ---------- 插件日志汇聚（与 exe 日志同写一个 app.log） ----------
+
+_LOG_LEVELS = {"debug": 10, "info": 20, "warn": 30, "warning": 30, "error": 40}
+
+
+@router.post("/logs")
+async def receive_extension_logs(request: Request, body: LogsIn) -> dict[str, int]:
+    """接收插件运行日志条目，写入本地 app.log（logger=extension）。
+
+    插件与 exe 的时间线在同一文件里按时间排序，一次填写可端到端追溯。
+    """
+    logger = logging.getLogger("extension")
+    written = 0
+    for e in body.entries[:100]:
+        if not isinstance(e, dict):
+            continue
+        msg = str(e.get("msg", ""))[:200]
+        if not msg:
+            continue
+        extra = " ".join(
+            f"{k}={str(v)[:120]}"
+            for k, v in e.items()
+            if k not in ("ts", "level", "msg") and v is not None
+        )
+        logger.log(
+            _LOG_LEVELS.get(str(e.get("level", "info")).lower(), 20),
+            "%s%s",
+            msg,
+            f" {extra}" if extra else "",
+        )
+        written += 1
+    return {"written": written}

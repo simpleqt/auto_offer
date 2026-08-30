@@ -16,22 +16,37 @@ const DEFAULT_API = "http://127.0.0.1:8765";
 const MAX_ATTACHMENT_BYTES = 8 * 1024 * 1024;
 const AO_LOG_MAX = 300;
 
-/** 插件运行日志：环形缓冲存 chrome.storage.local（aoLog），弹窗可查看/复制。 */
+/** 插件运行日志：环形缓冲存 chrome.storage.local（aoLog），弹窗可查看/复制；
+ *  同时实时上报本地服务 /api/v1/logs，与 exe 日志汇入同一 app.log（失败静默）。 */
 async function aoLog(level, msg, extra = undefined) {
+  const entry = { level, msg, ...(extra || {}) };
   try {
-    const { aoLog: entries = [] } = await chrome.storage.local.get("aoLog");
     const ts = new Date();
     const pad = (n) => String(n).padStart(2, "0");
-    entries.unshift({
+    const stamped = {
       ts: `${ts.getFullYear()}-${pad(ts.getMonth() + 1)}-${pad(ts.getDate())} ` +
           `${pad(ts.getHours())}:${pad(ts.getMinutes())}:${pad(ts.getSeconds())}`,
-      level,
-      msg,
-      ...(extra || {}),
-    });
+      ...entry,
+    };
+    const { aoLog: entries = [] } = await chrome.storage.local.get("aoLog");
+    entries.unshift(stamped);
     await chrome.storage.local.set({ aoLog: entries.slice(0, AO_LOG_MAX) });
   } catch {
     /* 日志自身绝不影响主流程 */
+  }
+  try {
+    const base = await apiBase();
+    fetchJson(
+      `${base}/api/v1/logs`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ entries: [entry] }),
+      },
+      5000
+    ).catch(() => {});
+  } catch {
+    /* 本地应用未启动时静默跳过 */
   }
 }
 

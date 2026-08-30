@@ -3,6 +3,16 @@
 本项目遵循 [Conventional Commits](https://www.conventionalcommits.org/)，版本策略为 SemVer。
 由 `git-cliff` 从提交历史生成（配置见 `cliff.toml`；本文件在无 git-cliff 环境下按同格式手动维护）。
 
+## [v0.2.11] - 2026-08-30
+
+**统一日志版**：插件与本地 exe 的日志汇入同一文件。
+
+### Features
+
+- (**server**) `POST /api/v1/logs`：接收插件日志条目写入 `app.log`（logger=extension，宽松校验——非字典/空消息条目跳过，不 422）
+- (**extension**) `aoLog` 双写：本地环形缓冲（弹窗查看）+ 实时上报本地服务；本地应用未启动时静默跳过
+- 一台机器一条时间线：一次填写的 插件动作（fill.start/pass1/mapping/attachments/done）与服务端事件（LLM 调用/映射结果/投递登记）在同一 `app.log` 里按时间排序，端到端可追溯
+
 ## [v0.2.10] - 2026-08-30
 
 **日志修正版**：真实扩展链路首跑揭出的两处修复。

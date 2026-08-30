@@ -93,6 +93,13 @@ class ApplicationReportIn(BaseModel):
     note: str | None = None
 
 
+class LogsIn(BaseModel):
+    """插件运行日志上报：条目写入本地 app.log（logger=extension），与 exe 日志同文件。"""
+
+    entries: list[Any] = []
+    """宽松类型：非字典/空消息条目由处理器跳过，不让上报方因格式被 422 拒绝。"""
+
+
 class UsageAggregate(BaseModel):
     """单条用量聚合（按模型或按任务）。"""
 
