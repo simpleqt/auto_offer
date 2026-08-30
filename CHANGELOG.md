@@ -3,6 +3,22 @@
 本项目遵循 [Conventional Commits](https://www.conventionalcommits.org/)，版本策略为 SemVer。
 由 `git-cliff` 从提交历史生成（配置见 `cliff.toml`；本文件在无 git-cliff 环境下按同格式手动维护）。
 
+## [v0.2.12] - 2026-08-30
+
+**学院字段版**：教育经历新增独立「学院」字段，站点院系字段可直填。
+
+### Features
+
+- (**core**) `Education.college`：学院/院系独立字段（原先只能塞在描述里，站点「学院」字段永远填不上）
+- (**server**) 扁平档案教育经历输出「学院」
+- (**extension**) 标签别名：学院 → 院系/所属学院/学院名称
+- (**frontend**) 档案编辑页教育经历增加「学院」输入框
+- (**core**) 简历解析提示词：学院/院系 → `education.college`，不再混入描述
+
+### Bug Fixes
+
+- (**frontend**) 补跑 Prettier 格式化，修复 main 分支 CI「Format check (Prettier)」失败
+
 ## [v0.2.11] - 2026-08-30
 
 **统一日志版**：插件与本地 exe 的日志汇入同一文件。

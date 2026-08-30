@@ -159,10 +159,17 @@ export function EducationFields() {
                   </Form.Item>
                 </Col>
                 <Col span={8}>
+                  <Form.Item name={[name, 'college']} label="学院">
+                    <Input />
+                  </Form.Item>
+                </Col>
+                <Col span={8}>
                   <Form.Item name={[name, 'major']} label="专业">
                     <Input />
                   </Form.Item>
                 </Col>
+              </Row>
+              <Row gutter={12}>
                 <Col span={8}>
                   <Form.Item name={[name, 'degree']} label="学历">
                     <Select
@@ -171,8 +178,6 @@ export function EducationFields() {
                     />
                   </Form.Item>
                 </Col>
-              </Row>
-              <Row gutter={12}>
                 <Col span={8}>
                   <Form.Item name={[name, 'period', 'start']} label="开始时间">
                     <DatePicker picker="month" style={{ width: '100%' }} />
@@ -183,15 +188,19 @@ export function EducationFields() {
                     <DatePicker picker="month" style={{ width: '100%' }} />
                   </Form.Item>
                 </Col>
+              </Row>
+              <Row gutter={12}>
                 <Col span={8}>
                   <Form.Item name={[name, 'gpa']} label="GPA">
                     <Input />
                   </Form.Item>
                 </Col>
+                <Col span={16}>
+                  <Form.Item name={[name, 'description']} label="描述">
+                    <TextArea rows={2} />
+                  </Form.Item>
+                </Col>
               </Row>
-              <Form.Item name={[name, 'description']} label="描述">
-                <TextArea rows={2} />
-              </Form.Item>
             </Card>
           ))}
           <Button type="dashed" icon={<PlusOutlined />} block onClick={() => add({ period: {} })}>

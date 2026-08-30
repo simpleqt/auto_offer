@@ -111,11 +111,7 @@ export const uploadAttachment = (
 };
 
 /** 上传简历到指定档案并设为默认；mode=parse 同时重新解析覆盖档案内容。 */
-export const uploadResume = (
-  profileId: string,
-  file: File,
-  mode: 'replace' | 'parse',
-) => {
+export const uploadResume = (profileId: string, file: File, mode: 'replace' | 'parse') => {
   const form = new FormData();
   form.append('file', file);
   form.append('mode', mode);

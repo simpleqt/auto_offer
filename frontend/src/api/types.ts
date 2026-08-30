@@ -58,6 +58,7 @@ export type AttachmentLanguage = 'zh' | 'en';
 
 export interface Education {
   school: string;
+  college: string | null;
   major: string | null;
   degree: Degree | null;
   period: DateRange;

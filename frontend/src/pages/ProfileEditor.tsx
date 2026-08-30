@@ -70,9 +70,13 @@ export default function ProfileEditor({ profile }: { profile: Profile }) {
           { key: 'experience', label: '实习 / 工作 / 项目经历', children: <ExperienceFields /> },
           { key: 'extended', label: '扩展信息（按需注入）', children: <ExtendedFields /> },
           { key: 'qa', label: '问答知识库', children: <QABank /> },
-          { key: 'attachments', label: '附件管理', children: (
-            <Attachments profileId={profile.id} form={form} onProfileUpdated={onProfileUpdated} />
-          ) },
+          {
+            key: 'attachments',
+            label: '附件管理',
+            children: (
+              <Attachments profileId={profile.id} form={form} onProfileUpdated={onProfileUpdated} />
+            ),
+          },
         ]}
       />
       <Divider />

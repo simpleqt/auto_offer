@@ -24,7 +24,12 @@ import {
   message,
 } from 'antd';
 import { CheckOutlined, DeleteOutlined, PlusOutlined, UploadOutlined } from '@ant-design/icons';
-import { activateAttachment, deleteAttachment, uploadAttachment, uploadResume } from '../api/client';
+import {
+  activateAttachment,
+  deleteAttachment,
+  uploadAttachment,
+  uploadResume,
+} from '../api/client';
 import type { Profile } from '../api/types';
 
 export function ExtendedFields() {
@@ -189,13 +194,9 @@ export function Attachments({
   const [resumeMode, setResumeMode] = useState<'replace' | 'parse'>('replace');
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const attachments: any[] = Form.useWatch('attachments', form) || [];
-  const resumes = attachments
-    .map((a, i) => ({ a, i }))
-    .filter(({ a }) => a && a.kind === 'resume');
+  const resumes = attachments.map((a, i) => ({ a, i })).filter(({ a }) => a && a.kind === 'resume');
   const activeResumeIdx = (() => {
-    const marked = resumes.find(
-      ({ a }) => a.meta && String(a.meta.active) === '1',
-    );
+    const marked = resumes.find(({ a }) => a.meta && String(a.meta.active) === '1');
     return marked ? marked.i : resumes.length ? resumes[0].i : -1;
   })();
 
@@ -265,11 +266,7 @@ export function Attachments({
 
   return (
     <>
-      <Card
-        size="small"
-        title="简历附件（可保留多份，选一份默认）"
-        style={{ marginBottom: 16 }}
-      >
+      <Card size="small" title="简历附件（可保留多份，选一份默认）" style={{ marginBottom: 16 }}>
         <Typography.Paragraph type="secondary">
           填表时「上传简历」控件只注入默认简历。上传新简历可选：仅替换附件（不动档案内容），
           或重新解析并覆盖档案内容。
@@ -282,7 +279,10 @@ export function Attachments({
         {resumes.map(({ a, i }) => (
           <Row key={i} gutter={8} style={{ marginBottom: 6 }} align="middle">
             <Col flex="auto">
-              {String(a.path || '').split(/[\\/]/).pop()}（{a.label}）
+              {String(a.path || '')
+                .split(/[\\/]/)
+                .pop()}
+              （{a.label}）
               {i === activeResumeIdx && (
                 <Tag color="blue" style={{ marginLeft: 8 }}>
                   默认
@@ -326,83 +326,89 @@ export function Attachments({
         {(fields, { add, remove }) => (
           <>
             <Typography.Paragraph type="secondary">
-              其他附件（证件照/成绩单/证书/作品集等）在填表时按「用途标签 + 类型 + 语言」匹配站点上传控件；
+              其他附件（证件照/成绩单/证书/作品集等）在填表时按「用途标签 + 类型 +
+              语言」匹配站点上传控件；
               证件照超限会本地自动压缩。上传后文件保存在本机数据目录，路径随档案一起持久化；
               修改后需点底部「保存档案」。
             </Typography.Paragraph>
-          {fields.map(({ key, name }) => (
-            <Card
-              key={key}
-              size="small"
-              style={{ marginBottom: 8 }}
-              extra={
-                <Button type="text" danger icon={<DeleteOutlined />} onClick={() => remove(name)} />
-              }
-            >
-              <Row gutter={12}>
-                <Col span={8}>
-                  <Form.Item name={[name, 'kind']} label="类型" rules={[{ required: true }]}>
-                    <Select
-                      options={[
-                        { value: 'resume', label: '简历' },
-                        { value: 'photo', label: '证件照' },
-                        { value: 'transcript', label: '成绩单' },
-                        { value: 'certificate', label: '证书' },
-                        { value: 'portfolio', label: '作品集' },
-                        { value: 'other', label: '其他' },
-                      ]}
-                    />
-                  </Form.Item>
-                </Col>
-                <Col span={8}>
-                  <Form.Item name={[name, 'label']} label="用途标签" rules={[{ required: true }]}>
-                    <Input placeholder="如 中文简历 / 一寸白底照" />
-                  </Form.Item>
-                </Col>
-                <Col span={8}>
-                  <Form.Item name={[name, 'language']} label="语言">
-                    <Select
-                      options={[
-                        { value: 'zh', label: '中文' },
-                        { value: 'en', label: '英文' },
-                      ]}
-                      allowClear
-                    />
-                  </Form.Item>
-                </Col>
-              </Row>
-              <Form.Item name={[name, 'path']} label="文件路径" rules={[{ required: true }]}>
-                <Input placeholder="本机绝对路径" />
-              </Form.Item>
-            </Card>
-          ))}
-          <Space>
-            <Upload
-              showUploadList={false}
-              beforeUpload={async (file) => {
-                setUploading(true);
-                try {
-                  const attachment = await uploadAttachment(file, {});
-                  add(attachment);
-                  message.success(`已上传并保存：${file.name}`);
-                } catch (e) {
-                  message.error((e as Error).message);
-                } finally {
-                  setUploading(false);
+            {fields.map(({ key, name }) => (
+              <Card
+                key={key}
+                size="small"
+                style={{ marginBottom: 8 }}
+                extra={
+                  <Button
+                    type="text"
+                    danger
+                    icon={<DeleteOutlined />}
+                    onClick={() => remove(name)}
+                  />
                 }
-                return false; // 阻止 antd 自动上传，走自定义逻辑
-              }}
-            >
-              <Button icon={<UploadOutlined />} loading={uploading}>
-                上传附件
+              >
+                <Row gutter={12}>
+                  <Col span={8}>
+                    <Form.Item name={[name, 'kind']} label="类型" rules={[{ required: true }]}>
+                      <Select
+                        options={[
+                          { value: 'resume', label: '简历' },
+                          { value: 'photo', label: '证件照' },
+                          { value: 'transcript', label: '成绩单' },
+                          { value: 'certificate', label: '证书' },
+                          { value: 'portfolio', label: '作品集' },
+                          { value: 'other', label: '其他' },
+                        ]}
+                      />
+                    </Form.Item>
+                  </Col>
+                  <Col span={8}>
+                    <Form.Item name={[name, 'label']} label="用途标签" rules={[{ required: true }]}>
+                      <Input placeholder="如 中文简历 / 一寸白底照" />
+                    </Form.Item>
+                  </Col>
+                  <Col span={8}>
+                    <Form.Item name={[name, 'language']} label="语言">
+                      <Select
+                        options={[
+                          { value: 'zh', label: '中文' },
+                          { value: 'en', label: '英文' },
+                        ]}
+                        allowClear
+                      />
+                    </Form.Item>
+                  </Col>
+                </Row>
+                <Form.Item name={[name, 'path']} label="文件路径" rules={[{ required: true }]}>
+                  <Input placeholder="本机绝对路径" />
+                </Form.Item>
+              </Card>
+            ))}
+            <Space>
+              <Upload
+                showUploadList={false}
+                beforeUpload={async (file) => {
+                  setUploading(true);
+                  try {
+                    const attachment = await uploadAttachment(file, {});
+                    add(attachment);
+                    message.success(`已上传并保存：${file.name}`);
+                  } catch (e) {
+                    message.error((e as Error).message);
+                  } finally {
+                    setUploading(false);
+                  }
+                  return false; // 阻止 antd 自动上传，走自定义逻辑
+                }}
+              >
+                <Button icon={<UploadOutlined />} loading={uploading}>
+                  上传附件
+                </Button>
+              </Upload>
+              <Button type="dashed" icon={<PlusOutlined />} onClick={() => add({ meta: {} })}>
+                手动添加
               </Button>
-            </Upload>
-            <Button type="dashed" icon={<PlusOutlined />} onClick={() => add({ meta: {} })}>
-              手动添加
-            </Button>
-          </Space>
-        </>
-      )}
+            </Space>
+          </>
+        )}
       </Form.List>
     </>
   );

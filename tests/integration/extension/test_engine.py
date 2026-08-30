@@ -65,7 +65,14 @@ ZHIYE_PROFILE: dict[str, Any] = {
             "key": "education",
             "title": "教育经历",
             "kind": "repeat",
-            "items": [{"学校": "示例大学", "专业": "计算机科学与技术", "学历": "本科"}],
+            "items": [
+                {
+                    "学校": "示例大学",
+                    "学院": "示例信息学院",
+                    "专业": "计算机科学与技术",
+                    "学历": "本科",
+                }
+            ],
         },
         {
             "key": "other",
@@ -96,6 +103,7 @@ async def test_zhiye_like_basic_fill(page: Page) -> None:
     )
     assert text == "共青团员"
     assert await page.input_value("#school") == "示例大学"  # 别名：学校 → 毕业院校
+    assert await page.input_value("#college") == "示例信息学院"  # 别名：学院 → 院系
     assert await page.input_value("#self-eval") == "做事踏实。"
     # 自定义下拉（portal 面板选项）
     edu = await page.eval_on_selector(
@@ -110,7 +118,7 @@ async def test_zhiye_like_basic_fill(page: Page) -> None:
     assert await page.input_value("#weight") == ""
     skipped = {s["field"]: s["reason"] for s in report["skipped"]}
     assert any("附件需手动上传" in r for r in skipped.values())
-    assert report["counts"]["filled"] == 10
+    assert report["counts"]["filled"] == 11
 
 
 async def test_moka_like_element_fill(page: Page) -> None:

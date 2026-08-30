@@ -49,6 +49,33 @@ def test_project_title_strips_leading_numbering() -> None:
     assert item2["项目名称"] == "示例平台"
 
 
+def _education_item(payload: dict[str, object]) -> dict[str, object]:
+    flat = flatten_profile(payload)
+    edu = next(s for s in flat["sections"] if s["key"] == "education")
+    assert len(edu["items"]) == 1
+    return edu["items"][0]  # type: ignore[no-any-return]
+
+
+def test_education_college_emitted() -> None:
+    payload = _profile_payload()
+    payload["education"] = [
+        {"school": "示例大学", "college": "计算机与网络安全学院",
+         "period": {"start": {"year": 2020, "month": 9}}}
+    ]
+    item = _education_item(payload)
+    assert item["学校"] == "示例大学"
+    assert item["学院"] == "计算机与网络安全学院"
+
+
+def test_education_without_college_omits_field() -> None:
+    payload = _profile_payload()
+    payload["education"] = [
+        {"school": "示例大学", "period": {"start": {"year": 2020, "month": 9}}}
+    ]
+    item = _education_item(payload)
+    assert "学院" not in item
+
+
 def test_research_section_separate_and_last() -> None:
     payload = _profile_payload()
     payload["experiences"] = payload["experiences"] + [  # type: ignore[union-attr]

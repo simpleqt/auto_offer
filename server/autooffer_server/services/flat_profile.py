@@ -141,6 +141,7 @@ class _Flattener:
     def _edu_values(e: Education) -> dict[str, Any]:
         values: dict[str, Any] = {
             "学校": e.school,
+            "学院": e.college,
             "专业": e.major,
             "学历": e.degree,
             "学位": _DEGREE_NAME.get(e.degree or "", None),

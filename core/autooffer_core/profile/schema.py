@@ -29,6 +29,8 @@ class DateRange(BaseModel):
 
 class Education(BaseModel):
     school: str
+    college: str | None = None
+    """学院/院系名称，对应站点教育经历里的「学院」字段。"""
     major: str | None = None
     degree: Literal["高中", "大专", "本科", "硕士", "博士", "其他"] | None = None
     period: DateRange
