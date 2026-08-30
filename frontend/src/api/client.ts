@@ -110,6 +110,33 @@ export const uploadAttachment = (
   return request<Attachment>('/attachments', { method: 'POST', body: form });
 };
 
+/** 上传简历到指定档案并设为默认；mode=parse 同时重新解析覆盖档案内容。 */
+export const uploadResume = (
+  profileId: string,
+  file: File,
+  mode: 'replace' | 'parse',
+) => {
+  const form = new FormData();
+  form.append('file', file);
+  form.append('mode', mode);
+  return request<{ profile: Profile; low_confidence_paths: string[]; active_resume_index: number }>(
+    `/profiles/${encodeURIComponent(profileId)}/resumes`,
+    { method: 'POST', body: form },
+  );
+};
+
+export const activateAttachment = (profileId: string, index: number) =>
+  request<{ active_resume_index: number }>(
+    `/profiles/${encodeURIComponent(profileId)}/attachments/${index}/activate`,
+    { method: 'POST' },
+  );
+
+export const deleteAttachment = (profileId: string, index: number) =>
+  request<{ attachments: Attachment[] }>(
+    `/profiles/${encodeURIComponent(profileId)}/attachments/${index}`,
+    { method: 'DELETE' },
+  );
+
 // ---------- 任务 ----------
 
 export const createTask = (body: TaskIn) =>

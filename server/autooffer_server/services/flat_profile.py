@@ -310,6 +310,16 @@ class _Flattener:
                     sec["values"] = _clean(sec["values"])
                     break
         self._other(p, ext)
+        # 简历只带「默认简历」（meta.active 标记，无标记取第一份）：
+        # 填表注入用用户选定的那份，多简历不重复上传；index 是档案附件列表下标
+        active_resume = next(
+            (
+                i
+                for i, a in enumerate(p.attachments)
+                if a.kind == "resume" and str(a.meta.get("active", "")) in ("1", "True")
+            ),
+            next((i for i, a in enumerate(p.attachments) if a.kind == "resume"), -1),
+        )
         attachments = [
             {
                 "kind": a.kind,
@@ -319,8 +329,10 @@ class _Flattener:
                     r"^[0-9a-f]{8}_", "", a.path.replace("\\", "/").rsplit("/", 1)[-1]
                 ),
                 "language": a.language,
+                "index": i,
             }
-            for a in p.attachments
+            for i, a in enumerate(p.attachments)
+            if a.kind != "resume" or i == active_resume
         ]
         return {
             "schema": 1,

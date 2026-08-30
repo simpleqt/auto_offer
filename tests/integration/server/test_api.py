@@ -342,6 +342,93 @@ def test_attachment_upload_invalid_kind(client: TestClient) -> None:
     assert r.status_code == 422
 
 
+# ---------- 简历附件管理（多简历 + 默认 + 解析覆盖） ----------
+
+
+def _make_profile(client: TestClient) -> str:
+    client.put("/api/v1/profiles/pr1", json={"payload": sample_profile_payload()})
+    return "pr1"
+
+
+def test_resume_upload_replace_activate_delete(client: TestClient) -> None:
+    pid = _make_profile(client)
+    files = {"file": ("new_resume.txt", b"name: demo", "text/plain")}
+    r = client.post(f"/api/v1/profiles/{pid}/resumes", files=files, data={"mode": "replace"})
+    assert r.status_code == 200
+    body = r.json()
+    # 新简历成为默认；原两份简历 active 被清掉
+    atts = body["profile"]["attachments"]
+    assert len(atts) == 4
+    assert atts[3]["kind"] == "resume" and atts[3]["meta"]["active"] == 1
+    assert all("active" not in (a.get("meta") or {}) for a in atts[:3] if a["kind"] == "resume")
+    # replace 模式不动档案内容
+    assert body["profile"]["basic"]["name"] == "张三"
+
+    # flat 只带默认简历（带档案内下标）
+    flat = client.get(f"/api/v1/profiles/{pid}/flat").json()
+    resume_atts = [a for a in flat["attachments"] if a["kind"] == "resume"]
+    assert len(resume_atts) == 1
+    assert resume_atts[0]["index"] == 3
+    assert any(a["kind"] == "photo" for a in flat["attachments"])
+
+    # 激活旧简历（index 0），flat 随之切换
+    assert client.post(f"/api/v1/profiles/{pid}/attachments/0/activate").status_code == 200
+    flat = client.get(f"/api/v1/profiles/{pid}/flat").json()
+    resume_atts = [a for a in flat["attachments"] if a["kind"] == "resume"]
+    assert resume_atts[0]["index"] == 0
+
+    # 非简历附件不可激活
+    assert client.post(f"/api/v1/profiles/{pid}/attachments/2/activate").status_code == 422
+
+    # 删除默认简历 → 自动激活剩下的第一份
+    assert client.delete(f"/api/v1/profiles/{pid}/attachments/0").status_code == 200
+    atts = client.get(f"/api/v1/profiles/{pid}").json()["attachments"]
+    resumes = [a for a in atts if a["kind"] == "resume"]
+    assert len(resumes) == 2
+    assert (resumes[0].get("meta") or {}).get("active") == 1
+    assert client.delete(f"/api/v1/profiles/{pid}/attachments/99").status_code == 404
+
+
+def test_resume_upload_parse_overwrites_content(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    pid = _make_profile(client)
+    from autooffer_core.profile.schema import Profile
+
+    async def fake_parse(path: str, llm: Any) -> tuple[Profile, list[str]]:
+        parsed = Profile.model_validate(sample_profile_payload())
+        parsed.basic.name = "李四"
+        return parsed, ["basic.birth_date"]
+
+    monkeypatch.setattr("autooffer_core.profile.parser.parse_resume", fake_parse)
+
+    async def fake_build_llm(self: Any, role: str = "actor") -> Any:
+        return object()
+
+    monkeypatch.setattr("autooffer_server.context.AppContext.build_llm", fake_build_llm)
+    files = {"file": ("resume2.txt", b"name: lisi", "text/plain")}
+    r = client.post(f"/api/v1/profiles/{pid}/resumes", files=files, data={"mode": "parse"})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["profile"]["basic"]["name"] == "李四"  # 内容被解析结果覆盖
+    assert body["low_confidence_paths"] == ["basic.birth_date"]
+    # 身份与附件保留：id 不变，新简历入库且为默认
+    atts = body["profile"]["attachments"]
+    assert (atts[-1]["meta"] or {}).get("active") == 1
+    # 覆盖后 flat 正常出数据
+    flat = client.get(f"/api/v1/profiles/{pid}/flat").json()
+    assert any(v == "李四" for s in flat["sections"] for v in (s.get("values") or {}).values())
+
+
+def test_resume_upload_bad_mode_and_missing_profile(client: TestClient) -> None:
+    files = {"file": ("r.txt", b"x", "text/plain")}
+    r = client.post("/api/v1/profiles/none/resumes", files=files, data={"mode": "replace"})
+    assert r.status_code == 404
+    pid = _make_profile(client)
+    r = client.post(f"/api/v1/profiles/{pid}/resumes", files=files, data={"mode": "magic"})
+    assert r.status_code == 422
+
+
 # ---------- 应用设置（浏览器连接模式） ----------
 
 def test_settings_default_and_update(client: TestClient) -> None:

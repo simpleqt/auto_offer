@@ -3,6 +3,18 @@
 本项目遵循 [Conventional Commits](https://www.conventionalcommits.org/)，版本策略为 SemVer。
 由 `git-cliff` 从提交历史生成（配置见 `cliff.toml`；本文件在无 git-cliff 环境下按同格式手动维护）。
 
+## [v0.2.8] - 2026-08-30
+
+**简历附件管理版**：多简历可选、上传模式可配置。
+
+### Features
+
+- (**server**) `POST /profiles/{id}/resumes` 上传简历附件并设为默认：`mode=replace` 仅替换附件（不动档案内容）；`mode=parse` 重新解析简历并**覆盖档案内容**（保留 id/label/附件列表，返回低置信字段路径）。`POST .../attachments/{i}/activate` 切换默认简历；`DELETE .../attachments/{i}` 移除附件（删默认后自动激活下一份，文件保留在数据目录）
+- (**server**) 扁平档案只携带**默认简历**（`meta.active` 标记，无标记取第一份）+ 非简历附件，并携带档案内 `index`——填表注入用用户选定的那份，多简历不再重复上传
+- (**extension**) background 按扁平附件的 `index` 下标取字节（兼容旧格式回退循环序号）
+- (**core**) 解析器提示词：项目地址/GitHub URL → `Experience.link`（描述保留原文）
+- (**frontend**) 附件管理重做：简历管理卡片（多简历列表/默认标记/设为默认/删除）+ 上传时选择「仅替换附件」或「解析并覆盖档案内容」（后者二次确认，覆盖后整表刷新并提示低置信字段数）
+
 ## [v0.2.7] - 2026-08-29
 
 **预填纠偏版**：站点解析简历产生的乱配预填可被档案值纠正。

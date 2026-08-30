@@ -48,6 +48,12 @@ export default function ProfileEditor({ profile }: { profile: Profile }) {
     }
   }
 
+  /** 服务端已改档案（如简历解析覆盖）→ 整表刷新为服务端版本 */
+  function onProfileUpdated(fresh: Profile) {
+    form.setFieldsValue(datesToDayjs(fresh));
+    setUnsaved(false);
+  }
+
   return (
     <Form
       form={form}
@@ -64,7 +70,9 @@ export default function ProfileEditor({ profile }: { profile: Profile }) {
           { key: 'experience', label: '实习 / 工作 / 项目经历', children: <ExperienceFields /> },
           { key: 'extended', label: '扩展信息（按需注入）', children: <ExtendedFields /> },
           { key: 'qa', label: '问答知识库', children: <QABank /> },
-          { key: 'attachments', label: '附件管理', children: <Attachments /> },
+          { key: 'attachments', label: '附件管理', children: (
+            <Attachments profileId={profile.id} form={form} onProfileUpdated={onProfileUpdated} />
+          ) },
         ]}
       />
       <Divider />

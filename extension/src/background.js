@@ -51,8 +51,10 @@ async function fetchAttachments(base, profileId, attachments) {
     try {
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), 20000);
+      // meta.index 是档案附件列表下标（服务端扁平化只带默认简历时与循环序号不同）
+      const idx = Number.isInteger(meta.index) ? meta.index : i;
       const resp = await fetch(
-        `${base}/api/v1/profiles/${encodeURIComponent(profileId)}/attachments/${i}`,
+        `${base}/api/v1/profiles/${encodeURIComponent(profileId)}/attachments/${idx}`,
         { signal: controller.signal }
       );
       clearTimeout(timer);

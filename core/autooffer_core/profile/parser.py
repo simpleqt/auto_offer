@@ -78,9 +78,11 @@ _PARSE_PROMPT = """你是简历信息抽取器。请从下面的简历全文中�
    （如"2001年3月18日出生" → {{"year": 2001, "month": 3, "day": 18}}），只写到月则省略 day；
    "至今"的经历 end 置 null。
 3. 经历 kind：实习填 internship、正式工作填 work、工程项目填 project、科研/课题项目填 research。
-4. 获奖、语言等级（四六级/雅思等）、社团/学生干部经历放入 extended 对应字段。
-5. profile.id 填 "auto"，profile.label 填 "解析-待确认"。
-6. 对拿不准的字段（字迹模糊、表述含糊、你做了推断的），把字段路径放入 low_confidence_paths，
+4. 工程项目的「项目地址/服务地址/GitHub」等 URL 填 experience.link（只填一个最主要的仓库地址），
+   描述里保留原文；科研/实习没有明确 URL 就不填 link。
+5. 获奖、语言等级（四六级/雅思等）、社团/学生干部经历放入 extended 对应字段。
+6. profile.id 填 "auto"，profile.label 填 "解析-待确认"。
+7. 对拿不准的字段（字迹模糊、表述含糊、你做了推断的），把字段路径放入 low_confidence_paths，
    如 ["basic.birth_date", "education[0].gpa"]。
 
 JSON Schema：

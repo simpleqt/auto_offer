@@ -3,6 +3,7 @@
  * 供 ProfileEditor 以 <Collapse> 折叠面板组织，字段命名与 Profile 模型对齐。
  */
 import { useState } from 'react';
+import type { FormInstance } from 'antd';
 import {
   Button,
   Card,
@@ -11,16 +12,20 @@ import {
   Form,
   Input,
   InputNumber,
+  Modal,
+  Radio,
   Row,
   Select,
   Space,
   Table,
+  Tag,
   Typography,
   Upload,
   message,
 } from 'antd';
-import { DeleteOutlined, PlusOutlined, UploadOutlined } from '@ant-design/icons';
-import { uploadAttachment } from '../api/client';
+import { CheckOutlined, DeleteOutlined, PlusOutlined, UploadOutlined } from '@ant-design/icons';
+import { activateAttachment, deleteAttachment, uploadAttachment, uploadResume } from '../api/client';
+import type { Profile } from '../api/types';
 
 export function ExtendedFields() {
   return (
@@ -171,17 +176,160 @@ export function QABank() {
   );
 }
 
-export function Attachments() {
+export function Attachments({
+  profileId,
+  form,
+  onProfileUpdated,
+}: {
+  profileId: string;
+  form: FormInstance;
+  onProfileUpdated: (p: Profile) => void;
+}) {
   const [uploading, setUploading] = useState(false);
+  const [resumeMode, setResumeMode] = useState<'replace' | 'parse'>('replace');
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const attachments: any[] = Form.useWatch('attachments', form) || [];
+  const resumes = attachments
+    .map((a, i) => ({ a, i }))
+    .filter(({ a }) => a && a.kind === 'resume');
+  const activeResumeIdx = (() => {
+    const marked = resumes.find(
+      ({ a }) => a.meta && String(a.meta.active) === '1',
+    );
+    return marked ? marked.i : resumes.length ? resumes[0].i : -1;
+  })();
+
+  async function doUploadResume(file: File) {
+    setUploading(true);
+    try {
+      const res = await uploadResume(profileId, file, resumeMode);
+      onProfileUpdated(res.profile);
+      if (resumeMode === 'parse') {
+        message.success(
+          `简历已上传并解析覆盖档案${res.low_confidence_paths.length ? `（${res.low_confidence_paths.length} 个低置信字段请到各分区复核）` : ''}`,
+        );
+      } else {
+        message.success(`已上传并设为默认简历：${file.name}`);
+      }
+    } catch (e) {
+      message.error((e as Error).message);
+    } finally {
+      setUploading(false);
+    }
+  }
+
+  async function onUploadResume(file: File) {
+    if (resumeMode === 'parse') {
+      Modal.confirm({
+        title: '解析并覆盖档案内容？',
+        content:
+          '档案的基本信息、教育、实习/工作/项目/科研经历、技能、自评、扩展信息都会以这份简历的解析结果为准（附件列表保留）。当前未保存的手工修改将丢失。',
+        okText: '覆盖',
+        okButtonProps: { danger: true },
+        cancelText: '取消',
+        onOk: () => doUploadResume(file),
+      });
+    } else {
+      await doUploadResume(file);
+    }
+    return false; // 阻止 antd 自动上传
+  }
+
+  async function onActivate(index: number) {
+    try {
+      await activateAttachment(profileId, index);
+      // 本地镜像：激活目标，其余简历去掉 active 标记
+      const next = attachments.map((a, i) => {
+        if (!a || a.kind !== 'resume') return a;
+        const meta = { ...(a.meta || {}) };
+        if (i === index) meta.active = 1;
+        else delete meta.active;
+        return { ...a, meta };
+      });
+      form.setFieldValue('attachments', next);
+      message.success('已设为默认简历（填表注入用这份）');
+    } catch (e) {
+      message.error((e as Error).message);
+    }
+  }
+
+  async function onDeleteResume(index: number) {
+    try {
+      const res = await deleteAttachment(profileId, index);
+      form.setFieldValue('attachments', res.attachments);
+      message.success('已从档案移除该简历（文件保留在本机数据目录）');
+    } catch (e) {
+      message.error((e as Error).message);
+    }
+  }
 
   return (
-    <Form.List name="attachments">
-      {(fields, { add, remove }) => (
-        <>
-          <Typography.Paragraph type="secondary">
-            附件在填表时按「用途标签 + 类型 + 语言」匹配站点上传控件；证件照超限会本地自动压缩。
-            上传后文件保存在本机数据目录，路径随档案一起持久化。
+    <>
+      <Card
+        size="small"
+        title="简历附件（可保留多份，选一份默认）"
+        style={{ marginBottom: 16 }}
+      >
+        <Typography.Paragraph type="secondary">
+          填表时「上传简历」控件只注入默认简历。上传新简历可选：仅替换附件（不动档案内容），
+          或重新解析并覆盖档案内容。
+        </Typography.Paragraph>
+        {resumes.length === 0 && (
+          <Typography.Paragraph type="warning">
+            尚未登记简历附件——请上传一份，否则带「上传简历」的表单没有文件可注入。
           </Typography.Paragraph>
+        )}
+        {resumes.map(({ a, i }) => (
+          <Row key={i} gutter={8} style={{ marginBottom: 6 }} align="middle">
+            <Col flex="auto">
+              {String(a.path || '').split(/[\\/]/).pop()}（{a.label}）
+              {i === activeResumeIdx && (
+                <Tag color="blue" style={{ marginLeft: 8 }}>
+                  默认
+                </Tag>
+              )}
+            </Col>
+            <Col>
+              <Space>
+                {i !== activeResumeIdx && (
+                  <Button size="small" icon={<CheckOutlined />} onClick={() => onActivate(i)}>
+                    设为默认
+                  </Button>
+                )}
+                <Button
+                  size="small"
+                  danger
+                  icon={<DeleteOutlined />}
+                  onClick={() => onDeleteResume(i)}
+                />
+              </Space>
+            </Col>
+          </Row>
+        ))}
+        <Radio.Group
+          value={resumeMode}
+          onChange={(e) => setResumeMode(e.target.value)}
+          style={{ margin: '10px 0' }}
+        >
+          <Radio value="replace">仅替换附件（不动档案内容）</Radio>
+          <Radio value="parse">解析并覆盖档案内容</Radio>
+        </Radio.Group>
+        <br />
+        <Upload showUploadList={false} beforeUpload={onUploadResume} accept=".pdf,.docx,.txt,.md">
+          <Button icon={<UploadOutlined />} loading={uploading}>
+            上传简历
+          </Button>
+        </Upload>
+      </Card>
+
+      <Form.List name="attachments">
+        {(fields, { add, remove }) => (
+          <>
+            <Typography.Paragraph type="secondary">
+              其他附件（证件照/成绩单/证书/作品集等）在填表时按「用途标签 + 类型 + 语言」匹配站点上传控件；
+              证件照超限会本地自动压缩。上传后文件保存在本机数据目录，路径随档案一起持久化；
+              修改后需点底部「保存档案」。
+            </Typography.Paragraph>
           {fields.map(({ key, name }) => (
             <Card
               key={key}
@@ -255,6 +403,7 @@ export function Attachments() {
           </Space>
         </>
       )}
-    </Form.List>
+      </Form.List>
+    </>
   );
 }

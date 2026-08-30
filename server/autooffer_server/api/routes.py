@@ -272,6 +272,138 @@ async def put_profile(request: Request, profile_id: str, body: ProfileIn) -> dic
     return payload
 
 
+def _deactivate_resumes(attachments: list[dict[str, Any]]) -> None:
+    for a in attachments:
+        if a.get("kind") == "resume":
+            meta = dict(a.get("meta") or {})
+            meta.pop("active", None)
+            a["meta"] = meta
+
+
+@router.post("/profiles/{profile_id}/resumes")
+async def upload_resume(
+    request: Request,
+    profile_id: str,
+    file: Annotated[UploadFile, File()],
+    mode: Annotated[str, Form()] = "replace",
+    label: Annotated[str, Form()] = "",
+) -> dict[str, Any]:
+    """上传简历附件并设为默认（填表注入用这份）。
+
+    mode=replace 仅替换附件；mode=parse 重新解析简历并**覆盖档案内容**
+    （保留 id/label/附件列表；基本/教育/经历/技能等全部以解析结果为准）。
+    """
+    from autooffer_core.errors import AutoOfferError
+    from autooffer_core.profile.parser import parse_resume
+    from autooffer_core.profile.schema import Attachment
+
+    if mode not in ("replace", "parse"):
+        raise HTTPException(422, f"mode 必须是 replace 或 parse: {mode}")
+    ctx = _ctx(request)
+    payload: dict[str, Any] | None = await ctx.repo.get_profile(profile_id)
+    if payload is None:
+        raise HTTPException(404, f"档案不存在: {profile_id}")
+    ctx.config.ensure_dirs()
+    name = Path(file.filename or "resume").name
+    dest = ctx.config.attachments_dir / f"{uuid.uuid4().hex[:8]}_{name}"
+    dest.write_bytes(await file.read())
+    try:
+        attachment = Attachment.model_validate(
+            {
+                "kind": "resume",
+                "label": label or Path(name).stem,
+                "path": str(dest.resolve()),
+                "meta": {
+                    "size_kb": max(1, dest.stat().st_size // 1024),
+                    "filename": name,
+                    "active": 1,
+                },
+            }
+        )
+    except ValueError as exc:
+        dest.unlink(missing_ok=True)
+        raise HTTPException(422, f"附件参数非法: {exc}") from exc
+
+    low_conf: list[str] = []
+    if mode == "parse":
+        llm = await ctx.build_llm("profile_parser")
+        try:
+            parsed, low_conf = await parse_resume(str(dest), llm)
+        except AutoOfferError as exc:
+            dest.unlink(missing_ok=True)
+            raise HTTPException(422, f"简历解析失败: {exc}") from exc
+        new_payload: dict[str, Any] = parsed.model_dump(mode="json")
+        # 覆盖内容字段；身份与附件列表保留原档案
+        new_payload["id"] = profile_id
+        new_payload["label"] = payload.get("label") or "解析-待确认"
+        new_payload["attachments"] = payload.get("attachments", [])
+        payload = new_payload
+
+    attachments = list(payload.get("attachments", []))
+    _deactivate_resumes(attachments)
+    attachments.append(attachment.model_dump(mode="json"))
+    payload["attachments"] = attachments
+    await ctx.repo.save_profile(profile_id, str(payload.get("label") or ""), payload)
+    return {
+        "profile": payload,
+        "low_confidence_paths": low_conf,
+        "active_resume_index": len(attachments) - 1,
+    }
+
+
+@router.post("/profiles/{profile_id}/attachments/{index}/activate")
+async def activate_attachment(
+    request: Request, profile_id: str, index: int
+) -> dict[str, Any]:
+    """把指定简历附件设为默认（填表注入用）。"""
+    ctx = _ctx(request)
+    payload: dict[str, Any] | None = await ctx.repo.get_profile(profile_id)
+    if payload is None:
+        raise HTTPException(404, f"档案不存在: {profile_id}")
+    attachments = list(payload.get("attachments", []))
+    if index < 0 or index >= len(attachments):
+        raise HTTPException(404, f"附件不存在: index={index}")
+    if attachments[index].get("kind") != "resume":
+        raise HTTPException(422, "只有简历附件可以设为默认")
+    _deactivate_resumes(attachments)
+    meta = dict(attachments[index].get("meta") or {})
+    meta["active"] = 1
+    attachments[index]["meta"] = meta
+    payload["attachments"] = attachments
+    await ctx.repo.save_profile(profile_id, str(payload.get("label") or ""), payload)
+    return {"active_resume_index": index}
+
+
+@router.delete("/profiles/{profile_id}/attachments/{index}")
+async def delete_attachment(
+    request: Request, profile_id: str, index: int
+) -> dict[str, Any]:
+    """从档案移除附件（文件保留在数据目录，不删盘）。"""
+    ctx = _ctx(request)
+    payload: dict[str, Any] | None = await ctx.repo.get_profile(profile_id)
+    if payload is None:
+        raise HTTPException(404, f"档案不存在: {profile_id}")
+    attachments = list(payload.get("attachments", []))
+    if index < 0 or index >= len(attachments):
+        raise HTTPException(404, f"附件不存在: index={index}")
+    was_active = (
+        attachments[index].get("kind") == "resume"
+        and (attachments[index].get("meta") or {}).get("active")
+    )
+    del attachments[index]
+    if was_active:
+        # 删的是默认简历：显式激活剩下的第一份简历（若有），保持标记落盘
+        for a in attachments:
+            if a.get("kind") == "resume":
+                meta = dict(a.get("meta") or {})
+                meta["active"] = 1
+                a["meta"] = meta
+                break
+    payload["attachments"] = attachments
+    await ctx.repo.save_profile(profile_id, str(payload.get("label") or ""), payload)
+    return {"attachments": attachments}
+
+
 @router.delete("/profiles/{profile_id}")
 async def delete_profile(request: Request, profile_id: str) -> dict[str, bool]:
     deleted: bool = await _ctx(request).repo.delete_profile(profile_id)
