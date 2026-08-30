@@ -2165,6 +2165,9 @@
       skipped,
       unmatched,
       optionFields,
+      // 供 background 上报投递记录（服务端按 URL 去重更新）
+      pageTitle: document.title,
+      url: location.href,
     };
   }
 

@@ -298,6 +298,31 @@ async function handleAutofill(msg) {
     counts: report.counts || null,
   });
   await chrome.storage.local.set({ aoHistory: aoHistory.slice(0, 20) });
+
+  // 上报投递记录到本地应用（服务端同 URL 的 filled 记录去重更新；失败不影响填写）
+  try {
+    const pos = (report.filled || []).find((r) => /岗位|职位/.test(r.label || ""));
+    await fetchJson(
+      `${base}/api/v1/applications`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          url: msg.url || report.url || "",
+          profile_id: msg.profileId || "",
+          page_title: report.pageTitle || "",
+          position: pos ? String(pos.value || "").slice(0, 40) : "",
+          fields_filled: (report.counts && report.counts.filled) || 0,
+          fields_failed: (report.counts && report.counts.failed) || 0,
+          fields_pending: (report.counts && report.counts.skipped) || 0,
+          note: "插件填写",
+        }),
+      },
+      15000
+    );
+  } catch {
+    /* 本地应用未启动时静默跳过 */
+  }
   return report;
 }
 

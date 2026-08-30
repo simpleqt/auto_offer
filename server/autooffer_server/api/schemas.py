@@ -79,6 +79,20 @@ class ApplicationStatusIn(BaseModel):
     note: str | None = None
 
 
+class ApplicationReportIn(BaseModel):
+    """插件填写完成后的投递记录上报。"""
+
+    url: str
+    profile_id: str = ""
+    page_title: str = ""
+    company: str = ""
+    position: str = ""
+    fields_filled: int = 0
+    fields_failed: int = 0
+    fields_pending: int = 0
+    note: str | None = None
+
+
 class UsageAggregate(BaseModel):
     """单条用量聚合（按模型或按任务）。"""
 

@@ -3,6 +3,16 @@
 本项目遵循 [Conventional Commits](https://www.conventionalcommits.org/)，版本策略为 SemVer。
 由 `git-cliff` 从提交历史生成（配置见 `cliff.toml`；本文件在无 git-cliff 环境下按同格式手动维护）。
 
+## [v0.2.9] - 2026-08-30
+
+**投递记录上报版**：插件填写完成自动登记到本地投递列表。
+
+### Features
+
+- (**server**) `POST /api/v1/applications`：插件填写完成后的投递记录上报；同 URL 的既有「已填写」记录更新而非重复添加
+- (**extension**) background 在整个填写流程（规则直填+AI 映射+附件+选选项）结束后自动上报：URL、页面标题、岗位（从已填的 岗位/职位 字段取值）、填写/失败/待确认计数；本地应用未启动时静默跳过
+- (**core**) 公司名猜测优化：页面标题切分后跳过「投递/申请/招聘」类通用段（「投递简历 - 加入马上消费」→ 马上消费）；`ApplicationStore.add_or_update` 通用登记入口（插件上报与任务流报告共用，同 URL 去重）
+
 ## [v0.2.8] - 2026-08-30
 
 **简历附件管理版**：多简历可选、上传模式可配置。

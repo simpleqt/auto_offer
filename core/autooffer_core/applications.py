@@ -29,6 +29,22 @@ ApplicationStatus = Literal[
 ]
 
 _TITLE_SPLIT_RE = re.compile(r"[-—|_·]|\s{2,}")
+# 页面标题里的通用段（页面名/招聘词），不是公司名（「加入」除外——"加入马上消费"类公司名常见）
+_GENERIC_TITLE_PART_RE = re.compile(
+    r"^(投递|申请|简历|招聘|校招|社招|内推|官网|官方|职位|岗位|campus|career|job|join|apply)",
+    re.IGNORECASE,
+)
+
+
+def guess_company(page_title: str) -> str:
+    """从页面标题猜公司名：按常见分隔符切分，跳过「投递/招聘/加入」类通用段。"""
+    if not page_title:
+        return ""
+    parts = [p.strip() for p in _TITLE_SPLIT_RE.split(page_title) if p.strip()]
+    for p in parts:
+        if not _GENERIC_TITLE_PART_RE.match(p):
+            return p[:40]
+    return parts[0][:40] if parts else ""
 
 
 class ApplicationRecord(BaseModel):
@@ -53,14 +69,10 @@ def _now() -> str:
 def guess_company_position(page_title: str, report: FillReport) -> tuple[str, str]:
     """从页面标题与填写报告猜测公司名与岗位（可被用户在列表中修改）。
 
-    - 公司：标题按常见分隔符切分取首段（"星辰科技 - 校园招聘" → "星辰科技"）。
+    - 公司：标题切分后跳过通用段（「投递简历 - 加入马上消费」→ 马上消费）。
     - 岗位：填写报告中"应聘岗位/期望职位/岗位"类字段的实际值优先。
     """
-    company = ""
-    if page_title:
-        parts = [p.strip() for p in _TITLE_SPLIT_RE.split(page_title) if p.strip()]
-        if parts:
-            company = parts[0][:40]
+    company = guess_company(page_title)
     position = ""
     for f in report.fields:
         if any(k in f.label for k in ("应聘岗位", "期望职位", "应聘职位", "岗位", "职位")):
@@ -102,47 +114,78 @@ class ApplicationStore:
 
     # ---------- 操作 ----------
 
-    def add_from_report(
-        self, report: FillReport, *, page_title: str = "", note: str | None = None
+    def add_or_update(
+        self,
+        *,
+        url: str,
+        profile_id: str = "",
+        page_title: str = "",
+        company: str = "",
+        position: str = "",
+        filled: int = 0,
+        failed: int = 0,
+        pending: int = 0,
+        note: str | None = None,
     ) -> ApplicationRecord:
-        """由填写报告登记一条投递记录；同 URL 的既有 filled 记录会被更新而不是重复添加。"""
-        counts = report.counts()
-        company, position = guess_company_position(page_title, report)
+        """登记/更新一条投递记录：同 URL 的既有 filled 记录更新而非重复添加。
+
+        插件填写上报与任务流报告共用此入口。
+        """
+        if not company:
+            company = guess_company(page_title)
         records = self._load()
         existing = next(
-            (r for r in records if r.url == report.url and r.status == "filled"), None
+            (r for r in records if r.url == url and r.status == "filled"), None
         )
         if existing is not None:
-            existing.fields_filled = counts["filled"]
-            existing.fields_failed = counts["failed"]
-            existing.fields_pending = counts["pending_confirm"]
+            existing.fields_filled = filled
+            existing.fields_failed = failed
+            existing.fields_pending = pending
             existing.company = existing.company or company
             existing.position = existing.position or position
+            existing.profile_id = existing.profile_id or profile_id
             existing.updated_at = _now()
             if note:
                 existing.note = note
             self._save(records)
-            log.info("applications.updated", id=existing.id, url=report.url)
+            log.info("applications.updated", id=existing.id, url=url)
             return existing
 
         record = ApplicationRecord(
             id=f"app-{uuid.uuid4().hex[:8]}",
-            url=report.url,
+            url=url,
             company=company,
             position=position,
-            profile_id=report.profile_id,
+            profile_id=profile_id,
             status="filled",
             filled_at=_now(),
             updated_at=_now(),
-            fields_filled=counts["filled"],
-            fields_failed=counts["failed"],
-            fields_pending=counts["pending_confirm"],
+            fields_filled=filled,
+            fields_failed=failed,
+            fields_pending=pending,
             note=note,
         )
         records.append(record)
         self._save(records)
         log.info("applications.added", id=record.id, company=company, position=position)
         return record
+
+    def add_from_report(
+        self, report: FillReport, *, page_title: str = "", note: str | None = None
+    ) -> ApplicationRecord:
+        """由填写报告登记一条投递记录（岗位名取报告里 岗位/职位 类字段的值）。"""
+        counts = report.counts()
+        _, position = guess_company_position(page_title, report)
+        return self.add_or_update(
+            url=report.url,
+            profile_id=report.profile_id,
+            page_title=page_title,
+            position=position,
+            filled=counts["filled"],
+            failed=counts["failed"],
+            pending=counts["pending_confirm"],
+            note=note,
+        )
 
     def list(self, *, status: ApplicationStatus | None = None) -> list[ApplicationRecord]:
         records = self._load()

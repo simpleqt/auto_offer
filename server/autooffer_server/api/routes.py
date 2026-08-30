@@ -15,6 +15,7 @@ from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
 from autooffer_core import __version__
 from autooffer_core.applications import ApplicationStore
 from autooffer_server.api.schemas import (
+    ApplicationReportIn,
     ApplicationStatusIn,
     AppSettings,
     EndpointIn,
@@ -529,6 +530,26 @@ async def list_applications(request: Request, status: str | None = None) -> list
     store = _app_store(_ctx(request))
     records = store.list(status=status)  # type: ignore[arg-type]
     return [r.model_dump() for r in records]
+
+
+@router.post("/applications")
+async def report_application(
+    request: Request, body: ApplicationReportIn
+) -> dict[str, Any]:
+    """插件填写完成后上报投递记录；同 URL 的 filled 记录更新而非重复添加。"""
+    store = _app_store(_ctx(request))
+    record = store.add_or_update(
+        url=body.url,
+        profile_id=body.profile_id,
+        page_title=body.page_title,
+        company=body.company,
+        position=body.position,
+        filled=body.fields_filled,
+        failed=body.fields_failed,
+        pending=body.fields_pending,
+        note=body.note,
+    )
+    return record.model_dump()
 
 
 @router.put("/applications/{record_id}")

@@ -256,6 +256,32 @@ def test_applications_auto_recorded_and_status_update(client: TestClient) -> Non
     assert client.delete(f"/api/v1/applications/{record.id}").json()["deleted"] is True
 
 
+def test_application_report_from_extension(client: TestClient) -> None:
+    """插件填写上报：登记投递记录（公司取非通用标题段），同 URL 去重更新。"""
+    body = {
+        "url": "https://weikezhijia.jobs.feishu.cn/MSXF/resume/1/apply",
+        "profile_id": "p1",
+        "page_title": "投递简历 - 加入马上消费",
+        "fields_filled": 30,
+        "fields_failed": 0,
+        "fields_pending": 2,
+        "note": "插件填写",
+    }
+    r = client.post("/api/v1/applications", json=body)
+    assert r.status_code == 200
+    rec = r.json()
+    assert rec["company"] == "加入马上消费"
+    assert rec["status"] == "filled"
+    assert rec["fields_filled"] == 30
+
+    body2 = {**body, "fields_filled": 32, "fields_pending": 0}
+    rec2 = client.post("/api/v1/applications", json=body2).json()
+    assert rec2["id"] == rec["id"]
+    assert rec2["fields_filled"] == 32
+    listed = client.get("/api/v1/applications").json()
+    assert len(listed) == 1
+
+
 def test_application_404(client: TestClient) -> None:
     assert client.put("/api/v1/applications/none", json={"status": "submitted"}).status_code == 404
 

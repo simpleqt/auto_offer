@@ -29,6 +29,42 @@ def test_guess_company_position() -> None:
     assert position == "算法工程师"
 
 
+def test_guess_company_skips_generic_parts() -> None:
+    """飞书式标题「投递简历 - 加入马上消费」：公司应取非通用段。"""
+    from autooffer_core.applications import guess_company
+
+    assert guess_company("投递简历 - 加入马上消费") == "加入马上消费"
+    assert guess_company("职位申请-乐元素校园招聘") == "乐元素校园招聘"
+    assert guess_company("星辰科技 - 校园招聘") == "星辰科技"
+    assert guess_company("") == ""
+
+
+def test_add_or_update_from_extension(tmp_path: Path) -> None:
+    """插件上报入口：无 FillReport 也能登记；同 URL 去重更新。"""
+    store = ApplicationStore(tmp_path / "apps.json")
+    r1 = store.add_or_update(
+        url="https://weikezhijia.jobs.feishu.cn/apply",
+        profile_id="p1",
+        page_title="投递简历 - 加入马上消费",
+        filled=30,
+        failed=0,
+        pending=2,
+        note="插件填写",
+    )
+    assert r1.company == "加入马上消费"
+    assert r1.fields_filled == 30
+    r2 = store.add_or_update(
+        url="https://weikezhijia.jobs.feishu.cn/apply",
+        page_title="投递简历 - 加入马上消费",
+        filled=32,
+        failed=0,
+        pending=0,
+    )
+    assert r2.id == r1.id  # 同 URL 更新而非新增
+    assert r2.fields_filled == 32
+    assert len(store.list()) == 1
+
+
 def test_add_list_update(tmp_path: Path) -> None:
     store = ApplicationStore(tmp_path / "apps.json")
     record = store.add_from_report(make_report(), page_title="星辰科技 - 校园招聘简历登记")
