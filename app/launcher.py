@@ -162,6 +162,66 @@ class _SingleInstance:
             self._lock_file = None
 
 
+def _icon_path() -> Path | None:
+    """品牌 ico 定位：PyInstaller 解包目录优先，其次仓库源码树。"""
+    if sys.platform != "win32":
+        return None
+    candidates: list[Path] = []
+    meipass = getattr(sys, "_MEIPASS", None)
+    if meipass:
+        candidates.append(Path(meipass) / "assets" / "brand" / "autooffer.ico")
+    candidates.append(Path(__file__).resolve().parents[1] / "assets" / "brand" / "autooffer.ico")
+    for c in candidates:
+        if c.exists():
+            return c
+    return None
+
+
+def _set_window_icon(window: Any, icon_path: Path) -> None:
+    """Windows 标题栏/任务栏图标：pywebview 未暴露 icon 参数，窗口显示后用 WM_SETICON 设置。"""
+    if sys.platform != "win32" or window is None:
+        return
+    import ctypes
+
+    def _apply() -> None:
+        try:
+            # pywebview Windows 后端 native 是 .NET WinForms BrowserForm；
+            # Handle 是 .NET IntPtr，需 ToInt64() 转 Python int
+            hwnd = int(window.native.Handle.ToInt64())
+        except Exception:
+            log.exception("app.icon_no_hwnd")
+            return
+        user32 = ctypes.windll.user32
+        # 64 位下 HICON/HWND 超出 32 位，必须显式声明指针宽度签名
+        user32.LoadImageW.argtypes = [
+            ctypes.c_void_p,
+            ctypes.c_wchar_p,
+            ctypes.c_uint,
+            ctypes.c_int,
+            ctypes.c_int,
+            ctypes.c_uint,
+        ]
+        user32.LoadImageW.restype = ctypes.c_void_p
+        user32.SendMessageW.argtypes = [
+            ctypes.c_void_p,
+            ctypes.c_uint,
+            ctypes.c_void_p,
+            ctypes.c_void_p,
+        ]
+        user32.SendMessageW.restype = ctypes.c_void_p
+        image_icon, load_from_file = 1, 0x10
+        big = user32.LoadImageW(None, str(icon_path), image_icon, 32, 32, load_from_file)
+        small = user32.LoadImageW(None, str(icon_path), image_icon, 16, 16, load_from_file)
+        log.info("app.icon_load big=%s small=%s", big, small)
+        # WM_SETICON: wParam 1=大图标(Alt-Tab/任务栏) 0=小图标(标题栏)
+        if big:
+            user32.SendMessageW(hwnd, 0x0080, ctypes.c_void_p(1), ctypes.c_void_p(big))
+        if small:
+            user32.SendMessageW(hwnd, 0x0080, ctypes.c_void_p(0), ctypes.c_void_p(small))
+
+    window.events.shown += _apply
+
+
 def _run_server(app: Any, host: str, port: int) -> None:
     """在线程内运行 Uvicorn；进程退出时随主线程结束。"""
     config = uvicorn.Config(app, host=host, port=port, log_level="info")
@@ -256,6 +316,11 @@ def main(argv: list[str] | None = None) -> int:
                 single.release()
 
         window = webview.create_window("AutoOffer", base_url, width=1200, height=800)
+        icon = _icon_path()
+        if icon:
+            _set_window_icon(window, icon)
+        else:
+            log.warning("app.icon_missing（打包时请确认 assets/brand/autooffer.ico 已随包）")
         if args.minimized and window is not None:
 
             def _minimize_on_loaded() -> None:

@@ -11,7 +11,7 @@ import socket
 from pathlib import Path
 
 import structlog
-from app.launcher import _find_free_port, _resolve_port, setup_file_logging
+from app.launcher import _find_free_port, _icon_path, _resolve_port, setup_file_logging
 
 
 def test_find_free_port_returns_preferred_when_available() -> None:
@@ -80,3 +80,19 @@ def test_resolve_port_defaults_and_invalid(tmp_path: Path) -> None:
         '{"service_port": "not-a-port"}', encoding="utf-8"
     )
     assert _resolve_port(tmp_path) == 8765
+
+
+def test_icon_path_exists_and_loadable() -> None:
+    """品牌 ico 存在且 Win32 LoadImageW 能加载（标题栏图标设置的可行前提）。"""
+    import sys
+
+    icon = _icon_path()
+    if sys.platform != "win32":
+        assert icon is None
+        return
+    assert icon is not None and icon.exists(), "assets/brand/autooffer.ico 缺失"
+    import ctypes
+
+    user32 = ctypes.windll.user32
+    hicon = user32.LoadImageW(None, str(icon), 1, 32, 32, 0x10)
+    assert hicon, "LoadImageW 加载 ico 失败"

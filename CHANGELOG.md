@@ -3,6 +3,15 @@
 本项目遵循 [Conventional Commits](https://www.conventionalcommits.org/)，版本策略为 SemVer。
 由 `git-cliff` 从提交历史生成（配置见 `cliff.toml`；本文件在无 git-cliff 环境下按同格式手动维护）。
 
+## [v0.2.17] - 2026-08-30
+
+**窗口图标版**：桌面窗口标题栏/任务栏换成品牌图标。
+
+### Bug Fixes
+
+- (**app**) 桌面窗口标题栏与任务栏图标此前是 Python/默认图标——pywebview 未暴露 icon 参数，
+  现在窗口显示后经 Win32 `WM_SETICON` 设置品牌图标（ico 随包携带，打包安装版同样生效）
+
 ## [v0.2.16] - 2026-08-30
 
 **界面优化版**：视觉与交互全面打磨。
