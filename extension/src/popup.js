@@ -159,24 +159,41 @@ function renderError(message) {
 function renderReport(report) {
   $("report").classList.remove("hidden");
   const counts = report.counts || {};
-  const site = report.site ? `（站点识别：${report.site.name}）` : "";
-  $("report-title").textContent =
-    `已填 ${counts.filled || 0} · 失败 ${counts.failed || 0} · ` +
-    `跳过 ${counts.skipped || 0}${site}`;
+  const site = report.site ? report.site.name : "";
+  $("report-title").innerHTML =
+    `<span class="badge ok">已填 ${counts.filled || 0}</span>` +
+    `<span class="badge bad">失败 ${counts.failed || 0}</span>` +
+    `<span class="badge skip">跳过 ${counts.skipped || 0}</span>` +
+    (site ? `<span class="badge site">${site}</span>` : "");
   const list = $("report-list");
   list.innerHTML = "";
   const rows = [
     ...(report.filled || []).map((r) => [
       "filled",
-      `✓ ${r.label} = ${r.value}${r.via === "ai" ? "（AI映射）" : r.via === "附件" ? "（附件）" : ""}`,
+      r.label,
+      ` = ${r.value}`,
+      r.via === "ai" ? "AI映射" : r.via === "附件" ? "附件" : "",
     ]),
-    ...(report.failed || []).map((r) => ["failed", `✗ ${r.label}：${r.reason}`]),
-    ...(report.skipped || []).map((r) => ["skipped", `— ${r.field}：${r.reason}`]),
+    ...(report.failed || []).map((r) => ["failed", r.label, `：${r.reason}`, ""]),
+    ...(report.skipped || []).map((r) => ["skipped", r.field, `：${r.reason}`, ""]),
   ];
-  for (const [cls, text] of rows.slice(0, 60)) {
+  for (const [cls, label, detail, via] of rows.slice(0, 60)) {
     const li = document.createElement("li");
     li.className = cls;
-    li.textContent = text;
+    const name = document.createElement("span");
+    name.className = "fld";
+    name.textContent = label;
+    li.appendChild(name);
+    const val = document.createElement("span");
+    val.className = "val";
+    val.textContent = detail;
+    li.appendChild(val);
+    if (via) {
+      const tag = document.createElement("span");
+      tag.className = "via";
+      tag.textContent = via;
+      li.appendChild(tag);
+    }
     list.appendChild(li);
   }
 }

@@ -18,10 +18,12 @@ import { Attachments, ExtendedFields, QABank } from './ProfileExtendedSections';
 export default function ProfileEditor({ profile }: { profile: Profile }) {
   const [form] = Form.useForm();
   const [saving, setSaving] = useState(false);
+  const [dirty, setDirty] = useState(false);
 
   // 换档案（key 重挂载）重置 dirty
   useEffect(() => {
     setUnsaved(false);
+    setDirty(false);
   }, [profile.id]);
 
   // 窗口关闭前提醒（仅在 dirty 时拦截）
@@ -33,6 +35,18 @@ export default function ProfileEditor({ profile }: { profile: Profile }) {
     return () => window.removeEventListener('beforeunload', handler);
   }, []);
 
+  // Ctrl+S 保存档案（表单页肌肉记忆）
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') {
+        e.preventDefault();
+        if (!saving) form.submit();
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [form, saving]);
+
   async function onSave() {
     const values = await form.validateFields();
     setSaving(true);
@@ -40,6 +54,7 @@ export default function ProfileEditor({ profile }: { profile: Profile }) {
       const payload = dayjsToDates({ ...profile, ...values }) as Profile;
       await putProfile(profile.id, payload);
       setUnsaved(false);
+      setDirty(false);
       message.success('档案已保存');
     } catch (e) {
       message.error((e as Error).message);
@@ -52,6 +67,7 @@ export default function ProfileEditor({ profile }: { profile: Profile }) {
   function onProfileUpdated(fresh: Profile) {
     form.setFieldsValue(datesToDayjs(fresh));
     setUnsaved(false);
+    setDirty(false);
   }
 
   return (
@@ -59,7 +75,10 @@ export default function ProfileEditor({ profile }: { profile: Profile }) {
       form={form}
       layout="vertical"
       initialValues={datesToDayjs(profile)}
-      onValuesChange={() => setUnsaved(true)}
+      onValuesChange={() => {
+        setUnsaved(true);
+        setDirty(true);
+      }}
       onFinish={onSave}
     >
       <Collapse
@@ -85,16 +104,19 @@ export default function ProfileEditor({ profile }: { profile: Profile }) {
           position: 'sticky',
           bottom: 0,
           zIndex: 2,
-          background: '#fff',
+          background: dirty ? '#fffbe6' : '#fff',
           padding: '12px 0',
-          borderTop: '1px solid #f0f0f0',
+          borderTop: dirty ? '1px solid #ffe58f' : '1px solid #f0f0f0',
+          transition: 'background 0.2s',
         }}
       >
         <Space>
           <Button type="primary" htmlType="submit" loading={saving}>
             保存档案
           </Button>
-          <span style={{ color: '#999', fontSize: 12 }}>修改后请保存，切换页面会提醒</span>
+          <span style={{ color: dirty ? '#d48806' : '#999', fontSize: 12 }}>
+            {dirty ? '● 有未保存的修改（Ctrl+S 保存）' : 'Ctrl+S 可快速保存；切换页面会提醒未保存'}
+          </span>
         </Space>
       </div>
     </Form>

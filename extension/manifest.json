@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "AutoOffer 简历助手",
-  "version": "0.2.18",
+  "version": "0.2.19",
   "description": "本地简历档案一键填写招聘表单：规则直填优先，数据不出本机。",
   "permissions": [
     "activeTab",

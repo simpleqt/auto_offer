@@ -16,7 +16,6 @@ import {
   Switch,
   Table,
   Tag,
-  Tooltip,
   Typography,
 } from 'antd';
 import { DeleteOutlined, EditOutlined, PlusOutlined, ThunderboltOutlined } from '@ant-design/icons';
@@ -135,10 +134,11 @@ export default function ModelsPage() {
         return (
           <Space>
             <Tag color={reachable ? 'green' : 'red'}>{reachable ? '连通' : '失败'}</Tag>
+            {pr?.reachable && pr.latency_ms != null && (
+              <Tag color={pr.latency_ms < 1500 ? 'cyan' : 'orange'}>{pr.latency_ms}ms</Tag>
+            )}
             {vision != null && (
-              <Tooltip title={pr?.latency_ms ? `${pr.latency_ms}ms` : ''}>
-                <Tag color={vision ? 'geekblue' : 'default'}>{vision ? '视觉' : '纯文本'}</Tag>
-              </Tooltip>
+              <Tag color={vision ? 'geekblue' : 'default'}>{vision ? '视觉' : '纯文本'}</Tag>
             )}
           </Space>
         );
@@ -245,7 +245,11 @@ export default function ModelsPage() {
                 dataIndex: 'failure_rate',
                 render: (v: number) => `${(v * 100).toFixed(1)}%`,
               },
-              { title: 'Tokens', dataIndex: 'total_tokens' },
+              {
+                title: 'Tokens',
+                dataIndex: 'total_tokens',
+                render: (v: number) => v.toLocaleString(),
+              },
               {
                 title: '平均时延',
                 dataIndex: 'avg_latency_ms',
