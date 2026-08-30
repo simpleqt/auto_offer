@@ -145,3 +145,21 @@ footer {
 .hidden {
   display: none;
 }
+
+#log-view {
+  max-height: 180px;
+  overflow: auto;
+  margin: 6px 0 0;
+  padding: 6px 8px;
+  font-size: 11px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-all;
+  background: #fafafa;
+  border: 1px solid #eee;
+  border-radius: 4px;
+}
+
+#log-section {
+  margin-top: 10px;
+}

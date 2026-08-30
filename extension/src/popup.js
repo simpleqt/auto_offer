@@ -189,6 +189,51 @@ async function saveApiBase() {
   await refreshStatus();
 }
 
+function formatLogEntries(entries) {
+  return (entries || [])
+    .map((e) => {
+      const extra = Object.entries(e)
+        .filter(([k]) => !["ts", "level", "msg"].includes(k))
+        .map(([k, v]) => `${k}=${String(v)}`)
+        .join(" ");
+      return `${e.ts} [${e.level}] ${e.msg}${extra ? " " + extra : ""}`;
+    })
+    .join("\n");
+}
+
+async function toggleLogView() {
+  const view = $("log-view");
+  if (!view.classList.contains("hidden")) {
+    view.classList.add("hidden");
+    return;
+  }
+  const { aoLog = [] } = await chrome.storage.local.get("aoLog");
+  view.textContent = aoLog.length
+    ? formatLogEntries(aoLog.slice(0, 60))
+    : "（暂无日志——触发一次填写后这里会有记录）";
+  view.classList.remove("hidden");
+}
+
+async function copyLog() {
+  const { aoLog = [] } = await chrome.storage.local.get("aoLog");
+  const text = aoLog.length ? formatLogEntries(aoLog) : "（暂无日志）";
+  try {
+    await navigator.clipboard.writeText(text);
+    $("btn-log-copy").textContent = "已复制";
+    setTimeout(() => {
+      $("btn-log-copy").textContent = "复制";
+    }, 1200);
+  } catch {
+    $("log-view").textContent = text;
+    $("log-view").classList.remove("hidden");
+  }
+}
+
+async function clearLog() {
+  await chrome.runtime.sendMessage({ type: "ao:log.clear" });
+  $("log-view").classList.add("hidden");
+}
+
 document.addEventListener("DOMContentLoaded", async () => {
   $("api-base").value = await getApiBase();
   await loadTab();
@@ -196,4 +241,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   $("btn-grant").addEventListener("click", grantApiPermission);
   $("btn-fill").addEventListener("click", startFill);
   $("btn-save-api").addEventListener("click", saveApiBase);
+  $("btn-log").addEventListener("click", toggleLogView);
+  $("btn-log-copy").addEventListener("click", copyLog);
+  $("btn-log-clear").addEventListener("click", clearLog);
 });

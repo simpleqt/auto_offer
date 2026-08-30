@@ -14,6 +14,7 @@ from __future__ import annotations
 import argparse
 import contextlib
 import logging
+import logging.handlers
 import socket
 import sys
 import threading
@@ -48,6 +49,39 @@ def _find_free_port(preferred: int = 8765) -> int:
         except OSError:
             s.bind(("127.0.0.1", 0))
             return int(s.getsockname()[1])
+
+
+def setup_file_logging(logs_dir: Path) -> Path:
+    """全量运行日志落盘：structlog 与 uvicorn 一并写入滚动文件（2MB×5）。
+
+    用户以 exe/无窗口方式运行时没有控制台可看，排障必须依赖这份文件。
+    """
+    import structlog as _structlog
+
+    logs_dir.mkdir(parents=True, exist_ok=True)
+    path = logs_dir / "app.log"
+    handler = logging.handlers.RotatingFileHandler(
+        path, maxBytes=2_000_000, backupCount=5, encoding="utf-8"
+    )
+    handler.setFormatter(
+        logging.Formatter("%(asctime)s %(levelname)s %(name)s %(message)s")
+    )
+    root = logging.getLogger()
+    root.setLevel(logging.INFO)
+    root.addHandler(handler)
+    for name in ("uvicorn", "uvicorn.error", "uvicorn.access"):
+        logging.getLogger(name).addHandler(handler)
+    # structlog 默认直印 stdout；切到 stdlib 通道，与 uvicorn 同格式进文件
+    _structlog.configure(
+        processors=[
+            _structlog.stdlib.add_log_level,
+            _structlog.dev.ConsoleRenderer(colors=False),
+        ],
+        wrapper_class=_structlog.stdlib.BoundLogger,
+        logger_factory=_structlog.stdlib.LoggerFactory(),
+        cache_logger_on_first_use=False,
+    )
+    return path
 
 
 class _SingleInstance:
@@ -125,6 +159,8 @@ def main(argv: list[str] | None = None) -> int:
         config = ServerConfig.create(
             data_dir=args.data_dir, headless=args.headless, cdp_endpoint=args.cdp_endpoint
         )
+        log_path = setup_file_logging(Path(config.data_dir) / "logs")
+        log.info("app.logging file=%s", log_path)
         app = create_app(config)
         port = _find_free_port()
         base_url = f"http://127.0.0.1:{port}"

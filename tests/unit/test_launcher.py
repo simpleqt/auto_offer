@@ -6,9 +6,12 @@ GUI 窗口与 Windows 命名互斥量依赖真实桌面环境，无法离线覆�
 
 from __future__ import annotations
 
+import logging
 import socket
+from pathlib import Path
 
-from app.launcher import _find_free_port
+import structlog
+from app.launcher import _find_free_port, setup_file_logging
 
 
 def test_find_free_port_returns_preferred_when_available() -> None:
@@ -34,3 +37,17 @@ def test_find_free_port_is_loopback_safe() -> None:
     port = _find_free_port()
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
         s.bind(("127.0.0.1", port))
+
+
+def test_setup_file_logging_writes_structlog_and_stdlib(tmp_path: Path) -> None:
+    """文件日志：structlog 与 uvicorn/stdlib 记录都写入滚动文件。"""
+    path = setup_file_logging(tmp_path / "logs")
+    assert path.exists()
+    slog = structlog.get_logger("test.structlog")
+    slog.info("server.started", data_dir=str(tmp_path))
+    logging.getLogger("uvicorn.error").error("fake uvicorn failure")
+    for h in logging.getLogger().handlers[:]:
+        h.flush()
+    content = path.read_text(encoding="utf-8")
+    assert "server.started" in content
+    assert "fake uvicorn failure" in content

@@ -14,6 +14,23 @@
 
 const DEFAULT_API = "http://127.0.0.1:8765";
 const MAX_ATTACHMENT_BYTES = 8 * 1024 * 1024;
+const AO_LOG_MAX = 300;
+
+/** 插件运行日志：环形缓冲存 chrome.storage.local（aoLog），弹窗可查看/复制。 */
+async function aoLog(level, msg, extra = undefined) {
+  try {
+    const { aoLog: entries = [] } = await chrome.storage.local.get("aoLog");
+    entries.unshift({
+      ts: new Date().toISOString().slice(0, 19).replace("T", " "),
+      level,
+      msg,
+      ...(extra || {}),
+    });
+    await chrome.storage.local.set({ aoLog: entries.slice(0, AO_LOG_MAX) });
+  } catch {
+    /* 日志自身绝不影响主流程 */
+  }
+}
 
 async function apiBase() {
   const { aoApiBase } = await chrome.storage.local.get("aoApiBase");
@@ -190,6 +207,11 @@ async function handleAutofill(msg) {
     throw new Error("缺少目标标签页");
   }
   const sensitive = msg.sensitive ? 1 : 0;
+  await aoLog("info", "fill.start", {
+    url: msg.url || "",
+    profile: msg.profileId,
+    sensitive,
+  });
   const flat = await fetchJson(
     `${base}/api/v1/profiles/${encodeURIComponent(msg.profileId)}/flat?sensitive=${sensitive}`
   );
@@ -200,6 +222,11 @@ async function handleAutofill(msg) {
 
   // 第一段：本地规则直填（零 LLM）
   let report = await runFillPass(tabId, flat, {});
+  await aoLog("info", "fill.pass1", {
+    filled: report.counts ? report.counts.filled : 0,
+    failed: report.counts ? report.counts.failed : 0,
+    site: report.site ? report.site.name : "",
+  });
 
   const values = flatValueMap(flat);
   try {
@@ -219,6 +246,10 @@ async function handleAutofill(msg) {
       for (const m of (mappingResp && mappingResp.matches) || []) {
         mapping[m.field_label] = m.profile_label;
       }
+      await aoLog("info", "fill.mapping", {
+        unmatched: unmatched.length,
+        matched: Object.keys(mapping).length,
+      });
     }
 
     // 二段-2：附件字节下载（插件侧 DataTransfer 注入）
@@ -229,6 +260,7 @@ async function handleAutofill(msg) {
       msg.uploadAttachments !== false
     ) {
       attachments = await fetchAttachments(base, msg.profileId, flat.attachments);
+      await aoLog("info", "fill.attachments", { fetched: attachments.length });
     }
 
     const secondBase = {};
@@ -288,6 +320,7 @@ async function handleAutofill(msg) {
     }
   } catch (err) {
     report.mappingError = String((err && err.message) || err);
+    await aoLog("error", "fill.stage2_error", { error: report.mappingError });
   }
 
   const { aoHistory = [] } = await chrome.storage.local.get("aoHistory");
@@ -298,11 +331,17 @@ async function handleAutofill(msg) {
     counts: report.counts || null,
   });
   await chrome.storage.local.set({ aoHistory: aoHistory.slice(0, 20) });
+  await aoLog("info", "fill.done", {
+    url: msg.url || "",
+    filled: report.counts ? report.counts.filled : 0,
+    failed: report.counts ? report.counts.failed : 0,
+    skipped: report.counts ? report.counts.skipped : 0,
+  });
 
   // 上报投递记录到本地应用（服务端同 URL 的 filled 记录去重更新；失败不影响填写）
   try {
     const pos = (report.filled || []).find((r) => /岗位|职位/.test(r.label || ""));
-    await fetchJson(
+    const appRec = await fetchJson(
       `${base}/api/v1/applications`,
       {
         method: "POST",
@@ -320,8 +359,14 @@ async function handleAutofill(msg) {
       },
       15000
     );
-  } catch {
-    /* 本地应用未启动时静默跳过 */
+    await aoLog("info", "application.reported", {
+      id: appRec && appRec.id,
+      company: appRec && appRec.company,
+    });
+  } catch (err) {
+    await aoLog("error", "application.report_failed", {
+      error: String((err && err.message) || err),
+    });
   }
   return report;
 }
@@ -333,11 +378,16 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
         sendResponse(await handleStatus());
       } else if (msg.type === "ao:autofill") {
         sendResponse(await handleAutofill(msg));
+      } else if (msg.type === "ao:log.clear") {
+        await chrome.storage.local.set({ aoLog: [] });
+        sendResponse({ cleared: true });
       } else {
         sendResponse({ error: `未知消息类型: ${msg.type}` });
       }
     } catch (err) {
-      sendResponse({ error: String((err && err.message) || err) });
+      const text = String((err && err.message) || err);
+      aoLog("error", "fill.fatal", { error: text });
+      sendResponse({ error: text });
     }
   })();
   return true; // 异步响应
