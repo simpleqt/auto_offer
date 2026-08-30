@@ -296,6 +296,7 @@ export interface HealthInfo {
   version: string;
   data_dir: string;
   headless: boolean;
+  port: number;
 }
 
 export interface ParseResumeResult {
@@ -337,6 +338,7 @@ export interface AppSettings {
   cdp_endpoint: string;
   minimize_on_startup: boolean;
   auto_submit: boolean;
+  service_port: number;
 }
 
 // ---------- WebSocket 事件 ----------

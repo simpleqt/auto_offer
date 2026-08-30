@@ -142,6 +142,13 @@ class AppSettings(BaseModel):
     auto_submit: bool = False
     """全部步骤填写完成后自动点击提交按钮（默认关闭，提交由用户人工完成）。"""
 
+    service_port: int = Field(default=8765, ge=1024, le=65535)
+    """本地服务监听端口（默认 8765），端口冲突时可自行更换。
+
+    修改后需重启软件生效；换端口后浏览器插件弹窗里的「服务地址」
+    也要同步改成 http://127.0.0.1:<新端口>。
+    """
+
 
 class MappingFieldIn(BaseModel):
     """待映射的页面字段（仅标签/区块/选项文本，不含任何值）。"""

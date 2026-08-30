@@ -60,6 +60,7 @@ async def health(request: Request) -> dict[str, Any]:
         "version": __version__,
         "data_dir": str(ctx.config.data_dir),
         "headless": ctx.config.headless,
+        "port": ctx.config.port,
     }
 
 

@@ -11,7 +11,7 @@ import socket
 from pathlib import Path
 
 import structlog
-from app.launcher import _find_free_port, setup_file_logging
+from app.launcher import _find_free_port, _resolve_port, setup_file_logging
 
 
 def test_find_free_port_returns_preferred_when_available() -> None:
@@ -51,3 +51,32 @@ def test_setup_file_logging_writes_structlog_and_stdlib(tmp_path: Path) -> None:
     content = path.read_text(encoding="utf-8")
     assert "server.started" in content
     assert "fake uvicorn failure" in content
+
+
+def test_resolve_port_priority_cli_over_settings(tmp_path: Path) -> None:
+    """命令行 --port 最高优先：设置页存了别的端口也不生效。"""
+    (tmp_path / "settings.json").write_text(
+        '{"service_port": 9100}', encoding="utf-8"
+    )
+    assert _resolve_port(tmp_path, cli_port=9200) == 9200
+
+
+def test_resolve_port_from_settings(tmp_path: Path) -> None:
+    """无命令行参数时读设置页配置的端口。"""
+    (tmp_path / "settings.json").write_text(
+        '{"service_port": 9100}', encoding="utf-8"
+    )
+    assert _resolve_port(tmp_path) == 9100
+
+
+def test_resolve_port_defaults_and_invalid(tmp_path: Path) -> None:
+    """无设置 → 默认 8765；设置值越界/类型错误 → 回退默认而不是崩溃。"""
+    assert _resolve_port(tmp_path) == 8765
+    (tmp_path / "settings.json").write_text(
+        '{"service_port": 80}', encoding="utf-8"
+    )
+    assert _resolve_port(tmp_path) == 8765
+    (tmp_path / "settings.json").write_text(
+        '{"service_port": "not-a-port"}', encoding="utf-8"
+    )
+    assert _resolve_port(tmp_path) == 8765

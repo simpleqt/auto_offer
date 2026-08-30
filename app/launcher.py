@@ -51,6 +51,43 @@ def _find_free_port(preferred: int = 8765) -> int:
             return int(s.getsockname()[1])
 
 
+def _resolve_port(data_dir: Path, cli_port: int | None = None) -> int:
+    """服务端口优先级：命令行 --port > 设置页 service_port > 默认 8765。
+
+    只在启动时读取（换监听端口必须重启服务）；返回期望端口，
+    实际是否可用由 _find_free_port 兜底。
+    """
+    if cli_port:
+        return cli_port
+    from autooffer_server.services.settings import SettingsStore
+
+    settings = SettingsStore(data_dir / "settings.json").get()
+    port = settings.get("service_port", 8765)
+    if isinstance(port, int) and 1024 <= port <= 65535:
+        return port
+    log.warning("app.port_invalid_setting value=%s fallback=8765", port)
+    return 8765
+
+
+def _write_runtime_info(data_dir: Path, port: int, base_url: str) -> None:
+    """把实际监听地址写到数据目录，供排障与外部工具发现（端口被占自动换过时尤其重要）。"""
+    import json
+    import os
+
+    path = data_dir / "server.json"
+    try:
+        path.write_text(
+            json.dumps(
+                {"port": port, "base_url": base_url, "pid": os.getpid()},
+                ensure_ascii=False,
+                indent=2,
+            ),
+            encoding="utf-8",
+        )
+    except OSError:
+        log.warning("app.runtime_info_write_failed path=%s", path)
+
+
 def setup_file_logging(logs_dir: Path) -> Path:
     """全量运行日志落盘：structlog 与 uvicorn 一并写入滚动文件（2MB×5）。
 
@@ -147,6 +184,12 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="主窗口启动后最小化（静默待命，操作用户浏览器当前页面）",
     )
+    parser.add_argument(
+        "--port",
+        type=int,
+        default=None,
+        help="本地服务监听端口（优先于设置页；默认 8765，被占用时自动换空闲端口）",
+    )
     args = parser.parse_args(argv)
 
     single = _SingleInstance()
@@ -162,8 +205,18 @@ def main(argv: list[str] | None = None) -> int:
         log_path = setup_file_logging(Path(config.data_dir) / "logs")
         log.info("app.logging file=%s", log_path)
         app = create_app(config)
-        port = _find_free_port()
+        preferred = _resolve_port(Path(config.data_dir), args.port)
+        port = _find_free_port(preferred)
+        config.port = port  # health 端点等对外报告实际监听端口
         base_url = f"http://127.0.0.1:{port}"
+        _write_runtime_info(Path(config.data_dir), port, base_url)
+        if port != preferred:
+            log.warning(
+                "app.port_conflict preferred=%s actual=%s（如需固定端口请在设置页更换）",
+                preferred,
+                port,
+            )
+        log.info("app.listening %s", base_url)
 
         t = threading.Thread(target=_run_server, args=(app, config.host, port), daemon=True)
         t.start()

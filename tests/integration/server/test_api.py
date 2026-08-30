@@ -483,9 +483,10 @@ def test_settings_default_and_update(client: TestClient) -> None:
         "cdp_endpoint": "",
         "minimize_on_startup": False,
         "auto_submit": False,
+        "service_port": 8765,
     }
 
-    # 更新为 CDP 模式 + 开启自动提交
+    # 更新为 CDP 模式 + 开启自动提交 + 自定义服务端口
     r = client.put(
         "/api/v1/settings",
         json={
@@ -493,6 +494,7 @@ def test_settings_default_and_update(client: TestClient) -> None:
             "cdp_endpoint": "http://127.0.0.1:9222",
             "minimize_on_startup": True,
             "auto_submit": True,
+            "service_port": 9100,
         },
     )
     assert r.status_code == 200
@@ -501,10 +503,12 @@ def test_settings_default_and_update(client: TestClient) -> None:
     assert body["cdp_endpoint"] == "http://127.0.0.1:9222"
     assert body["minimize_on_startup"] is True
     assert body["auto_submit"] is True
+    assert body["service_port"] == 9100
 
     # 已持久化
     assert client.get("/api/v1/settings").json()["browser_mode"] == "cdp"
     assert client.get("/api/v1/settings").json()["auto_submit"] is True
+    assert client.get("/api/v1/settings").json()["service_port"] == 9100
 
 
 def test_settings_rejects_invalid_browser_mode(client: TestClient) -> None:
@@ -513,3 +517,18 @@ def test_settings_rejects_invalid_browser_mode(client: TestClient) -> None:
         json={"browser_mode": "invalid", "cdp_endpoint": "", "minimize_on_startup": False},
     )
     assert r.status_code == 422
+
+
+def test_settings_rejects_invalid_service_port(client: TestClient) -> None:
+    """端口范围 1024-65535：特权端口和越界值直接 422，不让用户存进坑里。"""
+    for bad in (80, 1023, 65536, "not-a-port"):
+        r = client.put(
+            "/api/v1/settings",
+            json={
+                "browser_mode": "managed",
+                "cdp_endpoint": "",
+                "minimize_on_startup": False,
+                "service_port": bad,
+            },
+        )
+        assert r.status_code == 422, bad

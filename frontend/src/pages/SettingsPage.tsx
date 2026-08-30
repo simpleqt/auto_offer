@@ -6,6 +6,7 @@ import {
   Descriptions,
   Form,
   Input,
+  InputNumber,
   message,
   Radio,
   Space,
@@ -29,8 +30,11 @@ export default function SettingsPage() {
 
   const save = useMutation({
     mutationFn: (body: AppSettings) => putSettings(body),
-    onSuccess: () => {
-      message.success('设置已保存，下一个任务生效');
+    onSuccess: (_d, body) => {
+      const portChanged = body.service_port !== data?.port;
+      message.success(
+        portChanged ? '设置已保存，服务端口重启软件后生效' : '设置已保存，下一个任务生效',
+      );
       qc.invalidateQueries({ queryKey: ['settings'] });
     },
     onError: (e: Error) => message.error(e.message),
@@ -46,13 +50,18 @@ export default function SettingsPage() {
         message="推荐使用浏览器插件填写"
         description="在 Chrome 加载本软件目录下的 extension/ 文件夹即可一键直填招聘表单（规则直填优先，冷门问法 AI 仅做字段映射，档案值不出本机）。安装步骤见 README「浏览器插件快速上手」。下方浏览器连接方式属于传统模式，保留可用。"
       />
-      <Card title="浏览器连接方式">
-        <Form
-          form={form}
-          layout="vertical"
-          initialValues={{ browser_mode: 'managed', cdp_endpoint: '', minimize_on_startup: false }}
-          onFinish={(vals) => save.mutate(vals)}
-        >
+      <Form
+        form={form}
+        layout="vertical"
+        initialValues={{
+          browser_mode: 'managed',
+          cdp_endpoint: '',
+          minimize_on_startup: false,
+          service_port: 8765,
+        }}
+        onFinish={(vals) => save.mutate(vals)}
+      >
+        <Card title="浏览器连接方式" style={{ marginBottom: 16 }}>
           <Form.Item
             name="browser_mode"
             label="任务在哪个浏览器里填写"
@@ -120,15 +129,35 @@ export default function SettingsPage() {
             label="填写完成后自动提交"
             valuePropName="checked"
             extra="开启后：走完全部步骤即自动点击页面上的「提交/投递」按钮（默认关闭，由你人工审核后提交）"
+            style={{ marginBottom: 0 }}
           >
             <Switch />
           </Form.Item>
+        </Card>
 
-          <Button type="primary" htmlType="submit" icon={<SaveOutlined />} loading={save.isPending}>
-            保存设置
-          </Button>
-        </Form>
-      </Card>
+        <Card title="服务端口" style={{ marginBottom: 16 }}>
+          <Form.Item
+            name="service_port"
+            label="本地服务监听端口"
+            rules={[{ required: true, message: '请填写端口' }]}
+            extra={
+              <span>
+                默认 8765；被其他程序占用时可换端口避免冲突。保存后
+                <Typography.Text strong>重启软件</Typography.Text>
+                生效；换端口后浏览器插件弹窗里的「服务地址」也要同步改成
+                <Typography.Text code>http://127.0.0.1:新端口</Typography.Text>
+              </span>
+            }
+            style={{ marginBottom: 0 }}
+          >
+            <InputNumber min={1024} max={65535} style={{ width: 160 }} />
+          </Form.Item>
+        </Card>
+
+        <Button type="primary" htmlType="submit" icon={<SaveOutlined />} loading={save.isPending}>
+          保存设置
+        </Button>
+      </Form>
 
       <Card title="本地服务">
         <Descriptions column={2} size="small">
@@ -142,6 +171,7 @@ export default function SettingsPage() {
           <Descriptions.Item label="任务浏览器">
             {data?.headless ? '无头模式' : '可见窗口'}
           </Descriptions.Item>
+          <Descriptions.Item label="当前监听端口">{data?.port ?? '—'}</Descriptions.Item>
         </Descriptions>
       </Card>
 
