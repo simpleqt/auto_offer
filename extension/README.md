@@ -14,14 +14,15 @@ popup(选档案/授权敏感字段) ──▶ background(SW) 两段式编排
                                │   POST /api/v1/option-match   （AI 选选项，≤3轮级联）
                                ▼
                      content.js（规则直填引擎）
-                       站点适配器(智易/北森 Phoenix/Moka/牛客/智联 + Ant/Element 兜底)
+                       站点适配器(飞书招聘/智易/北森 Phoenix/Moka/牛客/智联 + Ant/Element 兜底)
                        标签扫描 → 本地评分(textMatchScore) + 硬否决
-                                 （上传类 / 家庭域 / 值形冲突）
+                                 （上传类 / 家庭域 / 科研域 / 奖惩域 / 值形冲突）
                        → setNativeValue 原生注入(React 兼容)
                        → 自定义下拉（弹层叶子兜底 + 搜索框重试 + 选项收割）
                        → Phoenix 自绘单选（内部节点指针序列 + 选中态核验）
                        → 日历/月份选择器、「至今」开关（幂等）
-                       → 多条教育经历自动补块（occurrence/itemIndex 配对）
+                       → 多条教育经历/获奖模块自动补块（occurrence/itemIndex 配对）
+                       → 站点预填纠偏（值不一致按普通阈值覆盖，一致则不重写）
                        → 附件 File+DataTransfer 注入
 ```
 
@@ -33,7 +34,7 @@ popup(选档案/授权敏感字段) ──▶ background(SW) 两段式编排
 ## 安装到 Edge / Chrome
 
 前提：本地服务已启动（`.venv/Scripts/python.exe -m app.launcher`，
-健康检查 http://127.0.0.1:8765/api/health）。
+健康检查 http://127.0.0.1:8765/api/v1/system/health）。
 
 **方式一：加载解压缩目录（开发推荐，改动即生效）**
 
