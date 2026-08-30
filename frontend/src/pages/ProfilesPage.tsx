@@ -8,6 +8,7 @@ import {
   message,
   Modal,
   Popconfirm,
+  Progress,
   Row,
   Space,
   Spin,
@@ -173,6 +174,15 @@ export default function ProfilesPage() {
                   ]}
                 >
                   <List.Item.Meta
+                    avatar={
+                      <Progress
+                        type="circle"
+                        size={36}
+                        percent={p.completeness ?? 0}
+                        strokeColor={(p.completeness ?? 0) >= 80 ? '#52c41a' : '#2e5be6'}
+                        format={(v) => <span style={{ fontSize: 11 }}>{v}</span>}
+                      />
+                    }
                     title={
                       <Space>
                         <Typography.Text strong>{p.label || p.name || p.id}</Typography.Text>

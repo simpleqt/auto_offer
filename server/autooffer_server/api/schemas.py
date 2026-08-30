@@ -54,6 +54,8 @@ class ProfileSummary(BaseModel):
     updated_at: str
     name: str = ""
     attachments: int = 0
+    completeness: int = 0
+    """档案完整度 0-100（core.profile.completeness 计算），提示还能补什么。"""
 
 
 class TaskIn(BaseModel):

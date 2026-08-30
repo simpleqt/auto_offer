@@ -205,6 +205,7 @@ export interface ProfileSummary {
   updated_at: string;
   name: string;
   attachments: number;
+  completeness: number;
 }
 
 // ---------- 任务 ----------

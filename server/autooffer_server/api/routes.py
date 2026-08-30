@@ -15,6 +15,8 @@ from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
 
 from autooffer_core import __version__
 from autooffer_core.applications import ApplicationStore
+from autooffer_core.profile.completeness import profile_completeness
+from autooffer_core.profile.schema import Profile
 from autooffer_server.api.schemas import (
     ApplicationReportIn,
     ApplicationStatusIn,
@@ -159,16 +161,20 @@ async def put_routing(request: Request, body: RoutingIn) -> dict[str, str]:
 @router.get("/profiles", response_model=list[ProfileSummary])
 async def list_profiles(request: Request) -> list[dict[str, Any]]:
     rows = await _ctx(request).repo.list_profiles()
-    return [
-        {
-            "id": r["id"],
-            "label": r["label"],
-            "updated_at": r["updated_at"],
-            "name": r["payload"].get("basic", {}).get("name", ""),
-            "attachments": len(r["payload"].get("attachments", [])),
-        }
-        for r in rows
-    ]
+    out: list[dict[str, Any]] = []
+    for r in rows:
+        score, _missing = profile_completeness(Profile.model_validate(r["payload"]))
+        out.append(
+            {
+                "id": r["id"],
+                "label": r["label"],
+                "updated_at": r["updated_at"],
+                "name": r["payload"].get("basic", {}).get("name", ""),
+                "attachments": len(r["payload"].get("attachments", [])),
+                "completeness": score,
+            }
+        )
+    return out
 
 
 @router.get("/profiles/{profile_id}")
