@@ -19,6 +19,7 @@ import { PlayCircleOutlined, ReloadOutlined } from '@ant-design/icons';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { cancelTask, createTask, listProfiles, listTasks, resumeTask } from '../api/client';
 import { TASK_STATE_COLORS, TASK_STATE_LABELS } from '../constants';
+import { fmtTime } from '../profile-utils';
 import TaskDetail from './TaskDetail';
 
 export default function TasksPage() {
@@ -65,6 +66,9 @@ export default function TasksPage() {
     <Row gutter={[16, 16]}>
       <Col xs={24} lg={8}>
         <Card title="新建任务" style={{ marginBottom: 16 }}>
+          <Typography.Paragraph type="secondary" style={{ fontSize: 12 }}>
+            传统模式：软件自控浏览器完成填写（推荐日常使用浏览器插件，见「首次引导」）。
+          </Typography.Paragraph>
           <Form form={form} layout="vertical" onFinish={(v) => create.mutate(v)}>
             <Form.Item
               name="url"
@@ -119,7 +123,11 @@ export default function TasksPage() {
                 <List.Item
                   style={{
                     cursor: 'pointer',
-                    background: t.id === selectedId ? '#f0f5ff' : undefined,
+                    background: t.id === selectedId ? '#eef3ff' : undefined,
+                    borderInlineStart:
+                      t.id === selectedId ? '3px solid #2e5be6' : '3px solid transparent',
+                    paddingInlineStart: 10,
+                    borderRadius: 6,
                   }}
                   onClick={() => setSelectedId(t.id)}
                 >
@@ -131,9 +139,15 @@ export default function TasksPage() {
                       </Space>
                     }
                     description={
-                      <Typography.Text type="secondary" style={{ fontSize: 12 }} ellipsis>
-                        {t.page_title || t.url}
-                      </Typography.Text>
+                      <span>
+                        <Typography.Text type="secondary" style={{ fontSize: 12 }} ellipsis>
+                          {t.page_title || t.url}
+                        </Typography.Text>
+                        <br />
+                        <Typography.Text type="secondary" style={{ fontSize: 11 }}>
+                          {fmtTime(t.created_at)}
+                        </Typography.Text>
+                      </span>
                     }
                   />
                 </List.Item>

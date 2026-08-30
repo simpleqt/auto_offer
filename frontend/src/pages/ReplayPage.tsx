@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   Button,
   Card,
@@ -35,6 +35,19 @@ export default function ReplayPage() {
     [events],
   );
   const current = stepEvents[cursor];
+
+  // 键盘 ←/→ 步进回放（选中任务后生效）
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (!taskId || (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight')) return;
+      e.preventDefault();
+      setCursor((c) =>
+        e.key === 'ArrowLeft' ? Math.max(0, c - 1) : Math.min(stepEvents.length - 1, c + 1),
+      );
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [taskId, stepEvents.length]);
 
   return (
     <Row gutter={[16, 16]}>
@@ -122,7 +135,7 @@ export default function ReplayPage() {
                 />
               )}
               <Typography.Text type="secondary">
-                时间：{fmtTime(current.created_at)}
+                时间：{fmtTime(current.created_at)} · 键盘 ←/→ 可步进
               </Typography.Text>
             </Space>
           )}

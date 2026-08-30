@@ -132,13 +132,16 @@ export default function App() {
           </Space>
         </Header>
         <Content style={{ padding: 24, overflow: 'auto' }}>
-          {page === 'onboarding' && <OnboardingPage goTo={switchPage} />}
-          {page === 'profiles' && <ProfilesPage />}
-          {page === 'models' && <ModelsPage />}
-          {page === 'tasks' && <TasksPage />}
-          {page === 'replay' && <ReplayPage />}
-          {page === 'applications' && <ApplicationsPage />}
-          {page === 'settings' && <SettingsPage />}
+          {/* 宽屏限宽居中：超宽显示器上表单/表格不再拉伸过宽 */}
+          <div style={{ maxWidth: 1440, margin: '0 auto' }}>
+            {page === 'onboarding' && <OnboardingPage goTo={switchPage} />}
+            {page === 'profiles' && <ProfilesPage />}
+            {page === 'models' && <ModelsPage />}
+            {page === 'tasks' && <TasksPage />}
+            {page === 'replay' && <ReplayPage />}
+            {page === 'applications' && <ApplicationsPage />}
+            {page === 'settings' && <SettingsPage />}
+          </div>
         </Content>
       </Layout>
     </Layout>

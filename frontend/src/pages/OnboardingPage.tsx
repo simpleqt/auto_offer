@@ -12,72 +12,100 @@ export default function OnboardingPage({ goTo }: { goTo: (p: PageKey) => void })
   const current = !step1Done ? 0 : !step2Done ? 1 : 2;
 
   return (
-    <Card title="首次引导">
-      <Space direction="vertical" size={24} style={{ width: '100%' }}>
-        <Steps
-          current={current}
-          items={[
-            { title: '配置模型', description: '添加 OpenAI 兼容端点并探测' },
-            { title: '建立档案', description: '上传简历解析或手动填写' },
-            { title: '发起任务', description: '粘贴表单 URL 开始自动填写' },
-          ]}
+    <Space direction="vertical" size={16} style={{ width: '100%' }}>
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 20,
+          padding: '28px 32px',
+          borderRadius: 12,
+          background: 'linear-gradient(120deg, #5b8cff 0%, #2e5be6 100%)',
+          color: '#fff',
+        }}
+      >
+        <img
+          src="/logo.png"
+          alt="AutoOffer"
+          style={{ width: 56, height: 56, borderRadius: 12, flex: 'none' }}
         />
-        {current === 0 && (
-          <Result
-            status="info"
-            title="先配置一个模型端点"
-            subTitle="软件会自动测试连通性与视觉能力；api_key 用系统级加密存储，不会明文回显。"
-            extra={
-              <Button type="primary" onClick={() => goTo('models')}>
-                去配置模型
-              </Button>
-            }
+        <div>
+          <div style={{ fontSize: 22, fontWeight: 700, letterSpacing: 1 }}>
+            AutoOffer · 简历自动填写
+          </div>
+          <div style={{ opacity: 0.85, marginTop: 4, fontSize: 13 }}>
+            上传一次简历，任意招聘网站一键直填——规则匹配零 AI、冷门问法 AI
+            仅映射标签，档案不出本机。
+          </div>
+        </div>
+      </div>
+      <Card title="首次引导">
+        <Space direction="vertical" size={24} style={{ width: '100%' }}>
+          <Steps
+            current={current}
+            items={[
+              { title: '配置模型', description: '添加 OpenAI 兼容端点并探测' },
+              { title: '建立档案', description: '上传简历解析或手动填写' },
+              { title: '发起任务', description: '粘贴表单 URL 开始自动填写' },
+            ]}
           />
-        )}
-        {current === 1 && (
-          <Result
-            status="info"
-            title="再建立你的个人档案"
-            subTitle="上传简历 PDF/Word 自动解析，或手动填写结构化模板；扩展信息按需填写。"
-            extra={
-              <Button type="primary" onClick={() => goTo('profiles')}>
-                去建立档案
-              </Button>
-            }
-          />
-        )}
-        {current === 2 && (
-          <>
+          {current === 0 && (
             <Result
-              status="success"
-              title="准备就绪"
-              subTitle="模型与档案都已配置完成，可以发起你的第一个自动填写任务了。"
+              status="info"
+              title="先配置一个模型端点"
+              subTitle="软件会自动测试连通性与视觉能力；api_key 用系统级加密存储，不会明文回显。"
               extra={
-                <Button type="primary" onClick={() => goTo('tasks')}>
-                  发起任务
+                <Button type="primary" onClick={() => goTo('models')}>
+                  去配置模型
                 </Button>
               }
             />
-            <Alert
-              type="info"
-              showIcon
-              message="推荐使用浏览器插件填写（更快、更稳）"
-              description={
-                <Typography.Paragraph style={{ marginBottom: 0 }}>
-                  Edge/Chrome 打开 <Typography.Text code>edge://extensions</Typography.Text>（Chrome
-                  为 <Typography.Text code>chrome://extensions</Typography.Text>）→
-                  开启「开发人员模式」→ 「加载解压缩的扩展」→ 选择本软件目录下的{' '}
-                  <Typography.Text code>extension/</Typography.Text>{' '}
-                  文件夹。之后在任意招聘表单页点插件图标即可一键直填，填写记录自动汇总到「投递列表」。
-                </Typography.Paragraph>
+          )}
+          {current === 1 && (
+            <Result
+              status="info"
+              title="再建立你的个人档案"
+              subTitle="上传简历 PDF/Word 自动解析，或手动填写结构化模板；扩展信息按需填写。"
+              extra={
+                <Button type="primary" onClick={() => goTo('profiles')}>
+                  去建立档案
+                </Button>
               }
             />
-          </>
-        )}
-        <Typography.Paragraph type="secondary" style={{ textAlign: 'center' }}>
-          提示：填写完成后浏览器窗口会保留，请人工核对报告后再自行提交。
-        </Typography.Paragraph>
-      </Space>
-    </Card>
+          )}
+          {current === 2 && (
+            <>
+              <Result
+                status="success"
+                title="准备就绪"
+                subTitle="模型与档案都已配置完成，可以发起你的第一个自动填写任务了。"
+                extra={
+                  <Button type="primary" onClick={() => goTo('tasks')}>
+                    发起任务
+                  </Button>
+                }
+              />
+              <Alert
+                type="info"
+                showIcon
+                message="推荐使用浏览器插件填写（更快、更稳）"
+                description={
+                  <Typography.Paragraph style={{ marginBottom: 0 }}>
+                    Edge/Chrome 打开 <Typography.Text code>edge://extensions</Typography.Text>
+                    （Chrome 为 <Typography.Text code>chrome://extensions</Typography.Text>）→
+                    开启「开发人员模式」→ 「加载解压缩的扩展」→ 选择本软件目录下的{' '}
+                    <Typography.Text code>extension/</Typography.Text>{' '}
+                    文件夹。之后在任意招聘表单页点插件图标即可一键直填，填写记录自动汇总到「投递列表」。
+                  </Typography.Paragraph>
+                }
+              />
+            </>
+          )}
+          <Typography.Paragraph type="secondary" style={{ textAlign: 'center', marginBottom: 0 }}>
+            提示：填写完成后浏览器窗口会保留，请人工核对报告后再自行提交。
+          </Typography.Paragraph>
+        </Space>
+      </Card>
+    </Space>
   );
 }
