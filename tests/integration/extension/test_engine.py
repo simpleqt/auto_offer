@@ -190,6 +190,53 @@ async def test_ai_mapping_pass_fills_leftover(page: Page) -> None:
     assert any(f["label"] == "应聘方向" for f in second["filled"])
 
 
+async def test_awards_module_fill_and_isolation(page: Page) -> None:
+    """获奖情况模块：别名直填（获奖名称/获奖时间/描述）+ 自动补块 + 与项目模块硬隔离。"""
+    await page.goto(fixture_url("awards_like.html"))
+    flat: dict[str, Any] = {
+        "schema": 1,
+        "profile": {"id": "demo", "label": "示例"},
+        "sections": [
+            {
+                "key": "awards",
+                "title": "奖惩情况",
+                "kind": "repeat",
+                "items": [
+                    {
+                        "奖惩名称": "校级三等奖学金",
+                        "奖惩时间": "2025-12",
+                        "奖惩描述": "学业成绩年级前10%",
+                    },
+                    {
+                        "奖惩名称": "省级编程竞赛二等奖",
+                        "奖惩时间": "2024-06",
+                        "奖惩描述": "团队负责人，负责算法模块",
+                    },
+                ],
+            },
+            {
+                "key": "project",
+                "title": "项目经历",
+                "kind": "repeat",
+                "items": [{"项目名称": "示例平台", "项目描述": "项目描述正文"}],
+            },
+        ],
+    }
+    report = await autofill(page, flat)
+    assert report["counts"]["failed"] == 0, report["failed"]
+    titles = await page.eval_on_selector_all(
+        ".award-title", "els => els.map(e => e.value)"
+    )
+    assert titles == ["校级三等奖学金", "省级编程竞赛二等奖"]  # 自动点「添加获奖经历」补到 2 块
+    dates = await page.eval_on_selector_all(".award-date", "els => els.map(e => e.value)")
+    assert dates == ["2025-12", "2024-06"]
+    descs = await page.eval_on_selector_all(".award-desc", "els => els.map(e => e.value)")
+    assert descs == ["学业成绩年级前10%", "团队负责人，负责算法模块"]
+    # 硬隔离：项目模块的裸「描述」拿到项目描述，不得被奖惩条目抢走（反之亦然）
+    assert await page.input_value(".proj-title") == "示例平台"
+    assert await page.input_value(".proj-desc") == "项目描述正文"
+
+
 async def test_repeat_blocks_add_and_fill(page: Page) -> None:
     """教育经历多条目：自动点「添加教育经历」补块，第 N 块配第 N 条档案。"""
     await page.goto(fixture_url("repeat_upload.html"))

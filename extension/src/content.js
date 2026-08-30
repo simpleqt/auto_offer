@@ -207,6 +207,10 @@
     接受工作地调剂: ["接受调剂", "是否接受调剂", "工作地调剂", "是否接受工作地调动"],
     可到岗时间: ["到岗时间", "入职时间", "最快到岗", "预计入职时间"],
     外语水平: ["掌握程度", "熟练程度"],
+    奖惩名称: ["获奖名称", "奖项名称", "奖励名称", "荣誉奖项", "所获奖项", "奖惩项目"],
+    奖励等级: ["获奖等级", "奖项等级", "奖励级别", "奖惩级别"],
+    奖惩时间: ["获奖时间", "获得时间", "取得时间", "奖励时间", "获奖年月"],
+    奖惩描述: ["获奖描述", "奖项描述", "获奖情况", "奖惩说明", "描述"],
   };
 
   // 家庭域字段：只允许家庭类档案条目匹配（反之亦然）。
@@ -218,6 +222,10 @@
   // 必须按模块标题硬隔离：普通「项目经历」模块不得吃掉科研条目，反之亦然。
   const RESEARCH_FIELD_RE = /科研|课题/;
   const RESEARCH_CATEGORY_RE = /科研|课题/;
+
+  // 奖惩域字段：获奖模块与项目模块都可能有裸「描述」字段，按模块标题硬隔离。
+  const AWARD_FIELD_RE = /获奖|奖惩|荣誉|奖学金/;
+  const AWARD_CATEGORY_RE = /奖惩|获奖/;
 
   // 值形状检测（用于「值/标签语义冲突」硬否决）。
   const VALUE_SHAPES = [
@@ -630,7 +638,7 @@
 
   // 已知区块标题（Phoenix 等自研框架的标题是无语义类名的裸 DIV，按文本识别）
   const SECTION_TITLE_RE =
-    /^(基本信息|个人信息|求职意向|教育经历|实习经历|工作经历|项目经历|科研项目经历|科研经历|科研情况|语言能力|外语能力|专业技能|计算机技能|证书|奖惩情况|家庭情况|家庭成员|其他信息|附加信息|自我评价|自我描述|论文著作|专利成果|作品|获奖)$/;
+    /^(基本信息|个人信息|求职意向|教育经历|实习经历|工作经历|项目经历|科研项目经历|科研经历|科研情况|语言能力|外语能力|专业技能|计算机技能|证书|奖惩情况|家庭情况|家庭成员|其他信息|附加信息|自我评价|自我描述|论文著作|专利成果|作品|获奖|荣誉奖项|荣誉情况|所获荣誉)$/;
   let sectionTitleCache = null;
 
   function collectSectionTitles() {
@@ -1002,6 +1010,12 @@
     const fieldResearch = RESEARCH_FIELD_RE.test(fieldText);
     const entryResearch = RESEARCH_CATEGORY_RE.test(entry.category);
     if (fieldResearch !== entryResearch && (fieldResearch || entryResearch)) {
+      return 0;
+    }
+    // 奖惩域双向硬约束（获奖/项目模块都可能裸标「描述」，按模块标题隔离）
+    const fieldAward = AWARD_FIELD_RE.test(fieldText);
+    const entryAward = AWARD_CATEGORY_RE.test(entry.category);
+    if (fieldAward !== entryAward && (fieldAward || entryAward)) {
       return 0;
     }
     if (shapeConflict(field, entry)) {
@@ -1683,6 +1697,13 @@
       anchor: /^项目名称$|科研项目名称|课题名称/,
       scope: /科研/,
       btn: /添加.*科研|新增.*科研/,
+      btnScoped: /^(添加|新增|\+)$/,
+    },
+    {
+      // 获奖情况模块：锚点按站点习惯「获奖名称/奖惩名称」都认
+      category: /奖惩|获奖/,
+      anchor: /奖惩名称|获奖名称|奖项名称|奖励名称/,
+      btn: /添加.*(奖|荣誉)|新增.*(奖|荣誉)/,
       btnScoped: /^(添加|新增|\+)$/,
     },
   ];

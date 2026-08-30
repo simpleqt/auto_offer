@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <title>获奖情况多区块基准页（Ant 风格 + 添加按钮 + 项目模块隔离）</title>
+  <style>
+    body { font: 14px/1.6 system-ui, "Microsoft YaHei"; padding: 24px; }
+    .ant-form-item { display: flex; align-items: center; margin-bottom: 10px; }
+    .ant-form-item-label { width: 110px; text-align: right; padding-right: 12px; }
+    .ant-form-item-control { flex: 1; }
+    input[type="text"] { width: 100%; box-sizing: border-box; padding: 6px 10px; border: 1px solid #d9d9d9; border-radius: 6px; }
+    #add-award { margin: 8px 0 16px 122px; padding: 4px 14px; cursor: pointer; border: 1px dashed #3370ff; color: #3370ff; width: auto; display: inline-block; }
+    .award-block, .proj-block { border: 1px solid #eee; padding: 10px; margin-bottom: 10px; border-radius: 6px; }
+    h3 { margin: 10px 0; }
+  </style>
+</head>
+<body>
+  <h3>获奖情况</h3>
+  <div id="award-blocks">
+    <div class="award-block">
+      <div class="ant-form-item">
+        <div class="ant-form-item-label"><label>获奖名称</label></div>
+        <div class="ant-form-item-control"><input type="text" class="award-title" /></div>
+      </div>
+      <div class="ant-form-item">
+        <div class="ant-form-item-label"><label>获奖时间</label></div>
+        <div class="ant-form-item-control"><input type="text" class="award-date" /></div>
+      </div>
+      <div class="ant-form-item">
+        <div class="ant-form-item-label"><label>描述</label></div>
+        <div class="ant-form-item-control"><input type="text" class="award-desc" /></div>
+      </div>
+    </div>
+  </div>
+  <span id="add-award">添加获奖经历</span>
+
+  <h3>项目经历</h3>
+  <div class="proj-block">
+    <div class="ant-form-item">
+      <div class="ant-form-item-label"><label>项目名称</label></div>
+      <div class="ant-form-item-control"><input type="text" class="proj-title" /></div>
+    </div>
+    <div class="ant-form-item">
+      <div class="ant-form-item-label"><label>描述</label></div>
+      <div class="ant-form-item-control"><input type="text" class="proj-desc" /></div>
+    </div>
+  </div>
+
+  <script>
+    const tpl = document.querySelector(".award-block").innerHTML;
+    document.getElementById("add-award").addEventListener("click", () => {
+      const block = document.createElement("div");
+      block.className = "award-block";
+      block.innerHTML = tpl;
+      document.getElementById("award-blocks").appendChild(block);
+    });
+  </script>
+</body>
+</html>

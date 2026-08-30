@@ -122,6 +122,54 @@ export function ExtendedFields() {
           </Form.Item>
         </Col>
       </Row>
+      <Typography.Title level={5} style={{ marginTop: 8 }}>
+        获奖情况
+      </Typography.Title>
+      <Form.List name={['extended', 'awards']}>
+        {(fields, { add, remove }) => (
+          <>
+            {fields.map(({ key, name }) => (
+              <Card
+                key={key}
+                size="small"
+                style={{ marginBottom: 12 }}
+                extra={
+                  <Button
+                    type="text"
+                    danger
+                    icon={<DeleteOutlined />}
+                    onClick={() => remove(name)}
+                  />
+                }
+              >
+                <Row gutter={12}>
+                  <Col span={8}>
+                    <Form.Item name={[name, 'title']} label="获奖名称" rules={[{ required: true }]}>
+                      <Input placeholder="如 校级三等奖学金" />
+                    </Form.Item>
+                  </Col>
+                  <Col span={8}>
+                    <Form.Item name={[name, 'level']} label="获奖等级">
+                      <Input placeholder="如 校级/省级/国家级，选填" />
+                    </Form.Item>
+                  </Col>
+                  <Col span={8}>
+                    <Form.Item name={[name, 'date']} label="获奖时间">
+                      <DatePicker picker="month" style={{ width: '100%' }} />
+                    </Form.Item>
+                  </Col>
+                </Row>
+                <Form.Item name={[name, 'description']} label="描述">
+                  <Input.TextArea rows={2} placeholder="获奖说明，选填" />
+                </Form.Item>
+              </Card>
+            ))}
+            <Button type="dashed" icon={<PlusOutlined />} block onClick={() => add()}>
+              添加获奖
+            </Button>
+          </>
+        )}
+      </Form.List>
     </>
   );
 }
