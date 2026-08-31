@@ -1,0 +1,169 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <title>自研 AUI 风格组件基准页（复刻华为真站：渐入动画 + absolute 弹层 + 滚动条结构 + 农历日格）</title>
+  <style>
+    body { font: 14px/1.6 system-ui, "Microsoft YaHei"; padding: 24px; }
+    .aui-form-item { display: flex; align-items: center; margin-bottom: 14px; }
+    .aui-form-item__label { width: 130px; text-align: right; padding-right: 12px; color: #333; }
+    .aui-form-item__content { flex: 1; }
+    .aui-input__inner { width: 220px; padding: 6px 10px; border: 1px solid #d9d9d9; border-radius: 4px; }
+    .aui-select { display: inline-block; position: relative; }
+    /* 弹层：absolute 定位（真站如此），渐入动画 opacity 0→1 约 300ms */
+    .aui-select-dropdown.aui-popper, .aui-popover-pc {
+      position: absolute; z-index: 999; background: #fff; border: 1px solid #ddd;
+      border-radius: 6px; box-shadow: 0 4px 16px rgba(0,0,0,.12);
+      opacity: 0; transition: opacity .3s ease;
+    }
+    .aui-select-dropdown.aui-popper.open, .aui-popover-pc.open { opacity: 1; }
+    .aui-select-dropdown__wrap { max-height: 180px; overflow: hidden auto; }
+    .aui-select-dropdown__list { list-style: none; margin: 0; padding: 4px 0; }
+    .aui-select-dropdown__item { padding: 8px 16px; cursor: pointer; }
+    .aui-select-dropdown__item:hover { background: #f0f5ff; }
+    .aui-select-dropdown__item-wrapper { display: flex; }
+    .cal { width: 304px; padding: 8px; }
+    .cal .header { display: flex; align-items: center; justify-content: space-between; padding: 4px; }
+    .cal .prev, .cal .next { display: flex; gap: 2px; }
+    .cal .prev-year, .cal .prev-month, .cal .next-month, .cal .next-year {
+      width: 16px; height: 16px; cursor: pointer; background: #bbb; border-radius: 2px;
+    }
+    .cal .week-row { display: flex; }
+    .cal .week-day { width: 41px; height: 28px; text-align: center; line-height: 28px; color: #888; }
+    .cal .day-row { display: flex; }
+    .cal .day-cell { width: 41px; height: 32px; text-align: center; line-height: 32px; cursor: pointer; }
+    .cal .day-cell:hover { background: #eef3ff; }
+    .cal .day-cell.muted { color: #ccc; }
+    .cal .day-cell .solar { font-size: 13px; }
+    .cal .day-cell .lunar { font-size: 9px; color: #999; margin-left: 1px; }
+    .cal .footer { display: flex; gap: 8px; padding: 6px; }
+    .hidden { display: none; }
+  </style>
+</head>
+<body>
+  <h3>基本信息</h3>
+  <div class="aui-form-item">
+    <div class="aui-form-item__label">姓名</div>
+    <div class="aui-form-item__content"><input class="aui-input__inner j-name" placeholder="请输入" /></div>
+  </div>
+  <div class="aui-form-item">
+    <div class="aui-form-item__label">性别</div>
+    <div class="aui-form-item__content">
+      <div class="aui-select"><input class="aui-input__inner j-gender" readonly placeholder="请选择" /></div>
+    </div>
+  </div>
+  <div class="aui-form-item">
+    <div class="aui-form-item__label">证件签发国家/地区</div>
+    <div class="aui-form-item__content">
+      <div class="aui-select"><input class="aui-input__inner j-country" readonly placeholder="请选择" /></div>
+    </div>
+  </div>
+  <div class="aui-form-item birthday-form-item">
+    <div class="aui-form-item__label">出生日期</div>
+    <div class="aui-form-item__content">
+      <div class="picker"><input class="j-birth" placeholder="请选择" readonly /></div>
+    </div>
+  </div>
+  <!-- 组合行：带标签的选择行(区号) + 无标签的文本行(号码) -->
+  <div class="aui-form-item">
+    <div class="aui-form-item__label">联系电话</div>
+    <div class="aui-form-item__content">
+      <div class="aui-select areaCode-box">
+        <input class="aui-input__inner j-areacode" readonly value="+86" />
+      </div>
+    </div>
+  </div>
+  <div class="aui-form-item view-form-item-phone">
+    <div class="aui-form-item__content"><input class="aui-input__inner j-phone" placeholder="请输入" /></div>
+  </div>
+
+  <div id="sel-pop" class="aui-select-dropdown aui-popper hidden"></div>
+  <div id="cal-pop" class="aui-popup aui-popover aui-popover-pc cal hidden"></div>
+
+  <script>
+    const CN = ["一","二","三","四","五","六","七","八","九","十","十一","十二","十三","十四","十五","十六","十七","十八","十九","二十","廿一","廿二","廿三","廿四","廿五","廿六","廿七","廿八","廿九","三十","卅一"];
+    function show(el) {
+      el.classList.remove("hidden");
+      requestAnimationFrame(() => requestAnimationFrame(() => el.classList.add("open")));
+    }
+    function hide(el) { el.classList.remove("open"); setTimeout(() => el.classList.add("hidden"), 300); }
+
+    // —— 下拉：真站结构 scrollbar > wrap > ul > li > wrapper > label ——
+    const selPop = document.getElementById("sel-pop");
+    let selTarget = null;
+    function bindSelect(input, options) {
+      input.addEventListener("click", () => {
+        selTarget = input;
+        selPop.innerHTML =
+          '<div class="aui-scrollbar"><div class="aui-select-dropdown__wrap aui-scrollbar__wrap">' +
+          '<ul class="aui-select-dropdown__list aui-scrollbar__view">' +
+          options.map((o) =>
+            '<li class="aui-select-dropdown__item"><div class="aui-select-dropdown__item-wrapper full-width">' +
+            `<span class="aui-select-dropdown__item-label">${o}</span></div></li>`).join("") +
+          '</ul></div></div>';
+        const r = input.getBoundingClientRect();
+        selPop.style.left = r.left + "px";
+        selPop.style.top = (r.bottom + 4) + "px";
+        show(selPop);
+      });
+    }
+    bindSelect(document.querySelector(".j-gender"), ["男", "女"]);
+    bindSelect(document.querySelector(".j-country"),
+      ["中国大陆", "中国台湾", "中国香港", "美国", "德国", "日本"]);
+    bindSelect(document.querySelector(".j-areacode"), ["+86", "+852", "+1", "+44"]);
+    selPop.addEventListener("click", (e) => {
+      const li = e.target.closest("li");
+      if (li && selTarget) { selTarget.value = li.textContent; }
+      hide(selPop);
+    });
+
+    // —— 日历：农历混排日格 ——
+    const calPop = document.getElementById("cal-pop");
+    const birth = document.querySelector(".j-birth");
+    let cur = new Date();
+    function renderCal() {
+      const y = cur.getFullYear(), m = cur.getMonth();
+      const startWd = new Date(y, m, 1).getDay();
+      const daysIn = new Date(y, m + 1, 0).getDate();
+      const daysPrev = new Date(y, m, 0).getDate();
+      let cells = "";
+      for (let i = 0; i < 42; i += 1) {
+        const dnum = i - startWd + 1;
+        let cls = "day-cell", inner;
+        if (dnum < 1) { cls += " muted"; inner = `<span class="solar">${daysPrev + dnum}</span>`; }
+        else if (dnum > daysIn) { cls += " muted"; inner = `<span class="solar">${dnum - daysIn}</span>`; }
+        else { inner = `<span class="solar">${dnum}</span><span class="lunar">${CN[dnum - 1]}</span>`; }
+        cells += `<div class="${cls}">${inner}</div>`;
+      }
+      calPop.innerHTML =
+        `<div class="header">
+           <div class="prev"><div class="prev-year" title="上一年"></div><div class="prev-month" title="上一月"></div></div>
+           <div class="label"><span class="year button">${y} 年</span> <span class="month button">${m + 1} 月</span></div>
+           <div class="next"><div class="next-month" title="下一月"></div><div class="next-year" title="下一年"></div></div>
+         </div>
+         <div class="week-row">${["日","一","二","三","四","五","六"].map((w) => `<div class="week-day">${w}</div>`).join("")}</div>
+         <div id="day-grid">${cells}</div>
+         <div class="footer"><button type="button" class="aui-button j-now">此刻</button><button type="button" class="aui-button j-ok">确定</button></div>`;
+    }
+    birth.addEventListener("click", () => {
+      renderCal();
+      const r = birth.getBoundingClientRect();
+      calPop.style.left = r.left + "px";
+      calPop.style.top = (r.bottom + 4) + "px";
+      show(calPop);
+    });
+    calPop.addEventListener("click", (e) => {
+      const cls = e.target.className || "";
+      if (cls.includes("prev-year")) { cur = new Date(cur.getFullYear() - 1, cur.getMonth(), 1); renderCal(); }
+      else if (cls.includes("prev-month")) { cur = new Date(cur.getFullYear(), cur.getMonth() - 1, 1); renderCal(); }
+      else if (cls.includes("next-month")) { cur = new Date(cur.getFullYear(), cur.getMonth() + 1, 1); renderCal(); }
+      else if (cls.includes("next-year")) { cur = new Date(cur.getFullYear() + 1, cur.getMonth(), 1); renderCal(); }
+      else if (e.target.closest(".day-cell") && !e.target.closest(".day-cell").classList.contains("muted")) {
+        const d = e.target.closest(".day-cell").querySelector(".solar").textContent;
+        birth.value = `${cur.getFullYear()}-${String(cur.getMonth() + 1).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+        hide(calPop);
+      }
+    });
+  </script>
+</body>
+</html>

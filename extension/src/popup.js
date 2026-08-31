@@ -129,6 +129,17 @@ async function startFill() {
   $("btn-fill").disabled = true;
   $("btn-fill").textContent = "填写中…";
   $("report").classList.add("hidden");
+  // 阶段进度：后台把当前阶段写进 aoProgress，这里轮询显示（AI 映射较慢时不至于像卡死）
+  const progressTimer = setInterval(async () => {
+    try {
+      const { aoProgress } = await chrome.storage.local.get("aoProgress");
+      if (aoProgress && aoProgress.text) {
+        $("btn-fill").textContent = aoProgress.text;
+      }
+    } catch {
+      /* 读取失败忽略 */
+    }
+  }, 600);
   try {
     const report = await chrome.runtime.sendMessage({
       type: "ao:autofill",
@@ -144,6 +155,7 @@ async function startFill() {
   } catch (err) {
     renderError(String((err && err.message) || err));
   } finally {
+    clearInterval(progressTimer);
     $("btn-fill").disabled = false;
     $("btn-fill").textContent = "开始填写";
   }

@@ -233,11 +233,16 @@ async function handleAutofill(msg) {
     throw new Error("缺少目标标签页");
   }
   const sensitive = msg.sensitive ? 1 : 0;
+  const setProgress = (text) =>
+    chrome.storage.local
+      .set({ aoProgress: { text, ts: Date.now() } })
+      .catch(() => {});
   await aoLog("info", "fill.start", {
     url: msg.url || "",
     profile: msg.profileId,
     sensitive,
   });
+  await setProgress("拉取档案…");
   const flat = await fetchJson(
     `${base}/api/v1/profiles/${encodeURIComponent(msg.profileId)}/flat?sensitive=${sensitive}`
   );
@@ -247,6 +252,7 @@ async function handleAutofill(msg) {
   });
 
   // 第一段：本地规则直填（零 LLM）
+  await setProgress("规则直填…");
   let report = await runFillPass(tabId, flat, {});
   await aoLog("info", "fill.pass1", {
     filled: report.counts ? report.counts.filled : 0,
@@ -260,6 +266,7 @@ async function handleAutofill(msg) {
     const unmatched = report.unmatched || [];
     const mapping = {};
     if (unmatched.length > 0 && msg.aiMapping !== false) {
+      await setProgress(`AI 映射 ${unmatched.length} 个字段…`);
       const mappingResp = await fetchJson(
         `${base}/api/v1/mapping`,
         {
@@ -314,6 +321,7 @@ async function handleAutofill(msg) {
         if (picks.length === 0) {
           break;
         }
+        await setProgress(`AI 选选项（第 ${round + 1} 轮，${picks.length} 项）…`);
         let overrides = {};
         try {
           const choiceResp = await fetchJson(
@@ -350,6 +358,7 @@ async function handleAutofill(msg) {
   }
 
   const { aoHistory = [] } = await chrome.storage.local.get("aoHistory");
+  await setProgress("");
   aoHistory.unshift({
     ts: Date.now(),
     url: msg.url || "",

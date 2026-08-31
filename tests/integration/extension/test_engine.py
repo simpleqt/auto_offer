@@ -190,6 +190,86 @@ async def test_ai_mapping_pass_fills_leftover(page: Page) -> None:
     assert any(f["label"] == "应聘方向" for f in second["filled"])
 
 
+async def test_aui_style_components_fill_by_behavior(page: Page) -> None:
+    """自研 AUI 风格组件：类名不在引擎名单里，靠行为/内容指纹驱动。
+
+    覆盖：popover 日历(内容指纹识别+prev-year/prev-month 箭头)、
+    select-dropdown 弹层选项、国籍别名(证件签发国家/地区→中国大陆)、
+    组合行标签继承(联系电话=区号下拉+无标签号码输入框)。
+    """
+    await page.goto(fixture_url("aui_like.html"))
+    flat: dict[str, Any] = {
+        "schema": 1,
+        "profile": {"id": "demo", "label": "示例"},
+        "sections": [
+            {
+                "key": "basic",
+                "title": "基本信息",
+                "kind": "simple",
+                "values": {
+                    "姓名": "张三",
+                    "性别": "男",
+                    "国籍": "中国",
+                    "出生日期": "2001-03-18",
+                    "手机号码": "13800001111",
+                },
+            }
+        ],
+    }
+    report = await autofill(page, flat)
+    assert report["counts"]["failed"] == 0, report["failed"]
+    assert await page.input_value(".j-name") == "张三"
+    assert await page.input_value(".j-gender") == "男"  # 下拉弹层选项点击
+    # 档案值「中国」应匹配选项「中国大陆」（包含匹配）
+    assert await page.input_value(".j-country") == "中国大陆"
+    # 日历：内容指纹识别 + 年/月箭头导航 + 日格点击
+    assert await page.input_value(".j-birth") == "2001-03-18"
+    # 组合行：号码写入无标签文本框，区号下拉保持默认
+    assert await page.input_value(".j-phone") == "13800001111"
+    assert await page.input_value(".j-areacode") == "+86"
+
+
+async def test_desc_only_entry_merges_link_into_description(page: Page) -> None:
+    """站点项目条目没有链接字段时：项目地址追加进描述文本（多行控件保留换行）。"""
+    await page.goto(fixture_url("aui_like.html"))
+    await page.evaluate("""() => {
+      const h = document.createElement('h3');
+      h.textContent = '项目经历';
+      document.body.appendChild(h);
+      const block = document.createElement('div');
+      block.className = 'merge-proj-block';
+      block.innerHTML = `
+        <div class="aui-form-item">
+          <div class="aui-form-item__label">项目描述</div>
+          <div class="aui-form-item__content"><textarea class="j-merge-desc"></textarea></div>
+        </div>`;
+      document.body.appendChild(block);
+    }""")
+    flat: dict[str, Any] = {
+        "schema": 1,
+        "profile": {"id": "demo", "label": "示例"},
+        "sections": [
+            {
+                "key": "project",
+                "title": "项目经历",
+                "kind": "repeat",
+                "items": [
+                    {
+                        "项目名称": "示例平台",
+                        "项目描述": "负责接口设计与开发。",
+                        "项目链接": "https://github.com/demo/app",
+                    }
+                ],
+            }
+        ],
+    }
+    report = await autofill(page, flat)
+    assert report["counts"]["failed"] == 0, report["failed"]
+    val = await page.input_value(".j-merge-desc")
+    # 站点无链接字段 → 地址并入描述；描述正文保持原样在前
+    assert val == "负责接口设计与开发。\n项目地址：https://github.com/demo/app"
+
+
 async def test_awards_module_fill_and_isolation(page: Page) -> None:
     """获奖情况模块：别名直填（获奖名称/获奖时间/描述）+ 自动补块 + 与项目模块硬隔离。"""
     await page.goto(fixture_url("awards_like.html"))

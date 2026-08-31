@@ -192,7 +192,7 @@
     "期望月薪(税前)": ["期望月薪", "期望月薪（税前）", "月薪(税前)", "期望月薪范围", "税前期望月薪"],
     "现月薪(税前)": ["现月薪", "目前月薪", "当前月薪", "现月薪（税前）", "上月薪资"],
     期望从事行业: ["期望行业", "意向行业", "期望行业方向", "希望从事行业"],
-    国籍: ["nationality", "国家", "国籍（国家或地区）"],
+    国籍: ["nationality", "国家", "国籍（国家或地区）", "证件签发国家/地区", "签发国家/地区", "证件签发地"],
     工作年限: ["工作年数", "参加工作年限", "年限", "工作经历年限"],
     项目职务: ["项目角色", "担任角色", "项目职责", "项目内职务", "课题角色"],
     项目名称: ["科研项目名称", "课题名称", "项目课题名称"],
@@ -418,7 +418,25 @@
     if (!l || !r) {
       return false;
     }
-    return l === r || l.includes(r) || r.includes(l);
+    if (l === r || l.includes(r) || r.includes(l)) {
+      return true;
+    }
+    // 年/月/日单位剥离后比对：级联下拉选项「2001年」要能对上日期值
+    // 「2001-03-18」的前缀。仅当一侧带年/月/日单位时启用，且前缀长度≥2
+    // （防止「3日」之类单数字前缀误配「30-40K」）。
+    if (/[年月日]/.test(l) || /[年月日]/.test(r)) {
+      const stripUnits = (s) => s.replace(/年|月|日/g, "");
+      const lu = stripUnits(l);
+      const ru = stripUnits(r);
+      return (
+        Boolean(lu) &&
+        Boolean(ru) &&
+        (lu === ru ||
+          (lu.length >= 2 && ru.startsWith(lu)) ||
+          (ru.length >= 2 && lu.startsWith(ru)))
+      );
+    }
+    return false;
   }
 
   function setSelectValue(el, value) {
@@ -569,10 +587,27 @@
           continue;
         }
         // label 属于其他表单行（爬到公共祖先时抓到别人的 label）；
-        // 判据：二者无嵌套关系、且 label 所在行内还有其他控件（如勾选行）
-        if (container && containerSelector) {
+        // 判据：二者无嵌套关系、且 label 所在行内还有其他控件（如勾选行）。
+        // 行定位在选择器 miss 时回退通用行链（自研库的行类名不在适配器名单里）
+        if (container) {
           try {
-            const labelRow = labelEl.closest(containerSelector);
+            const genericRow = '.form-group,[class*="form-item"],[class*="field"],[class*="question"]';
+            let labelRow = null;
+            if (containerSelector) {
+              labelRow = labelEl.closest(containerSelector);
+            }
+            if (!labelRow) {
+              labelRow = labelEl.closest(genericRow);
+            }
+            // [class*="form-item"] 会子串命中 label 自身类名（aui-form-item__label），
+            // 定位到标签元素时向上取真正的表单行
+            if (
+              labelRow &&
+              labelRow.parentElement &&
+              labelRow.matches(labelSelector || LABEL_SELECTOR)
+            ) {
+              labelRow = labelRow.parentElement;
+            }
             if (
               labelRow &&
               labelRow !== container &&
@@ -613,6 +648,34 @@
         !/请输入|请选择|请填写/.test(first)
       ) {
         return norm(first, 30);
+      }
+    }
+    // 4.6) 组合控件继承：本行无标签且是可编辑文本输入，紧邻前一行是
+    // 「带标签 + 选择类控件」时继承其标签——覆盖「区号下拉+号码输入」
+    // 「国籍下拉+证件号输入」等前缀组合行（跨组件库通用，无站点代码）。
+    {
+      const isFreeText =
+        el instanceof HTMLInputElement &&
+        !el.readOnly &&
+        !["radio", "checkbox", "file"].includes(el.type || "text");
+      if (isFreeText && container) {
+        // 逐级向上找前兄弟行（容器可能是行内包装层），取第一个
+        // 「有标签文本 + 含选择类控件」的行
+        let node = container;
+        for (let hop = 0; node && hop < 3; hop += 1, node = node.parentElement) {
+          const sib = node.previousElementSibling;
+          if (!sib || !sib.querySelector) {
+            continue;
+          }
+          const lab = sib.querySelector(labelSelector || LABEL_SELECTOR);
+          const labText = lab ? norm(lab.textContent, 40) : "";
+          const sibIsChoiceRow = sib.querySelector(
+            'input[readonly],select,[role="combobox"],[class*="select"]'
+          );
+          if (labText && sibIsChoiceRow && !/^[+\d\s().-]+$/.test(labText)) {
+            return labText;
+          }
+        }
       }
     }
     // 5) placeholder 兜底（去掉「请输入/请选择/请填写」前缀后仍可作标签）
@@ -798,7 +861,7 @@
       } else if (tag === "input" && (type === "date" || type === "month")) {
         kind = "native-date";
       } else if (isCustomChoiceControl(el, container)) {
-        // 手机区号类前缀选择器：触发器为空或纯 +数字，且同行的正文输入框另有其人
+        // 手机区号类前缀选择器：触发器为空或纯 +数字，且正文输入框另有其人
         const trig = norm(el.value || el.textContent, 12);
         if (!trig || /^[+]\d{1,3}$/.test(trig)) {
           const row = container || el.parentElement;
@@ -808,6 +871,18 @@
             ].filter((x) => x !== el && x.offsetParent && x.type !== "file");
             if (siblings.length > 0) {
               continue;
+            }
+            // 跨行组合（华为 AUI 等）：区号下拉一行、无标签号码输入框在紧邻下一行。
+            // 仅限显式 +数字 区号——空触发器的普通下拉随处可见，不能因下一行
+            // 恰好是文本框就误杀（zhiye 学历下拉→毕业院校输入框即此反例）。
+            if (/^[+]\d{1,3}$/.test(trig)) {
+              const nextRow = neighborRow(row, "next");
+              const nextInput = nextRow
+                ? nextRow.querySelector('input:not([type="hidden"]):not([readonly])')
+                : null;
+              if (nextInput && nextInput.offsetParent) {
+                continue;
+              }
             }
           }
         }
@@ -1018,6 +1093,13 @@
     if (fieldAward !== entryAward && (fieldAward || entryAward)) {
       return 0;
     }
+    // 下拉类控件不吃自由文本强形状值：手机号/邮箱/身份证/URL 不可能出现在选项里
+    if (field.kind === "custom-choice" || field.kind === "select") {
+      const vs = valueShape(entry.value);
+      if (vs === "phone" || vs === "email" || vs === "idcard" || vs === "url") {
+        return 0;
+      }
+    }
     if (shapeConflict(field, entry)) {
       return 0;
     }
@@ -1158,10 +1240,76 @@
       usedEntries.add(c.ei);
       plan.push({ field: fields[c.fi], entry: entries[c.ei], score: c.score });
     }
+
+    // 合并填充：站点项目条目没有「项目链接」字段时，把档案里的项目地址
+    // 追加进描述文本（信息不丢，站点侧可点击复制的纯文本）。
+    {
+      const DESC_LABEL_RE =
+        /^(项目描述|工作内容|职责|工作职责|实习职责|项目详情|项目内容|描述)$/;
+      for (const item of plan) {
+        const cat = String(item.entry.category || "");
+        if (
+          item.entry.itemIndex == null ||
+          !DESC_LABEL_RE.test(item.entry.label || "") ||
+          !/经历$/.test(cat)
+        ) {
+          continue;
+        }
+        // 站点已有链接字段命中时不合并
+        const hasLinkField = plan.some(
+          (x) =>
+            x.entry.category === item.entry.category &&
+            x.entry.itemIndex === item.entry.itemIndex &&
+            /^(项目链接|项目地址|项目主页)$/.test(x.entry.label || "")
+        );
+        if (hasLinkField) {
+          continue;
+        }
+        for (const e of entries) {
+          if (
+            e.category === item.entry.category &&
+            e.itemIndex === item.entry.itemIndex &&
+            !usedEntries.has(e) &&
+            /^(项目链接)$/.test(e.label || "") &&
+            e.value
+          ) {
+            const desc = String(item.entry.value || "").trim();
+            // 单行控件（input）会被浏览器剥掉换行，用空格连接；多行控件保留换行
+            const el = item.field.element;
+            const joiner =
+              el instanceof HTMLTextAreaElement ||
+              (el && el.isContentEditable) ||
+              (el instanceof HTMLElement && el.getAttribute("role") === "textbox")
+                ? "\n"
+                : " ";
+            const tail = `项目地址：${e.value}`;
+            item.entry = {
+              ...item.entry,
+              value: desc ? `${desc}${joiner}${tail}` : tail,
+            };
+            break;
+          }
+        }
+      }
+    }
     return { plan, usedFields };
   }
 
   // ---------- 自定义下拉 ----------
+
+  /** 找相邻表单行：容器可能是行内 content/label 包装层（如 aui-form-item__content），
+   *  本级无兄弟时逐级向上（最多3跳）再取 prev/next 兄弟。 */
+  function neighborRow(container, dir, hops = 3) {
+    let node = container;
+    for (let i = 0; node && i < hops; i += 1) {
+      const sib = dir === "prev" ? node.previousElementSibling : node.nextElementSibling;
+      if (sib) {
+        return sib;
+      }
+      node = node.parentElement;
+    }
+    return null;
+  }
 
   function findChoiceFieldContainer(el, container) {
     let node = container || el;
@@ -1178,7 +1326,8 @@
 
   /** 收集当前可见弹层（portal 渲染的下拉/日历/级联）。
    *  高度门槛 60：Phoenix 会把每个 select 触发器也渲染成 32px 的
-   *  phoenix-unmodeled-layer 小条，真面板（下拉/日历）都在 200px+。 */
+   *  phoenix-unmodeled-layer 小条，真面板（下拉/日历）都在 200px+。
+   *  宽度门槛 36：性别等两字选项面板仅 ~50px 宽，不能按宽度误杀。 */
   function findPopupLayers() {
     const layers = [];
     for (const el of document.querySelectorAll(PANEL_SELECTOR)) {
@@ -1186,7 +1335,7 @@
         continue;
       }
       const r = el.getBoundingClientRect();
-      if (r.width < 60 || r.height < 60) {
+      if (r.width < 36 || r.height < 60) {
         continue;
       }
       // 跳过嵌套层：祖先弹层已覆盖
@@ -1298,6 +1447,37 @@
         return el;
       }
     }
+    // 通用内容指纹：不看组件库类名——浮层文本含「YYYY年M月」且带星期表头
+    // （连续5个以上曜日字符）或 20+ 日期格，即认定为日历面板。
+    // 覆盖自研组件库（如华为 AUI 的 aui-popover 不在任何类名名单里）。
+    const floating = document.querySelectorAll(
+      '[class*="pop"],[class*="picker"],[class*="calendar"],[class*="layer"],[class*="dropdown"]'
+    );
+    for (const el of floating) {
+      if (!isVisible(el)) {
+        continue;
+      }
+      const st = getComputedStyle(el);
+      if (!["fixed", "absolute"].includes(st.position)) {
+        continue;
+      }
+      const r = el.getBoundingClientRect();
+      if (r.width < 120 || r.height < 80) {
+        continue;
+      }
+      const text = norm(el.textContent, 400);
+      if (!/(\d{4})\s*年\s*(\d{1,2})\s*月/.test(text)) {
+        continue;
+      }
+      const compact = text.replace(/\s+/g, "");
+      const weekdayHeader = /[日一二三四五六]{5,}/.test(compact);
+      const cellCount = el.querySelectorAll(
+        'td,[class*="cell"],[class*="day"],[class*="date"]'
+      ).length;
+      if (weekdayHeader || cellCount >= 20) {
+        return el;
+      }
+    }
     return null;
   }
 
@@ -1307,8 +1487,15 @@
     return m ? [Number(m[1]), Number(m[2])] : null;
   }
 
-  async function clickCalendarArrow(panel, kind) {
-    const btn = panel.querySelector(`[class*="${kind}-year-btn"],[class*="${kind}-month-btn"]`);
+  async function clickCalendarArrow(panel, kind, unit) {
+    // 优先单位专属箭头（prev-year/prev-month，覆盖 ant 的 *-btn 与 AUI 的裸类名），
+    // 无单位区分的库退化为单箭头按月翻
+    let btn = panel.querySelector(`[class*="${kind}-${unit}"]`);
+    if (!btn) {
+      btn = panel.querySelector(
+        `[class*="${kind}-year-btn"],[class*="${kind}-month-btn"],[class*="${kind}"]`
+      );
+    }
     if (btn) {
       clickActionElement(btn);
       await sleep(140);
@@ -1328,11 +1515,26 @@
     const month = m[2] ? Number(m[2]) : null;
     const day = m[3] ? Number(m[3]) : null;
 
+    // 触发点击：优先输入框本身（多数库监听在 input 上），
+    // 无面板再补点包装层（部分库监听在 wrapper）
     const trigger =
-      field.element.closest('[class*="select"],[class*="date"],[class*="picker"]') || field.element;
+      field.element instanceof HTMLInputElement && !field.element.disabled
+        ? field.element
+        : field.element.closest('[class*="select"],[class*="date"],[class*="picker"]') ||
+          field.element;
     clickActionElement(trigger);
     await sleep(320);
+    if (!findCalendarPanel()) {
+      const wrap = trigger.closest('[class*="date"],[class*="picker"],[class*="select"]');
+      if (wrap && wrap !== trigger) {
+        clickActionElement(wrap);
+        await sleep(320);
+      }
+    }
     let panel = findCalendarPanel();
+    if (window.__AO_DEBUG__) {
+      console.log("[ao] date", field.label, "panel:", panel ? (panel.className || "").toString().slice(0, 40) : null);
+    }
     if (!panel) {
       return { ok: false, reason: "日历面板未出现" };
     }
@@ -1354,9 +1556,9 @@
         break;
       }
       if (cur[0] !== year) {
-        await clickCalendarArrow(panel, cur[0] > year ? "prev" : "next");
+        await clickCalendarArrow(panel, cur[0] > year ? "prev" : "next", "year");
       } else {
-        await clickCalendarArrow(panel, cur[1] > month ? "prev" : "next");
+        await clickCalendarArrow(panel, cur[1] > month ? "prev" : "next", "month");
       }
       guard += 1;
       await sleep(110);
@@ -1384,13 +1586,15 @@
       await sleep(180);
       return { ok: true };
     }
-    // 日格：叶子文本恰为日期数字（优先 td/cell/day 语义节点）
+    // 日格：文本以目标日数字开头（部分日历混排农历，如「13十四」）。
+    // ^N(\D|$) 防止 3 误配 13。
+    const dayPat = new RegExp(`^\\s*${day}(\\D|$)`);
     const dayNodes = Array.from(
       finalPanel.querySelectorAll('td,[class*="cell"],[class*="day"],[class*="date"]')
-    ).filter((n) => norm(n.textContent, 6) === String(day) && isVisible(n));
+    ).filter((n) => dayPat.test(norm(n.textContent, 12)) && isVisible(n));
     const target =
       dayNodes[0] ||
-      findVisibleChoiceOptions(finalPanel).find((o) => norm(o.textContent, 6) === String(day));
+      findVisibleChoiceOptions(finalPanel).find((o) => dayPat.test(norm(o.textContent, 12)));
     if (!target) {
       // 降级：值带日但控件是纯月份选择器 → 点月格
       const monCell = findVisibleChoiceOptions(finalPanel).find((o) => {
@@ -1418,8 +1622,11 @@
     const container = findChoiceFieldContainer(el, field.container);
     container.scrollIntoView({ block: "center", inline: "nearest" });
     clickActionElement(el instanceof Element ? el : container);
-    await sleep(260);
-    // 面板未出现时补点选择器包装层（点 form-item 容器会触发外部点击关闭）
+    // 自研组件库弹层有过渡动画（AUI ~300ms opacity）：先耐心等面板出现，
+    // 不能在动画期间误判「未打开」去补点 wrapper——那会把已开的面板点成关闭
+    for (let i = 0; i < 5 && findPopupLayers().length === 0; i += 1) {
+      await sleep(220);
+    }
     if (findPopupLayers().length === 0) {
       const wrapper =
         el instanceof Element
@@ -1427,11 +1634,20 @@
           : null;
       if (wrapper && wrapper !== el) {
         clickActionElement(wrapper);
-        await sleep(260);
+        for (let i = 0; i < 4 && findPopupLayers().length === 0; i += 1) {
+          await sleep(250);
+        }
       }
     }
 
     const options = findVisibleChoiceOptions(container);
+    if (window.__AO_DEBUG__) {
+      console.log(
+        "[ao] choice", field.label, "layers:", findPopupLayers().length,
+        "opts:", options.slice(0, 6).map((o) => norm(o.textContent, 10)),
+        "val:", String(value).slice(0, 12)
+      );
+    }
     const matched = options.find(
       (opt) =>
         choiceTextMatches(norm(opt.textContent, 60), value) ||
@@ -1443,11 +1659,16 @@
       return { ok: true };
     }
 
-    // 降级：向内层搜索框注入后重试（带搜索的自定义下拉）
-    const searchInput =
+    // 降级：向内层搜索框注入后重试（带搜索的自定义下拉）。
+    // readonly 触发器不是搜索框（纯下拉），注入只会污染显示值，跳过。
+    const rawSearch =
       el instanceof HTMLInputElement
         ? el
         : container.querySelector?.('input:not([type="hidden"]),textarea,[contenteditable="true"]');
+    const searchInput =
+      rawSearch && !(rawSearch instanceof HTMLInputElement && rawSearch.readOnly)
+        ? rawSearch
+        : null;
     if (searchInput) {
       setNativeValue(searchInput, value);
       await sleep(160);
@@ -2048,7 +2269,9 @@
       const expectTruncated = norm(expectValue, 400);
       const textVerified =
         readBackValue.includes(expectValue) ||
-        (expectValue.length > 400 && expectTruncated === readBackValue);
+        (expectValue.length > 400 && expectTruncated === readBackValue) ||
+        // 多行合并值（如「描述\n项目地址：…」）：回读会折叠空白，按同口径比对
+        norm(expectValue) === readBackValue;
       let verified =
         item.field.kind === "checkbox" ||
         result.trust ||
@@ -2063,6 +2286,7 @@
           readBackValue.includes(expectValue) ||
           (expectValue.length > 400 &&
             expectTruncated === readBackValue) ||
+          norm(expectValue) === readBackValue ||
           normDate(readBackValue).includes(normDate(expectValue));
       }
       const label = item.field.label || item.field.nearbyText || "(无标签)";
