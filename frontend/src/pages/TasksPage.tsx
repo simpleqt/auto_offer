@@ -123,7 +123,7 @@ export default function TasksPage() {
                 <List.Item
                   style={{
                     cursor: 'pointer',
-                    background: t.id === selectedId ? '#eef3ff' : undefined,
+                    background: t.id === selectedId ? 'var(--ao-selected)' : undefined,
                     borderInlineStart:
                       t.id === selectedId ? '3px solid #2e5be6' : '3px solid transparent',
                     paddingInlineStart: 10,

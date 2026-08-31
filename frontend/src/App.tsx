@@ -109,14 +109,14 @@ export default function App() {
       <Layout>
         <Header
           style={{
-            background: '#fff',
+            background: 'var(--ao-panel)',
             padding: '0 24px',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'space-between',
             height: 52,
             lineHeight: '52px',
-            borderBottom: '1px solid #eef0f4',
+            borderBottom: '1px solid var(--ao-line)',
           }}
         >
           <Typography.Title level={5} style={{ margin: 0 }}>

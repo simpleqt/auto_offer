@@ -314,3 +314,54 @@ footer {
   background: #cdd5e3;
   border-radius: 3px;
 }
+
+/* ---------- 深色（跟随系统外观，与桌面端「跟随系统」模式一致） ---------- */
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --brand: #7d9bff;
+    --brand-deep: #96b1ff;
+    --brand-pale: #1b2641;
+    --text: #e8eaf0;
+    --text-2: #9ca3b0;
+    --text-3: #6b7280;
+    --line: #2a2f3a;
+    --ok: #4ade80;
+    --ok-pale: #12261c;
+    --bad: #f87c78;
+    --bad-pale: #2b1513;
+  }
+
+  body {
+    background: #16181d;
+  }
+
+  select,
+  input[type="text"] {
+    background: #1f2329;
+    color: var(--text);
+  }
+
+  button.mini {
+    background: #232936;
+    color: var(--brand);
+  }
+
+  button.mini:hover:not(:disabled) {
+    background: #2c3444;
+  }
+
+  #report-list li.skipped::before {
+    background: #565d6b;
+  }
+
+  #log-view {
+    background: #1a1d23;
+    border-color: var(--line);
+    color: var(--text-2);
+  }
+
+  ::-webkit-scrollbar-thumb {
+    background: #3a3f4a;
+  }
+}

@@ -1,5 +1,28 @@
 :root {
   color-scheme: light;
+  /* 界面自定义色（antd 组件由主题算法接管，这里只管内联样式的少数硬编码色） */
+  --ao-panel: #ffffff;
+  --ao-line: #eef0f4;
+  --ao-selected: #eef3ff;
+  --ao-warn-bg: #fffbe6;
+  --ao-warn-line: #ffe58f;
+  --ao-warn-text: #d48806;
+  --ao-text-3: #999999;
+  --ao-pre-bg: #fafafa;
+  --ao-page-bg: #f5f7fb;
+}
+
+html[data-ao-theme='dark'] {
+  color-scheme: dark;
+  --ao-panel: #1f1f1f;
+  --ao-line: #2e2e2e;
+  --ao-selected: #1e2a4a;
+  --ao-warn-bg: #2b2616;
+  --ao-warn-line: #594b1a;
+  --ao-warn-text: #d9a017;
+  --ao-text-3: #8c8c8c;
+  --ao-pre-bg: #141414;
+  --ao-page-bg: #101216;
 }
 
 html,
@@ -15,7 +38,7 @@ body,
 }
 
 body {
-  background: #f5f7fb;
+  background: var(--ao-page-bg);
 }
 
 /* 细滚动条：内容区大量表单/表格滚动时更轻量 */
@@ -35,4 +58,12 @@ body {
 
 ::-webkit-scrollbar-track {
   background: transparent;
+}
+
+html[data-ao-theme='dark'] ::-webkit-scrollbar-thumb {
+  background: #3a3f4a;
+}
+
+html[data-ao-theme='dark'] ::-webkit-scrollbar-thumb:hover {
+  background: #4c5260;
 }

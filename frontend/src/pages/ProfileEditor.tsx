@@ -151,9 +151,9 @@ export default function ProfileEditor({ profile }: { profile: Profile }) {
           position: 'sticky',
           bottom: 0,
           zIndex: 2,
-          background: dirty ? '#fffbe6' : '#fff',
+          background: dirty ? 'var(--ao-warn-bg)' : 'var(--ao-panel)',
           padding: '12px 0',
-          borderTop: dirty ? '1px solid #ffe58f' : '1px solid #f0f0f0',
+          borderTop: dirty ? '1px solid var(--ao-warn-line)' : '1px solid var(--ao-line)',
           transition: 'background 0.2s',
         }}
       >
@@ -161,7 +161,7 @@ export default function ProfileEditor({ profile }: { profile: Profile }) {
           <Button type="primary" htmlType="submit" loading={saving}>
             保存档案
           </Button>
-          <span style={{ color: dirty ? '#d48806' : '#999', fontSize: 12 }}>
+          <span style={{ color: dirty ? 'var(--ao-warn-text)' : 'var(--ao-text-3)', fontSize: 12 }}>
             {dirty ? '● 有未保存的修改（Ctrl+S 保存）' : 'Ctrl+S 可快速保存；切换页面会提醒未保存'}
           </span>
         </Space>

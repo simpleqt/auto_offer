@@ -44,7 +44,10 @@ async function refreshStatus() {
     for (const p of status.profiles || []) {
       const opt = document.createElement("option");
       opt.value = p.id;
-      opt.textContent = p.name ? `${p.label}（${p.name}）` : p.label;
+      const base = p.name ? `${p.label}（${p.name}）` : p.label;
+      // 完整度随档案名展示：选档案时即可判断这份档案够不够填
+      opt.textContent =
+        p.completeness != null ? `${base} · ${p.completeness}%` : base;
       sel.appendChild(opt);
     }
     sel.disabled = sel.options.length === 0;

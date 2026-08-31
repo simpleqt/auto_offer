@@ -17,12 +17,21 @@ import { SaveOutlined } from '@ant-design/icons';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { getSettings, health, putSettings } from '../api/client';
 import type { AppSettings } from '../api/types';
+import { useThemeMode } from '../theme';
+import type { ThemeMode } from '../theme';
+
+const THEME_OPTIONS: { value: ThemeMode; label: string }[] = [
+  { value: 'auto', label: '跟随系统' },
+  { value: 'light', label: '浅色' },
+  { value: 'dark', label: '深色' },
+];
 
 export default function SettingsPage() {
   const qc = useQueryClient();
   const { data } = useQuery({ queryKey: ['health'], queryFn: health });
   const { data: settings } = useQuery({ queryKey: ['settings'], queryFn: getSettings });
   const [form] = Form.useForm<AppSettings>();
+  const { mode: themeMode, setMode: setThemeMode } = useThemeMode();
 
   useEffect(() => {
     if (settings) form.setFieldsValue(settings);
@@ -158,6 +167,21 @@ export default function SettingsPage() {
           保存设置
         </Button>
       </Form>
+
+      <Card title="外观" style={{ marginBottom: 16 }}>
+        <Radio.Group
+          optionType="button"
+          buttonStyle="solid"
+          value={themeMode}
+          onChange={(e) => setThemeMode(e.target.value as ThemeMode)}
+          options={THEME_OPTIONS}
+        />
+        <div style={{ marginTop: 8 }}>
+          <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+            深色模式即时生效；「跟随系统」会随 Windows 主题自动切换。插件弹窗跟随系统外观。
+          </Typography.Text>
+        </div>
+      </Card>
 
       <Card title="本地服务">
         <Descriptions column={2} size="small">

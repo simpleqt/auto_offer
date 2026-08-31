@@ -147,7 +147,12 @@ async function handleStatus() {
       ok: true,
       base,
       version: health.version,
-      profiles: (profiles || []).map((p) => ({ id: p.id, label: p.label, name: p.name })),
+      profiles: (profiles || []).map((p) => ({
+        id: p.id,
+        label: p.label,
+        name: p.name,
+        completeness: typeof p.completeness === "number" ? p.completeness : null,
+      })),
     };
   } catch (err) {
     return { ok: false, base, error: String((err && err.message) || err) };

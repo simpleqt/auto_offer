@@ -153,7 +153,7 @@ export default function ProfilesPage() {
                 <List.Item
                   style={{
                     cursor: 'pointer',
-                    background: p.id === selectedId ? '#eef3ff' : undefined,
+                    background: p.id === selectedId ? 'var(--ao-selected)' : undefined,
                     borderInlineStart:
                       p.id === selectedId ? '3px solid #2e5be6' : '3px solid transparent',
                     paddingInlineStart: 10,

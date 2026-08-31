@@ -115,7 +115,7 @@ export default function ReplayPage() {
                     style={{
                       marginTop: 12,
                       fontSize: 12,
-                      background: '#fafafa',
+                      background: 'var(--ao-pre-bg)',
                       padding: 8,
                       overflow: 'auto',
                     }}
