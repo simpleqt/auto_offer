@@ -1757,8 +1757,10 @@
         return choiceTextMatches(t, target);
       });
       if (exact) {
-        dispatchPointerSeq(exact);
-        await sleep(240);
+        clickOptionIcon(exact); // 级联叶子也要打图标热区（新版组件监听在 icon-container）
+        await sleep(320);
+        // 级联面板同样是「选择+确定」两段式：叶子选中后补点确定（面板已自动关则跳过）
+        await confirmPanelIfOpen(exact);
         return { ok: true };
       }
       // 前缀选项：选项文本是剩余值的开头，且点完还有 ≥2 字符的下层
@@ -1769,8 +1771,26 @@
       if (!prefix) {
         return null;
       }
-      dispatchPointerSeq(prefix.o);
+      // 点击热区双保险：先打图标（新版组件），层内容未变再补打文本（旧版热区）
+      const layerBefore = norm(
+        ((findPopupLayers().find((l) => l.contains(prefix.o)) || {}).textContent || ""),
+        200
+      );
+      clickOptionIcon(prefix.o);
       await sleep(800); // 等层切换渲染（面包屑/子列表）
+      let layerNow = "";
+      const layersNow = findPopupLayers();
+      if (layersNow.length) {
+        layerNow = norm(
+          (layersNow.find((l) => l.contains(prefix.o)) || layersNow[layersNow.length - 1])
+            .textContent || "",
+          200
+        );
+      }
+      if (layerNow === layerBefore && layersNow.length) {
+        dispatchPointerSeq(prefix.o);
+        await sleep(800);
+      }
       remaining = remaining.slice(prefix.t.length);
     }
     return null;
