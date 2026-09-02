@@ -1772,6 +1772,37 @@
     return null;
   }
 
+  /**
+   * 日期策略链尾：面板操作全部失败时退回直接键入格式串——
+   * 可编辑 input 的库（phoenix-select--editable 等）会自行解析。
+   * 依次尝试 YYYY-MM[-DD] / YYYY/MM / YYYY年M月，均无效返回 null。
+   */
+  async function tryDirectDateInput(field, value) {
+    const m = String(value).match(/^(\d{4})(?:-(\d{1,2}))?(?:-(\d{1,2}))?$/);
+    if (!m) {
+      return null;
+    }
+    const el = field.element;
+    if (!(el instanceof HTMLInputElement) || el.readOnly || el.disabled) {
+      return null;
+    }
+    const p2 = (n) => String(n).padStart(2, "0");
+    const [, y, mo, d] = m;
+    const formats = d
+      ? [`${y}-${p2(mo)}-${p2(d)}`, `${y}/${p2(mo)}/${p2(d)}`, `${y}年${mo}月${d}日`]
+      : [`${y}-${p2(mo)}`, `${y}/${p2(mo)}`, `${y}年${mo}月`];
+    for (const fmt of formats) {
+      setNativeValue(el, fmt);
+      await sleep(320);
+      const v = norm(el.value, 30);
+      if (/\d{4}/.test(v) && v) {
+        return { ok: true };
+      }
+    }
+    setNativeValue(el, "");
+    return null;
+  }
+
   async function tryFillCustomChoiceField(field, value) {
     const el = field.element;
     const container = findChoiceFieldContainer(el, field.container);
@@ -2018,6 +2049,11 @@
           const choice = await tryFillCustomChoiceField(field, entry.value);
           if (choice.ok) {
             return choice;
+          }
+          // 策略链尾：面板全败后退回直接键入（可编辑 input 的库会自行解析）
+          const direct = await tryDirectDateInput(field, entry.value);
+          if (direct) {
+            return direct;
           }
           return { ok: false, reason: `日历:${cal.reason}；下拉:${choice.reason}` };
         }
@@ -2462,36 +2498,36 @@
           d ? `${y}-${mo}-${d}` : `${y}-${mo}`
         )
         .replace(/-/g, "");
-    for (const item of plan) {
+    // 回读校验统一口径（主循环与自愈回路共用）
+    const verifyReadBack = (item, expectValue) => {
+      refreshField(item, adapter);
+      let v = readBack(item.field);
+      if (
+        v.includes(expectValue) ||
+        (expectValue.length > 400 && norm(expectValue, 400) === v) ||
+        norm(expectValue) === v ||
+        normDate(v).includes(normDate(expectValue))
+      ) {
+        return true;
+      }
+      return false;
+    };
+    const execAndVerify = async (item) => {
       const wasPrefilled = Boolean(item.field.currentValue && item.field.currentValue.length > 0);
       const result = await fillOne(item, adapter);
-      refreshField(item, adapter);
-      let readBackValue = readBack(item.field);
-      // 长文本（项目/自我评价 400+ 字）回读被 norm 截断：按同口径截断后再比对
-      const expectValue = String(item.entry.value);
-      const expectTruncated = norm(expectValue, 400);
-      const textVerified =
-        readBackValue.includes(expectValue) ||
-        (expectValue.length > 400 && expectTruncated === readBackValue) ||
-        // 多行合并值（如「描述\n项目地址：…」）：回读会折叠空白，按同口径比对
-        norm(expectValue) === readBackValue;
       let verified =
         item.field.kind === "checkbox" ||
         result.trust ||
-        textVerified ||
-        normDate(readBackValue).includes(normDate(expectValue));
+        verifyReadBack(item, String(item.entry.value));
       // 文本类回读竞态：React 提交有延迟，稍候重读一次
       if (!verified && result.ok) {
         await sleep(280);
-        refreshField(item, adapter);
-        readBackValue = readBack(item.field);
-        verified =
-          readBackValue.includes(expectValue) ||
-          (expectValue.length > 400 &&
-            expectTruncated === readBackValue) ||
-          norm(expectValue) === readBackValue ||
-          normDate(readBackValue).includes(normDate(expectValue));
+        verified = verifyReadBack(item, String(item.entry.value));
       }
+      return { result, verified, wasPrefilled };
+    };
+    for (const item of plan) {
+      const { result, verified, wasPrefilled } = await execAndVerify(item);
       const label = item.field.label || item.field.nearbyText || "(无标签)";
       if (result.ok && verified) {
         filled.push({
@@ -2501,11 +2537,17 @@
           ...(wasPrefilled ? { corrected: true, oldValue: String(item.field.currentValue).slice(0, 40) } : {}),
         });
       } else if (result.ok) {
-        failed.push({ label, field: label, value: item.entry.value, reason: "已执行但回读不一致" });
+        failed.push({
+          label, field: label,
+          occurrence: item.field.occurrenceIndex || 0,
+          value: item.entry.value,
+          reason: "已执行但回读不一致",
+        });
       } else {
         const row = {
           label,
           field: label,
+          occurrence: item.field.occurrenceIndex || 0,
           value: item.entry.value,
           reason: result.reason || "执行失败",
         };
@@ -2525,6 +2567,59 @@
         failed.push(row);
       }
       await sleep(30);
+    }
+
+    // ---------- 复查-自愈回路 ----------
+    // 首轮失败/回读不一致的字段重扫重试一轮：React 重渲染、面板时序、
+    // 草稿恢复都可能让第二次成功（上限一轮，防止在死控件上空转）。
+    if (failed.length > 0 && !(options && options.noSelfHeal)) {
+      await sleep(500);
+      const retryKeys = new Set(
+        failed.map((r) => `${r.field}#${r.occurrence || 0}`)
+      );
+      const freshScan = scanFields(adapter);
+      // 首轮搜索降级可能把值留在 input 里但组件未接收——重试字段无视 currentValue，
+      // 否则「值一致跳过」会让自愈误判已成功
+      for (const f of freshScan.fields) {
+        if (retryKeys.has(`${f.label}#${f.occurrenceIndex || 0}`)) {
+          f.currentValue = "";
+        }
+      }
+      const freshPlan = buildPlan(
+        freshScan.fields,
+        buildEntries(flatProfile),
+        mapping,
+        options
+      ).plan;
+      for (const ovLabel of Object.keys(overrides)) {
+        const it = freshPlan.find((p) => p.field.label === ovLabel);
+        if (it) {
+          it.entry = { ...it.entry, value: String(overrides[ovLabel]) };
+        }
+      }
+      const healedLabels = new Set();
+      for (const item of freshPlan) {
+        const key = `${item.field.label}#${item.field.occurrenceIndex || 0}`;
+        if (!retryKeys.has(key)) {
+          continue;
+        }
+        const { result, verified } = await execAndVerify(item);
+        if (result.ok && verified) {
+          healedLabels.add(key);
+          filled.push({
+            label: item.field.label,
+            field: item.field.label,
+            value: String(item.entry.value).slice(0, 60),
+            via: "自愈重试",
+          });
+        }
+      }
+      for (let i = failed.length - 1; i >= 0; i -= 1) {
+        const r = failed[i];
+        if (healedLabels.has(`${r.field}#${r.occurrence || 0}`)) {
+          failed.splice(i, 1);
+        }
+      }
     }
 
     const skipped = [];
@@ -2608,6 +2703,25 @@
       }
     }
 
+    // 页面校验错误提示（填写后表单自己标红的反馈，供界面展示与人工核查）
+    const formErrors = [];
+    for (const el of document.querySelectorAll(
+      '[class*="error"],[class*="invalid"],[class*="form-item-error"]'
+    )) {
+      if (!isVisible(el) || formErrors.length >= 10) {
+        continue;
+      }
+      const t = norm(el.textContent, 60);
+      if (
+        t.length >= 4 &&
+        t.length <= 60 &&
+        !formErrors.includes(t) &&
+        /请|必填|必选|不能为空|格式|错误|无效|不正确|至少|超过/.test(t)
+      ) {
+        formErrors.push(t);
+      }
+    }
+
     return {
       site: adapter ? { id: adapter.id, name: adapter.name, confidence: adapter.confidence } : null,
       counts: { filled: filled.length, failed: failed.length, skipped: skipped.length },
@@ -2615,6 +2729,7 @@
       failed,
       skipped,
       unmatched,
+      formErrors,
       optionFields,
       // 供 background 上报投递记录（服务端按 URL 去重更新）
       pageTitle: document.title,

@@ -726,3 +726,33 @@ async def test_phoenix_month_picker_and_area_cascade(page: Page) -> None:
     assert await page.input_value("#start-input") == "2024-09"
     # 级联：首层选项「四川省」只是值前缀 → 点开下层 → 「德阳市」补全
     assert await page.input_value("#jiguan-input") == "四川省德阳市"
+
+
+async def test_self_heal_retry_recovers_lazy_panel(page: Page) -> None:
+    """自愈回路：首轮失败（懒加载面板首开无选项）的字段，重扫重试一轮后成功。"""
+    await page.goto(fixture_url("phoenix_form.html"))
+    report = await autofill(page, {
+        "schema": 1,
+        "profile": {"id": "demo", "label": "示例"},
+        "sections": [{"key": "basic", "title": "基本信息", "kind": "simple", "values": {
+            "期望城市": "成都市",
+        }}],
+    })
+    assert report["counts"]["failed"] == 0, report["failed"]
+    assert await page.input_value("#city-input") == "成都市"
+    healed = [r for r in report["filled"] if r.get("via") == "自愈重试"]
+    assert healed, report["filled"]
+
+
+async def test_self_heal_disabled_by_option(page: Page) -> None:
+    """noSelfHeal 关闭自愈：懒加载字段保持失败（供上层编排自行重试）。"""
+    await page.goto(fixture_url("phoenix_form.html"))
+    report = await autofill(page, {
+        "schema": 1,
+        "profile": {"id": "demo", "label": "示例"},
+        "sections": [{"key": "basic", "title": "基本信息", "kind": "simple", "values": {
+            "期望城市": "成都市",
+        }}],
+    }, {"noSelfHeal": True})
+    assert report["counts"]["failed"] == 1, report
+    assert await page.input_value("#city-input") == ""

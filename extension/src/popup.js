@@ -25,7 +25,7 @@ async function loadTab() {
     activeTab && activeTab.url && /^https?:/i.test(activeTab.url)
   );
   $("hint").textContent = fillable
-    ? "点击「开始填写」将申请页面授权并自动填写。"
+    ? "点「开始填写」或按 Alt+F 快捷键一键填写（用当前选定档案）。"
     : "当前页面不可注入（仅支持 http/https 页面）。";
   return fillable;
 }
@@ -175,19 +175,40 @@ function renderReport(report) {
   $("report").classList.remove("hidden");
   const counts = report.counts || {};
   const site = report.site ? report.site.name : "";
+  // 填充率口径：已填 + 站点已有值跳过（同为「页面该字段有正确值」）÷ 应填总数
+  const prefilled = (report.skipped || []).filter((r) =>
+    /已有值/.test(String(r.reason || ""))
+  ).length;
+  const denom = (counts.filled || 0) + (counts.failed || 0) + prefilled;
+  const rate = denom > 0 ? Math.round((((counts.filled || 0) + prefilled) / denom) * 100) : 0;
+  const rateColor = rate >= 80 ? "var(--ok, #52c41a)" : rate >= 50 ? "var(--warn, #faad14)" : "var(--bad, #ff4d4f)";
+  $("rate-num").textContent = `${rate}%`;
+  $("rate-num").style.color = rateColor;
+  $("rate-detail").textContent = `${counts.filled || 0} 填对 · ${prefilled} 已有 · ${counts.failed || 0} 失败`;
   $("report-title").innerHTML =
     `<span class="badge ok">已填 ${counts.filled || 0}</span>` +
     `<span class="badge bad">失败 ${counts.failed || 0}</span>` +
     `<span class="badge skip">跳过 ${counts.skipped || 0}</span>` +
     (site ? `<span class="badge site">${site}</span>` : "");
+  const errBox = $("form-errors");
+  const formErrors = report.formErrors || [];
+  if (formErrors.length > 0) {
+    errBox.classList.remove("hidden");
+    errBox.innerHTML =
+      `<div class="err-title">页面校验提示（请人工核查）</div>` +
+      formErrors.map((t) => `<div class="err-item">⚠ ${t}</div>`).join("");
+  } else {
+    errBox.classList.add("hidden");
+  }
   const list = $("report-list");
   list.innerHTML = "";
+  const VIA_LABELS = { ai: "AI映射", 附件: "附件", 自愈重试: "自愈" };
   const rows = [
     ...(report.filled || []).map((r) => [
       "filled",
       r.label,
       ` = ${r.value}`,
-      r.via === "ai" ? "AI映射" : r.via === "附件" ? "附件" : "",
+      VIA_LABELS[r.via] || "",
     ]),
     ...(report.failed || []).map((r) => ["failed", r.label, `：${r.reason}`, ""]),
     ...(report.skipped || []).map((r) => ["skipped", r.field, `：${r.reason}`, ""]),

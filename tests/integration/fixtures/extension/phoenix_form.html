@@ -64,6 +64,15 @@
           </div>
         </div>
       </div>
+      <div class="form-item form-item--phoenix">
+        <div class="form-item__title"><label class="form-item__text">期望城市</label></div>
+        <div class="form-item__control">
+          <div class="phoenix-select phoenix-select--editable" id="citypick">
+            <div class="phoenix-select__placeHolder phoenix-select__placeHolder--show">请选择</div>
+            <input id="city-input" class="phoenix-select__input" type="text" />
+          </div>
+        </div>
+      </div>
     </form>
   </div>
 
@@ -118,6 +127,41 @@
         panel.className = "common-unmodeled-layer";
         document.body.appendChild(panel);
         render();
+      };
+      sel.addEventListener("mousedown", open);
+      sel.addEventListener("click", open);
+    })();
+
+    // ---------- 懒加载下拉：首次打开面板未渲染（不可见），第二次打开才有（驱动自愈回路） ----------
+    (() => {
+      const sel = document.getElementById("citypick");
+      const input = document.getElementById("city-input");
+      const ph = sel.querySelector(".phoenix-select__placeHolder");
+      const OPTS = ["成都市", "北京市", "上海市"];
+      let panel = null;
+      let opens = 0;
+      const open = () => {
+        if (!panel) {
+          panel = document.createElement("div");
+          panel.className = "common-unmodeled-layer";
+          document.body.appendChild(panel);
+        }
+        opens += 1;
+        if (opens < 3) {
+          panel.style.display = "none"; // 数据慢：首轮的打开/补点都不显示（驱动失败）
+          return;
+        }
+        panel.style.display = ""; // 自愈重试的打开：数据就绪，立即渲染
+        panel.innerHTML = OPTS.map(
+          (o) => `<div class="area-item"><span class="area-text-label">${o}</span></div>`
+        ).join("");
+        panel.querySelectorAll(".area-item").forEach((it) => {
+          it.addEventListener("mousedown", () => {
+            input.value = it.textContent.trim();
+            ph.style.display = "none";
+            panel.style.display = "none";
+          });
+        });
       };
       sel.addEventListener("mousedown", open);
       sel.addEventListener("click", open);

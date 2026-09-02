@@ -223,6 +223,19 @@ function buildOptionPicks(first, mapping, values) {
       picks.push({ label: fieldLabel, options, value });
     }
   }
+  // 回读不一致的固定选项字段（规则直填路径）：值与选项对不上时交给 AI 重挑，
+  // 例如档案「前10%」对选项「年级前5%/前10%/前20%」
+  for (const row of (first && first.failed) || []) {
+    if (seen.has(row.label) || !/回读不一致/.test(row.reason || "")) {
+      continue;
+    }
+    const options = optionsByLabel.get(row.label);
+    const value = row.value || values[row.label];
+    if (options && options.length > 1 && value && !options.some((o) => looseMatch(value, o))) {
+      seen.add(row.label);
+      picks.push({ label: row.label, options, value });
+    }
+  }
   return picks;
 }
 
@@ -427,3 +440,30 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   })();
   return true; // 异步响应
 });
+
+// 快捷键（默认 Alt+F）：用弹窗里上次选定的档案直接填当前页，免开弹窗。
+// 站点源权限沿用弹窗授权时的按需授予；未授权/未选档案时静默记日志。
+if (chrome.commands && chrome.commands.onCommand) {
+  chrome.commands.onCommand.addListener(async (command) => {
+    if (command !== "fill-now") {
+      return;
+    }
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    if (!tab || !tab.id || !tab.url || !/^https?:/i.test(tab.url)) {
+      await aoLog("warn", "fill.hotkey_skip", { reason: "页面不可注入" });
+      return;
+    }
+    const { aoProfileId } = await chrome.storage.local.get("aoProfileId");
+    if (!aoProfileId) {
+      await aoLog("warn", "fill.hotkey_skip", { reason: "未选择档案（先在弹窗选一次）" });
+      return;
+    }
+    await handleAutofill({
+      type: "ao:autofill",
+      tabId: tab.id,
+      url: tab.url,
+      profileId: aoProfileId,
+      sensitive: false,
+    });
+  });
+}

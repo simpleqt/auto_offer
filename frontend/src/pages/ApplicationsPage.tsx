@@ -2,12 +2,15 @@ import { useState } from 'react';
 import {
   Button,
   Card,
+  Col,
   Empty,
   Input,
   message,
   Popconfirm,
+  Row,
   Select,
   Space,
+  Statistic,
   Table,
   Tag,
   Typography,
@@ -20,6 +23,86 @@ import { APP_STATUS_COLORS, APP_STATUS_LABELS } from '../constants';
 import { fmtTime } from '../profile-utils';
 
 const STATUS_OPTIONS = Object.keys(APP_STATUS_LABELS) as ApplicationStatus[];
+
+/** 投递看板：总数、状态分布、近 7 天投递趋势（纯 CSS 条形，不引图表库）。 */
+function Dashboard({ rows }: { rows: ApplicationRecord[] }) {
+  const total = rows.length;
+  const counts = STATUS_OPTIONS.map((s) => ({
+    status: s,
+    n: rows.filter((r) => r.status === s).length,
+  })).filter((c) => c.n > 0);
+
+  const days: { label: string; n: number }[] = [];
+  const today = new Date();
+  for (let i = 6; i >= 0; i -= 1) {
+    const d = new Date(today);
+    d.setDate(d.getDate() - i);
+    const key = `${d.getMonth() + 1}/${d.getDate()}`;
+    const n = rows.filter((r) => {
+      const rd = new Date(r.filled_at);
+      return (
+        rd.getFullYear() === d.getFullYear() &&
+        rd.getMonth() === d.getMonth() &&
+        rd.getDate() === d.getDate()
+      );
+    }).length;
+    days.push({ label: key, n });
+  }
+  const maxDay = Math.max(1, ...days.map((d) => d.n));
+
+  return (
+    <Row gutter={[12, 12]} style={{ marginBottom: 16 }}>
+      <Col xs={8} md={5}>
+        <Statistic title="累计投递" value={total} />
+      </Col>
+      <Col xs={16} md={9}>
+        <div style={{ fontSize: 12, color: 'var(--ao-text-3, #888)', marginBottom: 6 }}>
+          状态分布
+        </div>
+        <Space size={6} wrap>
+          {counts.length === 0 && <Typography.Text type="secondary">暂无</Typography.Text>}
+          {counts.map((c) => (
+            <Tag key={c.status} color={APP_STATUS_COLORS[c.status]}>
+              {APP_STATUS_LABELS[c.status]} {c.n}
+            </Tag>
+          ))}
+        </Space>
+      </Col>
+      <Col xs={24} md={10}>
+        <div style={{ fontSize: 12, color: 'var(--ao-text-3, #888)', marginBottom: 6 }}>
+          近 7 天
+        </div>
+        <div style={{ display: 'flex', alignItems: 'flex-end', gap: 6, height: 56 }}>
+          {days.map((d) => (
+            <div
+              key={d.label}
+              title={`${d.label}：${d.n} 次`}
+              style={{
+                flex: 1,
+                height: `${Math.max(6, (d.n / maxDay) * 100)}%`,
+                background: 'var(--ao-selected, #2e5be6)',
+                opacity: d.n > 0 ? 0.85 : 0.25,
+                borderRadius: 3,
+                minHeight: 4,
+              }}
+            />
+          ))}
+        </div>
+        <div style={{ display: 'flex', gap: 6, marginTop: 2 }}>
+          {days.map((d, i) => (
+            <Typography.Text
+              key={d.label}
+              type="secondary"
+              style={{ flex: 1, fontSize: 10, textAlign: 'center' }}
+            >
+              {i === 3 ? d.label : d.label.split('/')[1]}
+            </Typography.Text>
+          ))}
+        </div>
+      </Col>
+    </Row>
+  );
+}
 
 /** 状态色点：Select 收起态与下拉项统一带色，扫一眼即可分辨投递阶段。 */
 function statusDot(color: string) {
@@ -51,6 +134,11 @@ export default function ApplicationsPage() {
   const { data, isLoading } = useQuery({
     queryKey: ['applications', filter],
     queryFn: () => listApplications(filter),
+  });
+  // 看板基于全量数据（列表可能带状态过滤）
+  const { data: all } = useQuery({
+    queryKey: ['applications', undefined],
+    queryFn: () => listApplications(undefined),
   });
 
   const update = useMutation({
@@ -152,15 +240,6 @@ export default function ApplicationsPage() {
     },
   ];
 
-  // 顶部统计：按状态聚合计数，跟踪求职进度
-  const counts = (data ?? []).reduce(
-    (acc, r) => {
-      acc[r.status] = (acc[r.status] ?? 0) + 1;
-      return acc;
-    },
-    {} as Record<string, number>,
-  );
-
   return (
     <Card
       title="投递列表"
@@ -175,16 +254,7 @@ export default function ApplicationsPage() {
         />
       }
     >
-      {(data ?? []).length > 0 && (
-        <Space size={8} wrap style={{ marginBottom: 16 }}>
-          <Typography.Text type="secondary">共 {data?.length} 条</Typography.Text>
-          {STATUS_OPTIONS.filter((s) => counts[s]).map((s) => (
-            <Tag key={s} color={APP_STATUS_COLORS[s]}>
-              {APP_STATUS_LABELS[s]} {counts[s]}
-            </Tag>
-          ))}
-        </Space>
-      )}
+      {(all ?? []).length > 0 && <Dashboard rows={all ?? []} />}
       <Table
         rowKey="id"
         loading={isLoading}

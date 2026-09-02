@@ -365,3 +365,58 @@ footer {
     background: #3a3f4a;
   }
 }
+
+/* ---------- 填充率大数字 + 页面校验提示 ---------- */
+.rate-box {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--line, #e5e7eb);
+  border-radius: 8px;
+  background: var(--panel, #f8fafc);
+  margin-bottom: 8px;
+}
+.rate-num {
+  font-size: 30px;
+  font-weight: 700;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+.rate-label {
+  font-size: 11px;
+  color: var(--text-3, #6b7280);
+  line-height: 1.5;
+}
+.rate-detail {
+  font-size: 11px;
+}
+.form-errors {
+  margin: 0 0 8px;
+  border: 1px solid #f5c26b;
+  background: #fffaf0;
+  border-radius: 8px;
+  padding: 8px 10px;
+  font-size: 12px;
+}
+.form-errors .err-title {
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+.form-errors .err-item {
+  color: #92600a;
+  line-height: 1.6;
+}
+@media (prefers-color-scheme: dark) {
+  .rate-box {
+    background: #23272f;
+    border-color: #3a3f4a;
+  }
+  .form-errors {
+    background: #2f2817;
+    border-color: #5c4a1e;
+  }
+  .form-errors .err-item {
+    color: #e5c07b;
+  }
+}
