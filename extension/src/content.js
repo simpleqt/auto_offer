@@ -1860,9 +1860,31 @@
     }
     const confirms = [...host.querySelectorAll("button,[class*=button],[class*=btn],div,span")]
       .filter((b) => b.children.length <= 2 && isVisible(b))
-      .filter((b) => /^(确定|确认|OK)$/.test(norm(b.textContent, 8)));
+      .filter((b) => /^(确定|确认|OK)$/.test(norm(b.textContent, 8)))
+      // 禁用态跳过（选中未落时按钮常为灰）
+      .filter((b) => {
+        const cls = String(b.className || "");
+        return !b.disabled && !/disabled/i.test(cls) && b.getAttribute("aria-disabled") !== "true";
+      });
     if (!confirms.length) {
-      return;
+      // 全部禁用：等 600ms 后重找一次（选中状态落地有时差）
+      await sleep(600);
+      const retryHost = findPopupLayers().find((l) => (opt ? l.contains(opt) : false)) || findPopupLayers()[0];
+      if (!retryHost) {
+        return;
+      }
+      confirms.push(
+        ...[...retryHost.querySelectorAll("button,[class*=button],[class*=btn],div,span")]
+          .filter((b) => b.children.length <= 2 && isVisible(b))
+          .filter((b) => /^(确定|确认|OK)$/.test(norm(b.textContent, 8)))
+          .filter((b) => {
+            const cls = String(b.className || "");
+            return !b.disabled && !/disabled/i.test(cls) && b.getAttribute("aria-disabled") !== "true";
+          })
+      );
+      if (!confirms.length) {
+        return;
+      }
     }
     // 按深度排序（深的优先），同链去重
     const uniq = confirms.filter((b, i) => !confirms.some((o, j) => j !== i && o.contains(b)));
@@ -1925,6 +1947,27 @@
     }
     clickOptionIcon(pick);
     await sleep(600);
+    // 选中确认：面板「已选 N/1」计数为 0 说明结果项没选上（时序/首次点击未达）——
+    // 重试一次（元素被 React 重建时重新查找）
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      const hostNow = findPopupLayers()[0];
+      if (!hostNow) {
+        break; // 面板已关（选中即提交型）
+      }
+      const m = (hostNow.textContent || "").match(/已选[^/]{0,8}\/\s*(\d+)/);
+      if (!m || Number(m[1]) > 0) {
+        break; // 无计数（普通面板）或已选中
+      }
+      const still = pick.isConnected ? pick : null;
+      const again = still || [...hostNow.querySelectorAll("div,span")]
+        .filter((e) => isVisible(e) && (e.textContent || "").includes(kw) && (e.textContent || "").trim().length <= 20)
+        .sort((a, b) => a.textContent.length - b.textContent.length)[0];
+      if (!again) {
+        break;
+      }
+      clickOptionIcon(again);
+      await sleep(550);
+    }
     await confirmPanelIfOpen(pick);
     return { ok: true, via: "面板搜索" };
   }
