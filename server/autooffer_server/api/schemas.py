@@ -153,10 +153,12 @@ class AppSettings(BaseModel):
 
 
 class MappingFieldIn(BaseModel):
-    """待映射的页面字段（仅标签/区块/选项文本，不含任何值）。"""
+    """待映射的页面字段（仅标签/区块/控件特征/选项文本，不含任何值）。"""
 
     label: str
     section: str | None = None
+    kind: str | None = None
+    placeholder: str | None = None
     options: list[str] = []
 
 

@@ -702,3 +702,27 @@ async def test_link_field_rejects_long_text(page: Page) -> None:
     # 同块其他字段不受影响
     assert await page.eval_on_selector_all(
         ".proj-name", "els => els.map(e => e.value)") == ["示例AI助手平台"]
+
+
+async def test_phoenix_month_picker_and_area_cascade(page: Page) -> None:
+    """北森 Phoenix 风格：月选择面板（12 月格 + 两套翻年箭头，首套无效）与
+    籍贯省市级联（首层选项只是值前缀，需逐层下钻）。真站 haige.zhiye.com 驱动。"""
+    await page.goto(fixture_url("phoenix_form.html"))
+    report = await autofill(page, {
+        "schema": 1,
+        "profile": {"id": "demo", "label": "示例"},
+        "sections": [
+            {"key": "basic", "title": "基本信息", "kind": "simple", "values": {
+                "姓名": "张三", "籍贯": "四川省德阳市",
+            }},
+            {"key": "education", "title": "教育经历", "kind": "repeat", "items": [
+                {"开始时间": "2024-09"},
+            ]},
+        ],
+    })
+    assert report["counts"]["failed"] == 0, report["failed"]
+    assert await page.input_value("#name") == "张三"
+    # 月面板：翻年箭头应跳过无效装饰箭头，2026 → 2024 后点 9 月格
+    assert await page.input_value("#start-input") == "2024-09"
+    # 级联：首层选项「四川省」只是值前缀 → 点开下层 → 「德阳市」补全
+    assert await page.input_value("#jiguan-input") == "四川省德阳市"

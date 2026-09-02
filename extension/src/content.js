@@ -1466,7 +1466,7 @@
         continue;
       }
       const text = norm(el.textContent, 400);
-      if (!/(\d{4})\s*年\s*(\d{1,2})\s*月/.test(text)) {
+      if (!/(\d{4})\s*年\s*(\d{1,2})\s*月/.test(text) && !/(\d{4})\s*年/.test(text)) {
         continue;
       }
       const compact = text.replace(/\s+/g, "");
@@ -1474,7 +1474,11 @@
       const cellCount = el.querySelectorAll(
         'td,[class*="cell"],[class*="day"],[class*="date"]'
       ).length;
-      if (weekdayHeader || cellCount >= 20) {
+      // 月面板特征：≥8 个「N月」叶子格（年月连写文本可能不出现）
+      const monthLike = Array.from(el.querySelectorAll("td,span,div,a")).filter(
+        (n) => n.children.length === 0 && isVisible(n) && /^\d{1,2}月$/.test(norm(n.textContent, 8))
+      ).length;
+      if (weekdayHeader || cellCount >= 20 || monthLike >= 8) {
         return el;
       }
     }
@@ -1487,6 +1491,49 @@
     return m ? [Number(m[1]), Number(m[2])] : null;
   }
 
+  /** 月面板（纯年月选择器）：含 ≥8 个「N月」格。Phoenix/antd 的 MonthPicker。 */
+  function detectMonthPanel(panel) {
+    return Array.from(
+      panel.querySelectorAll('[class*="month-panel-month"],[class*="month"],td,[class*="cell"]')
+    ).filter((n) => {
+      // 排除头部装饰（如 phoenix-calendar-month-select 也显示「9月」但不是格子）
+      const cls = String(n.className || "");
+      if (/(select|btn|head|header|nav)/i.test(cls)) {
+        return false;
+      }
+      return isVisible(n) && /^\d{1,2}月$/.test(norm(n.textContent, 8));
+    });
+  }
+
+  /** 月面板年读数：优先面板自身的年元素（Phoenix month-panel-year-select 显示「2026x」）。 */
+  function readMonthPanelYear(panel) {
+    const yEl = panel.querySelector('[class*="month-panel-year"]');
+    if (yEl) {
+      const m = norm(yEl.textContent, 12).match(/(\d{4})/);
+      if (m) {
+        return Number(m[1]);
+      }
+    }
+    const m2 = norm(panel.textContent, 400).match(/(\d{4})\s*年/);
+    return m2 ? Number(m2[1]) : null;
+  }
+
+  /** 月面板翻年：候选箭头逐个试，年读数变化才算成功（同一面板常渲染两套箭头）。 */
+  async function clickMonthPanelYearArrow(panel, kind) {
+    const before = readMonthPanelYear(panel);
+    for (const sel of [`[class*="month-panel-${kind}-year"]`, `[class*="${kind}-year"]`]) {
+      for (const btn of Array.from(panel.querySelectorAll(sel)).filter(isVisible)) {
+        dispatchPointerSeq(btn); // Phoenix 手势监听在 pointerdown，普通合成 click 不触发
+        await sleep(200);
+        const after = readMonthPanelYear(panel);
+        if (after !== null && after !== before) {
+          return true;
+        }
+      }
+    }
+    return false;
+  }
+
   async function clickCalendarArrow(panel, kind, unit) {
     // 优先单位专属箭头（prev-year/prev-month，覆盖 ant 的 *-btn 与 AUI 的裸类名），
     // 无单位区分的库退化为单箭头按月翻
@@ -1497,7 +1544,7 @@
       );
     }
     if (btn) {
-      clickActionElement(btn);
+      dispatchPointerSeq(btn); // Phoenix 手势监听在 pointerdown
       await sleep(140);
     }
   }
@@ -1539,8 +1586,51 @@
       return { ok: false, reason: "日历面板未出现" };
     }
 
+    // 月面板模式（纯年月选择器）：翻年到目标年后直接点「N月」格。
+    // 值带日也走此路径——月面板上日格不存在，日无意义。
+    {
+      const mpCells = detectMonthPanel(panel);
+      if (mpCells.length >= 8 && month !== null) {
+        let guard = 0;
+        while (guard < 30) {
+          guard += 1;
+          const fresh = findCalendarPanel();
+          if (fresh) {
+            panel = fresh;
+          }
+          const y = readMonthPanelYear(panel);
+          if (y === null || y === year) {
+            break;
+          }
+          const moved = await clickMonthPanelYearArrow(panel, y > year ? "prev" : "next");
+          if (!moved) {
+            break;
+          }
+          await sleep(120);
+        }
+        const y2 = readMonthPanelYear(panel);
+        if (y2 !== year) {
+          return { ok: false, reason: `月面板年未到位(${y2 ?? "?"})` };
+        }
+        const freshCells = detectMonthPanel(panel);
+        const cell = freshCells.find((c) => {
+          const t = norm(c.textContent, 8);
+          return t === `${month}月` || t === `${String(month).padStart(2, "0")}月`;
+        });
+        if (!cell) {
+          return { ok: false, reason: `月格 ${month} 未找到` };
+        }
+        dispatchPointerSeq(cell);
+        await sleep(220);
+        return { ok: true };
+      }
+    }
+
     let guard = 0;
     const maxSteps = 240;
+    // 日历（带日格）+ 纯年月值：以 1 日代填（组件需要具体日期，
+    // 否则会停在当前默认月——如「2027-06」被显示成 2027-09-06）
+    const effDay = day === null && detectMonthPanel(panel).length < 8 ? 1 : day;
     while (guard < maxSteps) {
       const fresh = findCalendarPanel();
       if (fresh) {
@@ -1551,7 +1641,7 @@
         break;
       }
       // 纯月份选择器只需年份到位（月份直接点格子）；日历需年月均到位
-      const ymOk = cur[0] === year && (day === null || cur[1] === month);
+      const ymOk = cur[0] === year && (effDay === null || cur[1] === month);
       if (ymOk) {
         break;
       }
@@ -1565,11 +1655,11 @@
     }
     const finalPanel = findCalendarPanel() || panel;
     const finalYm = readCalendarYm(finalPanel);
-    if (!finalYm || finalYm[0] !== year || (day !== null && finalYm[1] !== month)) {
+    if (!finalYm || finalYm[0] !== year || (effDay !== null && finalYm[1] !== month)) {
       return { ok: false, reason: `年月导航未到位(${finalYm ? finalYm.join("-") : "?"})` };
     }
 
-    if (day === null) {
+    if (effDay === null) {
       // 纯月份选择器：点月格（文本「9月」样式）
       const monCell = findVisibleChoiceOptions(finalPanel).find((o) => {
         const t = norm(o.textContent, 8);
@@ -1582,17 +1672,29 @@
       if (!monCell) {
         return { ok: false, reason: `月格 ${month} 未找到` };
       }
-      clickActionElement(monCell);
+      dispatchPointerSeq(monCell);
       await sleep(180);
       return { ok: true };
     }
     // 日格：文本以目标日数字开头（部分日历混排农历，如「13十四」）。
     // ^N(\D|$) 防止 3 误配 13。
-    const dayPat = new RegExp(`^\\s*${day}(\\D|$)`);
+    const dayPat = new RegExp(`^\\s*${effDay}(\\D|$)`);
+    // 排除跨月灰格（phoenix 的 next/prev-month-btn-day 等）：9 月面板里文本「1」
+    // 的第一格常是 10 月 1 日灰格，误点会得到错误的月份值。
+    const inMonth = (n) => {
+      for (let e = n; e && e !== finalPanel; e = e.parentElement) {
+        const cls = String(e.className || "");
+        if (/next-month|prev-month|outside|other-|muted|disabled/i.test(cls)) {
+          return false;
+        }
+      }
+      return true;
+    };
     const dayNodes = Array.from(
       finalPanel.querySelectorAll('td,[class*="cell"],[class*="day"],[class*="date"]')
     ).filter((n) => dayPat.test(norm(n.textContent, 12)) && isVisible(n));
     const target =
+      dayNodes.find(inMonth) ||
       dayNodes[0] ||
       findVisibleChoiceOptions(finalPanel).find((o) => dayPat.test(norm(o.textContent, 12)));
     if (!target) {
@@ -1606,15 +1708,63 @@
         );
       });
       if (monCell) {
-        clickActionElement(monCell);
+        dispatchPointerSeq(monCell);
         await sleep(180);
         return { ok: true };
       }
-      return { ok: false, reason: `日格 ${day} 未找到` };
+      return { ok: false, reason: `日格 ${effDay} 未找到` };
     }
-    clickActionElement(target);
+    dispatchPointerSeq(target);
     await sleep(180);
     return { ok: true };
+  }
+
+  /**
+   * 级联面板逐层下钻：值是多层串（如「四川省德阳市」），首层选项只是值的
+   * 前缀 → 点开该层，面板原地刷新出下层选项，逐层消耗剩余文本。
+   * 返回 null 表示不是级联场景（无前缀选项），交回上层走搜索降级。
+   */
+  async function drillCascadeChoice(value) {
+    // 全程在 norm 空间操作（与 choiceTextMatches 同口径），避免原始串与压缩串长度错位
+    let remaining = norm(String(value), 40);
+    for (let hop = 0; hop < 4; hop += 1) {
+      const layers = findPopupLayers();
+      if (!layers.length) {
+        return null;
+      }
+      const opts = findVisibleChoiceOptions(null).filter((o) =>
+        layers.some((l) => l.contains(o))
+      );
+      if (!opts.length) {
+        return null;
+      }
+      const target = norm(remaining, 40);
+      const exact = opts.find((o) => {
+        const t = norm(o.textContent, 40);
+        // 前缀选项（省）只负责展开下层，不算完成——完整值在下一层
+        if (target.startsWith(t) && target.length - t.length >= 2) {
+          return false;
+        }
+        return choiceTextMatches(t, target);
+      });
+      if (exact) {
+        dispatchPointerSeq(exact);
+        await sleep(240);
+        return { ok: true };
+      }
+      // 前缀选项：选项文本是剩余值的开头，且点完还有 ≥2 字符的下层
+      const prefix = opts
+        .map((o) => ({ o, t: norm(o.textContent, 40) }))
+        .filter((x) => x.t.length >= 2 && target.startsWith(x.t) && target.length - x.t.length >= 2)
+        .sort((a, b) => b.t.length - a.t.length)[0];
+      if (!prefix) {
+        return null;
+      }
+      dispatchPointerSeq(prefix.o);
+      await sleep(800); // 等层切换渲染（面包屑/子列表）
+      remaining = remaining.slice(prefix.t.length);
+    }
+    return null;
   }
 
   async function tryFillCustomChoiceField(field, value) {
@@ -1640,7 +1790,35 @@
       }
     }
 
-    const options = findVisibleChoiceOptions(container);
+    let options = findVisibleChoiceOptions(container);
+    const findChoiceMatch = (opts) =>
+      opts.find(
+        (opt) =>
+          choiceTextMatches(norm(opt.textContent, 60), value) ||
+          choiceTextMatches(opt.getAttribute("aria-label") || "", value)
+      );
+    let matched = findChoiceMatch(options);
+    if (!matched) {
+      // 选项懒加载时序：面板已开但列表异步渲染（北森籍贯省列表 ~1.5s 后才出现，
+      // 第一时间只能收到右侧「已选地区」栏）。带重试重收，也识别「选项是值前缀」
+      // 的级联场景（说明列表已就绪，交给下钻逻辑处理）。
+      const valText = norm(String(value), 40);
+      for (let i = 0; i < 3; i += 1) {
+        await sleep(550);
+        options = findVisibleChoiceOptions(container);
+        matched = findChoiceMatch(options);
+        if (matched) {
+          break;
+        }
+        const prefixReady = options.some((o) => {
+          const t = norm(o.textContent, 40);
+          return t.length >= 2 && valText.startsWith(t) && valText.length - t.length >= 2;
+        });
+        if (prefixReady) {
+          break;
+        }
+      }
+    }
     if (window.__AO_DEBUG__) {
       console.log(
         "[ao] choice", field.label, "layers:", findPopupLayers().length,
@@ -1648,15 +1826,26 @@
         "val:", String(value).slice(0, 12)
       );
     }
-    const matched = options.find(
-      (opt) =>
-        choiceTextMatches(norm(opt.textContent, 60), value) ||
-        choiceTextMatches(opt.getAttribute("aria-label") || "", value)
-    );
     if (matched) {
+      // 包含匹配可能只命中多层值的首层（值「四川省德阳市」匹配选项「四川省」）——
+      // 点它但视为级联展开，继续在下层找完整值；单层选中则原样返回成功。
+      const single = norm(matched.textContent, 40);
+      const multi = norm(String(value), 40);
+      if (multi.startsWith(single) && multi.length - single.length >= 2) {
+        const drilled = await drillCascadeChoice(value);
+        if (drilled) {
+          return drilled;
+        }
+      }
       clickActionElement(matched);
       await sleep(120);
       return { ok: true };
+    }
+
+    // 级联下钻：整串无匹配（首层选项不含值的任何包含关系时上面的 find 不命中）
+    const cascaded = await drillCascadeChoice(value);
+    if (cascaded) {
+      return cascaded;
     }
 
     // 降级：向内层搜索框注入后重试（带搜索的自定义下拉）。
@@ -1873,8 +2062,17 @@
         const display = scope.querySelector(
           '[class*="selection-item"],[class*="selected-item"],[class*="selectItem"],[class*="selected"]:not([class*="unselected"])'
         );
-        const text = norm(el.value || (display ? display.textContent : ""), 60);
-        if (text) {
+        // Phoenix：选中值显示在 ul.phoenix-select__content 的普通 li（inputWrapper 是搜索框）
+        const liDisplay = scope.querySelector(
+          'ul[class*="content"] > li:not([class*="input"])'
+        );
+        const text = norm(
+          el.value ||
+            (display ? display.textContent : "") ||
+            (liDisplay ? liDisplay.textContent : ""),
+          60
+        );
+        if (text && !/^请选择|^请输入/.test(text)) {
           return text;
         }
       }
@@ -2341,6 +2539,8 @@
           unmatched.push({
             label,
             section: f.section || "",
+            kind: f.kind || "",
+            placeholder: String((f.element && f.element.placeholder) || "").slice(0, 30),
             options: String(f.optionText || "")
               .split(/[\s,，、]+/)
               .filter(Boolean)

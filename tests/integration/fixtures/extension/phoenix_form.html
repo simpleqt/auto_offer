@@ -1,0 +1,179 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <title>示例公司 - 申请表（北森 Phoenix 风格）</title>
+  <style>
+    body { font: 14px/1.6 system-ui, "Microsoft YaHei"; padding: 24px; background: #f5f6f8; }
+    .card { max-width: 640px; margin: 0 auto; background: #fff; padding: 20px 28px; border-radius: 8px; }
+    .form-item { display: flex; margin-bottom: 16px; }
+    .form-item__title { width: 120px; text-align: right; padding-right: 12px; }
+    .form-item__text { color: #333; }
+    .form-item__control { flex: 1; position: relative; }
+    .phoenix-select { position: relative; width: 100%; }
+    .phoenix-select__input {
+      width: 100%; box-sizing: border-box; padding: 6px 10px;
+      border: 1px solid #d9d9d9; border-radius: 6px; outline: none;
+    }
+    .phoenix-select__placeHolder { color: #bfc3c7; position: absolute; left: 10px; top: 6px; pointer-events: none; }
+    .common-unmodeled-layer {
+      position: absolute; left: 160px; width: 280px; background: #fff; z-index: 1050;
+      border: 1px solid #e5e6eb; border-radius: 6px; box-shadow: 0 6px 16px rgba(0,0,0,.08); padding: 8px;
+    }
+    .phoenix-calendar-year-select { display: inline-block; padding: 2px 8px; cursor: pointer; font-weight: 600; }
+    .phoenix-calendar-month-panel-year-select { display: inline-block; padding: 2px 8px; font-weight: 600; }
+    .phoenix-calendar-prev-year-btn, .phoenix-calendar-next-year-btn,
+    .phoenix-calendar-month-panel-prev-year-btn, .phoenix-calendar-month-panel-next-year-btn {
+      display: inline-block; padding: 2px 8px; cursor: pointer; user-select: none;
+    }
+    .month-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; margin-top: 6px; }
+    .phoenix-calendar-month-panel-month { padding: 8px 0; text-align: center; cursor: pointer; }
+    .phoenix-calendar-month-panel-month:hover { background: #f0f5ff; }
+    .area-tab-item { display: inline-block; padding: 2px 10px; cursor: pointer; }
+    .phoenix-breadcrumb-text { color: #666; margin-right: 6px; }
+    .area-list { margin-top: 6px; }
+    .area-item { padding: 6px 8px; cursor: pointer; }
+    .area-item:hover { background: #f0f5ff; }
+    .area-text-label { display: inline-block; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h3>基本信息</h3>
+    <form id="the-form">
+      <div class="form-item form-item--phoenix">
+        <div class="form-item__title"><label class="form-item__text">姓名</label></div>
+        <div class="form-item__control"><input id="name" class="plain-input" type="text" /></div>
+      </div>
+      <div class="form-item form-item--phoenix">
+        <div class="form-item__title"><label class="form-item__text">籍贯</label></div>
+        <div class="form-item__control">
+          <div class="phoenix-select phoenix-select--editable" id="jiguan">
+            <div class="phoenix-select__placeHolder phoenix-select__placeHolder--show">请选择</div>
+            <input id="jiguan-input" class="phoenix-select__input" type="text" />
+          </div>
+        </div>
+      </div>
+      <h3>教育经历</h3>
+      <div class="form-item form-item--phoenix">
+        <div class="form-item__title"><label class="form-item__text">开始时间</label></div>
+        <div class="form-item__control">
+          <div class="phoenix-select phoenix-select--editable" id="monthpick">
+            <div class="phoenix-select__placeHolder phoenix-select__placeHolder--show">请选择</div>
+            <input id="start-input" class="phoenix-select__input" type="text" />
+          </div>
+        </div>
+      </div>
+    </form>
+  </div>
+
+  <script>
+    const AREA_DATA = {
+      "四川省": ["成都市", "自贡市", "德阳市", "绵阳市"],
+      "广东省": ["广州市", "深圳市", "珠海市"],
+    };
+
+    // ---------- Phoenix 月选择器：12 月格 + 两套翻年箭头（第一套是无效装饰） ----------
+    (() => {
+      const sel = document.getElementById("monthpick");
+      const input = document.getElementById("start-input");
+      const ph = sel.querySelector(".phoenix-select__placeHolder");
+      let year = 2026;
+      let panel = null;
+
+      const render = () => {
+        panel.innerHTML = `
+          <div class="mp-head">
+            <span class="phoenix-calendar-prev-year-btn">‹</span>
+            <span class="phoenix-calendar-year-select">${year}年</span><span class="phoenix-calendar-month-select">9月</span>
+            <span class="phoenix-calendar-next-year-btn">›</span>
+          </div>
+          <div class="mp-panel-head">
+            <span class="phoenix-calendar-month-panel-prev-year-btn">‹</span>
+            <span class="phoenix-calendar-month-panel-year-select">${year}x</span>
+            <span class="phoenix-calendar-month-panel-next-year-btn">›</span>
+          </div>
+          <div class="month-grid">
+            ${Array.from({ length: 12 }, (_, i) =>
+              `<span class="phoenix-calendar-month-panel-month">${i + 1}月</span>`).join("")}
+          </div>`;
+        // 只有 month-panel 箭头真正翻年；头部那套是装饰（复刻真站两套箭头陷阱）
+        panel.querySelector(".phoenix-calendar-month-panel-prev-year-btn")
+          .addEventListener("pointerdown", () => { year -= 1; render(); });
+        panel.querySelector(".phoenix-calendar-month-panel-next-year-btn")
+          .addEventListener("pointerdown", () => { year += 1; render(); });
+        panel.querySelectorAll(".phoenix-calendar-month-panel-month").forEach((cell) => {
+          // 真站月格只认指针序列（pointerdown），普通合成 click 不触发
+          cell.addEventListener("pointerdown", () => {
+            input.value = `${year}-${String(cell.textContent.replace("月", "")).padStart(2, "0")}`;
+            ph.style.display = "none";
+            panel.remove();
+            panel = null;
+          });
+        });
+      };
+      const open = () => {
+        if (panel) return;
+        panel = document.createElement("div");
+        panel.className = "common-unmodeled-layer";
+        document.body.appendChild(panel);
+        render();
+      };
+      sel.addEventListener("mousedown", open);
+      sel.addEventListener("click", open);
+    })();
+
+    // ---------- Phoenix 籍贯级联：省层 → 市层原地切换 ----------
+    (() => {
+      const sel = document.getElementById("jiguan");
+      const input = document.getElementById("jiguan-input");
+      const ph = sel.querySelector(".phoenix-select__placeHolder");
+      let panel = null;
+
+      const open = () => {
+        if (panel) return;
+        panel = document.createElement("div");
+        panel.className = "common-unmodeled-layer";
+        document.body.appendChild(panel);
+        renderProvince();
+      };
+      const renderProvince = () => {
+        panel.innerHTML = `
+          <div><span class="area-tab-item active">全国</span>
+          <span class="phoenix-breadcrumb-text">全部省市</span></div>
+          <div class="area-list">
+            ${Object.keys(AREA_DATA).map((p) =>
+              `<div class="area-item"><span class="area-text-label">${p}</span></div>`).join("")}
+          </div>`;
+        panel.querySelectorAll(".area-item").forEach((it) => {
+          // 北森手势监听 mousedown；层切换有渲染延迟（复刻真站时序）
+          it.addEventListener("mousedown", () => {
+            const prov = it.textContent.trim();
+            setTimeout(() => renderCity(prov), 600);
+          });
+        });
+      };
+      const renderCity = (prov) => {
+        panel.innerHTML = `
+          <div><span class="area-tab-item">全国</span>
+          <span class="phoenix-breadcrumb-text">全部省市</span>
+          <span class="phoenix-breadcrumb-text">${prov}</span></div>
+          <div class="area-list">
+            ${AREA_DATA[prov].map((c) =>
+              `<div class="area-item"><span class="area-text-label">${c}</span></div>`).join("")}
+          </div>`;
+        panel.querySelectorAll(".area-item").forEach((it) => {
+          it.addEventListener("mousedown", () => {
+            input.value = prov + it.textContent.trim();
+            ph.style.display = "none";
+            panel.remove();
+            panel = null;
+          });
+        });
+      };
+      sel.addEventListener("mousedown", open);
+      sel.addEventListener("click", open);
+    })();
+  </script>
+</body>
+</html>

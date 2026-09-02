@@ -223,7 +223,14 @@ async def map_fields_api(request: Request, body: MappingIn) -> dict[str, Any]:
     except LookupError as exc:
         raise HTTPException(503, f"映射需要可用的模型端点: {exc}") from exc
     page_fields = [
-        PageField(label=f.label, section=f.section, options=f.options) for f in body.fields
+        PageField(
+            label=f.label,
+            section=f.section,
+            kind=f.kind,
+            placeholder=f.placeholder,
+            options=f.options,
+        )
+        for f in body.fields
     ]
     matches = await map_fields(page_fields, flat, llm)
     return {"matches": [m.model_dump() for m in matches]}

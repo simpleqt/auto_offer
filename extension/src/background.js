@@ -266,7 +266,7 @@ async function handleAutofill(msg) {
     const unmatched = report.unmatched || [];
     const mapping = {};
     if (unmatched.length > 0 && msg.aiMapping !== false) {
-      await setProgress(`AI 映射 ${unmatched.length} 个字段…`);
+      await setProgress(`AI 映射 ${unmatched.length} 个字段…（本地模型较慢，请稍候）`);
       const mappingResp = await fetchJson(
         `${base}/api/v1/mapping`,
         {
@@ -274,7 +274,7 @@ async function handleAutofill(msg) {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ profile_id: msg.profileId, fields: unmatched }),
         },
-        60000
+        180000
       );
       for (const m of (mappingResp && mappingResp.matches) || []) {
         mapping[m.field_label] = m.profile_label;
@@ -331,7 +331,7 @@ async function handleAutofill(msg) {
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify({ picks }),
             },
-            60000
+            120000
           );
           for (const c of (choiceResp && choiceResp.choices) || []) {
             overrides[c.label] = c.option;

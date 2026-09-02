@@ -19,27 +19,34 @@ from pydantic import BaseModel
 
 log = structlog.get_logger(__name__)
 
-CONFIDENCE_FLOOR = 0.6
+CONFIDENCE_FLOOR = 0.55
 
 MAPPING_SYSTEM_PROMPT = """你是招聘表单的字段映射引擎。输入包含两部分：
-A. 招聘页面上的字段（label=标签，section=所属区块，options=候选选项）
+A. 招聘页面上的字段（label=标签，section=所属区块，kind=控件类型（select=下拉/date=日期/text=文本），placeholder=输入提示，options=候选选项）
 B. 求职者档案字段目录（label=标签，category=分区）
 
 任务：为 A 中每个字段找出 B 中语义相同或最接近的一个标签。
 
 规则：
-1. 只依据标签与选项的语义判断，不要臆造 B 中不存在的标签。
+1. 只依据标签、控件类型与选项的语义判断，不要臆造 B 中不存在的标签。
 2. 只输出 JSON：
    {"matches": [{"field": "A的label", "profile": "B的label", "confidence": 0到1}]}
 3. 没有对应关系或拿不准的字段不要输出。
-4. confidence 低于 0.7 的不要输出。
+4. confidence 低于 0.6 的不要输出。
 5. A 中明显不是个人信息的字段（搜索框、推荐码、验证码等）不要输出。
+6. 措辞不同不代表不匹配，常见同义对应要敢映射：
+   出生地/成长地/户口所在地/生源地 → 籍贯；毕业时间 → 教育经历的结束时间；
+   获奖/荣誉/奖学金 → 奖惩类字段；单位名称/实习单位 → 公司；职务名称 → 职位；
+   实习内容/工作内容 → 职责描述；掌握程度 → 技能相关字段。
+7. A 的字段与 B 的分区对应（如页面字段在「教育经历」区块，优先映射 B 的教育经历分区字段）。
 """
 
 
 class PageField(BaseModel):
     label: str
     section: str | None = None
+    kind: str | None = None
+    placeholder: str | None = None
     options: list[str] = []
 
 
