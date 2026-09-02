@@ -44,7 +44,7 @@ autooffer = "cli.main:app"
 autooffer-app = "app.launcher:main"
 
 [tool.setuptools.packages.find]
-where = ["core", "server", "cli", "app"]
+where = [".", "core", "server"]
 include = ["autooffer_core*", "autooffer_server*", "cli*", "app*"]
 
 [tool.pytest.ini_options]
