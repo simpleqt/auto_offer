@@ -423,7 +423,11 @@
     if (!l || !r) {
       return false;
     }
-    if (l === r || l.includes(r) || r.includes(l)) {
+    // ASCII 大小写不敏感：档案值「30k」要能对上选项「20-30K」
+    const fold = (s) => (/[a-z]/i.test(s) ? s.toLowerCase() : s);
+    const lf = fold(l);
+    const rf = fold(r);
+    if (lf === rf || lf.includes(rf) || rf.includes(lf)) {
       return true;
     }
     // 年/月/日单位剥离后比对：级联下拉选项「2001年」要能对上日期值
@@ -431,8 +435,8 @@
     // （防止「3日」之类单数字前缀误配「30-40K」）。
     if (/[年月日]/.test(l) || /[年月日]/.test(r)) {
       const stripUnits = (s) => s.replace(/年|月|日/g, "");
-      const lu = stripUnits(l);
-      const ru = stripUnits(r);
+      const lu = stripUnits(lf);
+      const ru = stripUnits(rf);
       return (
         Boolean(lu) &&
         Boolean(ru) &&
@@ -1873,7 +1877,7 @@
           return drilled;
         }
       }
-      clickActionElement(matched);
+      dispatchPointerSeq(matched); // Phoenix 选项监听 pointerdown，普通合成 click 不触发
       await sleep(120);
       return { ok: true };
     }
@@ -1882,6 +1886,26 @@
     const cascaded = await drillCascadeChoice(value);
     if (cascaded) {
       return cascaded;
+    }
+
+    // 多值拆分：值是顿号/分号分隔的多个候选（如「英语 CET-4、英语 CET-6」），
+    // 每个 token 都能在当前面板找到选项才逐个点选（多选标签控件）；
+    // 任一 token 无对应选项则不碰，避免在单选控件上误点多个。
+    const tokens = String(value)
+      .split(/[、;；]/)
+      .map((t) => t.trim())
+      .filter((t) => t.length >= 2);
+    if (tokens.length >= 2) {
+      const picks = tokens
+        .map((tk) => options.find((o) => choiceTextMatches(norm(o.textContent, 40), tk)))
+        .filter(Boolean);
+      if (picks.length === tokens.length) {
+        for (const p of picks) {
+          dispatchPointerSeq(p);
+          await sleep(340);
+        }
+        return { ok: true };
+      }
     }
 
     // 降级：向内层搜索框注入后重试（带搜索的自定义下拉）。
@@ -1904,7 +1928,7 @@
           choiceTextMatches(opt.getAttribute("aria-label") || "", value)
       );
       if (retryMatched) {
-        clickActionElement(retryMatched);
+        dispatchPointerSeq(retryMatched);
         await sleep(120);
         return { ok: true };
       }
