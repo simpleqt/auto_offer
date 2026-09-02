@@ -1347,6 +1347,18 @@
       if (r.width < 36 || r.height < 60) {
         continue;
       }
+      // 北森 phoenix 每个字段控件里都常驻一个"伪弹层"包装（phoenix-unmodeled-layer，
+      // 全部可见），上百个假层会污染 [0]/[length-1] 索引、搜索引擎框与宿主判定
+      //（星网真站实测）—— 只排除字段容器内非浮动定位的层
+      if (
+        el.closest(
+          '.ant-form-item,.el-form-item,.form-item,[class*="formItem"],[class*="FormItem"]'
+        )
+      ) {
+        if (getComputedStyle(el).position === "static") {
+          continue;
+        }
+      }
       // 跳过嵌套层：祖先弹层已覆盖
       if (layers.some((x) => x.contains(el))) {
         continue;
@@ -1836,7 +1848,10 @@
     for (let depth = 0; node && depth < 5; depth += 1, node = node.parentElement) {
       const icon = node.querySelector('[class*="icon-container"],[class*="icon"],svg');
       if (icon) {
-        dispatchPointerSeq(icon);
+        // 北森 phoenix 把 onClick 绑在 icon 容器的内层 svg 上，事件只向上冒泡，
+        // 点容器本身永远够不到处理器 —— 必须打最内层热区（实测星网真站）
+        const inner = icon.querySelector("svg") || icon;
+        dispatchPointerSeq(inner);
         return true;
       }
       if (node.matches('[class*="list-item-container"],li')) {
@@ -1886,11 +1901,30 @@
         return;
       }
     }
-    // 按深度排序（深的优先），同链去重
+    // 同链去重后向每个按钮的最深可见后代派发：真实点击命中的永远是最内层
+    // 元素再向上冒泡，而北森 phoenix 把 onClick 绑在 phoenix-button__wraper
+    // 内层（容器无处理器），从容器直接派发够不到（星网真站实测）
+    const deepestIn = (btn) => {
+      let best = btn;
+      let bestDepth = 0;
+      for (const d of btn.querySelectorAll("*")) {
+        if (!isVisible(d)) {
+          continue;
+        }
+        let depth = 0;
+        for (let n = d; n && n !== btn; n = n.parentElement) {
+          depth += 1;
+        }
+        if (depth > bestDepth) {
+          best = d;
+          bestDepth = depth;
+        }
+      }
+      return best;
+    };
     const uniq = confirms.filter((b, i) => !confirms.some((o, j) => j !== i && o.contains(b)));
     for (const btn of uniq.slice(0, 4)) {
-      const content = btn.querySelector('[class*="content"],span,div') || btn;
-      dispatchPointerSeq(content);
+      dispatchPointerSeq(deepestIn(btn));
       await sleep(450);
       if (findPopupLayers().length === 0) {
         return; // 面板已关 = 提交成功
@@ -1923,44 +1957,71 @@
       .split(/省|市|自治区|特别行政区/)
       .map((t) => t.trim())
       .filter((t) => t.length >= 2);
-    const kw = tokens[tokens.length - 1] || compactVal.slice(-3);
-    if (!kw) {
+    // 关键词候选：最末级优先；地区库常不含镇/街道级（星网真站籍贯「马祖镇」搜不到），
+    // 逐级降级到上一级行政区，降级命中时以 trust 标记跳过整串回读校验
+    const kws = [tokens[tokens.length - 1], ...tokens.slice(0, -1).reverse()]
+      .filter(Boolean)
+      .filter((t, i, a) => a.indexOf(t) === i);
+    if (!kws.length) {
       return null;
     }
-    setNativeValue(search, kw);
-    await sleep(900);
-    const layers2 = findPopupLayers();
-    const host = layers2[layers2.length - 1];
-    if (!host) {
-      return null;
+    let pick = null;
+    let usedKw = null;
+    let degraded = false;
+    const findPick = (kw) => {
+      const layers2 = findPopupLayers();
+      const host = layers2.find((l) => l.contains(search)) || layers2[layers2.length - 1];
+      if (!host) {
+        return null;
+      }
+      const cands = [...host.querySelectorAll("div,span")].filter(
+        (e) =>
+          isVisible(e) &&
+          (e.textContent || "").includes(kw) &&
+          (e.textContent || "").trim().length <= 20 &&
+          (e.textContent || "").trim().length > 0
+      );
+      // 结果行以面积最大的行容器优先（文本可能被高亮 <mark> 拆开，行容器才是热区祖先）
+      return cands.sort((a, b) => a.textContent.length - b.textContent.length)[0] || null;
+    };
+    for (const kw of kws) {
+      setNativeValue(search, kw);
+      // 搜索结果异步渲染（实测 ~1.2s+）：轮询等结果出现，避免固定等待不够
+      pick = null;
+      for (let i = 0; i < 6; i += 1) {
+        await sleep(500);
+        pick = findPick(kw);
+        if (pick) {
+          break;
+        }
+      }
+      if (pick) {
+        usedKw = kw;
+        degraded = kw !== kws[0];
+        break;
+      }
     }
-    const cands = [...host.querySelectorAll("div,span")].filter(
-      (e) =>
-        isVisible(e) &&
-        (e.textContent || "").includes(kw) &&
-        (e.textContent || "").trim().length <= 20 &&
-        (e.textContent || "").trim().length > 0
-    );
-    const pick = cands.sort((a, b) => a.textContent.length - b.textContent.length)[0];
     if (!pick) {
+      setNativeValue(search, "");
       return null;
     }
     clickOptionIcon(pick);
     await sleep(600);
     // 选中确认：面板「已选 N/1」计数为 0 说明结果项没选上（时序/首次点击未达）——
-    // 重试一次（元素被 React 重建时重新查找）
+    // 重试一次（元素被 React 重建时重新查找）。注意计数格式「已选地区0/1」，
+    // 分子是斜杠前的数字（旧正则抓到分母会误判已选中）
     for (let attempt = 0; attempt < 2; attempt += 1) {
-      const hostNow = findPopupLayers()[0];
+      const hostNow = findPopupLayers().find((l) => l.contains(pick));
       if (!hostNow) {
         break; // 面板已关（选中即提交型）
       }
-      const m = (hostNow.textContent || "").match(/已选[^/]{0,8}\/\s*(\d+)/);
+      const m = (hostNow.textContent || "").match(/已选[^0-9]{0,8}(\d+)\s*\/\s*\d+/);
       if (!m || Number(m[1]) > 0) {
         break; // 无计数（普通面板）或已选中
       }
       const still = pick.isConnected ? pick : null;
       const again = still || [...hostNow.querySelectorAll("div,span")]
-        .filter((e) => isVisible(e) && (e.textContent || "").includes(kw) && (e.textContent || "").trim().length <= 20)
+        .filter((e) => isVisible(e) && (e.textContent || "").includes(usedKw) && (e.textContent || "").trim().length <= 20)
         .sort((a, b) => a.textContent.length - b.textContent.length)[0];
       if (!again) {
         break;
@@ -1969,6 +2030,11 @@
       await sleep(550);
     }
     await confirmPanelIfOpen(pick);
+    // 降级命中（镇级搜不到落在区县）：站点可表达的最深层级，回读必然与整串
+    // 档案值不一致 —— trust 跳过严格校验，避免把「已尽力填对」误报为失败
+    if (degraded) {
+      return { ok: true, trust: true, via: `面板搜索(${usedKw})` };
+    }
     return { ok: true, via: "面板搜索" };
   }
 
@@ -2712,6 +2778,11 @@
       // 选项文本词序无关（如搜索结果「德阳市 四川省」对档案「四川省德阳市」）：
       // 去分隔后字符多重集一致即视为同一选项
       if (item.field.kind === "custom-choice" && v) {
+        // 级联/搜索面板提交后控件只显示叶子名（成华区），档案存全路径
+        //（四川省成都市成华区）—— 期望值以回读值结尾即视为一致（星网真站实测）
+        if (norm(expectValue).endsWith(norm(v)) && norm(v).length >= 2) {
+          return true;
+        }
         const bag = (s) =>
           norm(s, 80)
             .replace(/[\s,，、/·]/g, "")
