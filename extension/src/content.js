@@ -1849,7 +1849,8 @@
 
   /**
    * 两段式面板：选后面板未关 → 点「确定」提交（北森 constant-main 面板
-   * 是「选择+确定」两段式，不点确定值不落控件；phoenix-button__content 是真实热区）。
+   * 是「选择+确定」两段式，不点确定值不落控件）。按钮热区冗余尝试：
+   * content 深层 → 逐层外容器，点到面板关闭为止。
    */
   async function confirmPanelIfOpen(opt) {
     const layers = findPopupLayers();
@@ -1857,13 +1858,21 @@
     if (!host) {
       return;
     }
-    const confirm = [...host.querySelectorAll("button,[class*=button],[class*=btn],div,span")]
+    const confirms = [...host.querySelectorAll("button,[class*=button],[class*=btn],div,span")]
       .filter((b) => b.children.length <= 2 && isVisible(b))
-      .find((b) => /^(确定|确认|OK)$/.test(norm(b.textContent, 8)));
-    if (confirm) {
-      const content = confirm.querySelector('[class*="content"],span,div') || confirm;
+      .filter((b) => /^(确定|确认|OK)$/.test(norm(b.textContent, 8)));
+    if (!confirms.length) {
+      return;
+    }
+    // 按深度排序（深的优先），同链去重
+    const uniq = confirms.filter((b, i) => !confirms.some((o, j) => j !== i && o.contains(b)));
+    for (const btn of uniq.slice(0, 4)) {
+      const content = btn.querySelector('[class*="content"],span,div') || btn;
       dispatchPointerSeq(content);
-      await sleep(420);
+      await sleep(450);
+      if (findPopupLayers().length === 0) {
+        return; // 面板已关 = 提交成功
+      }
     }
   }
 
@@ -1871,6 +1880,53 @@
     clickOptionIcon(opt);
     await sleep(320);
     await confirmPanelIfOpen(opt);
+  }
+
+  /**
+   * 面板内搜索选择：area 级联等带搜索框的面板（「请在左侧选择地区」类），
+   * 直接搜索值的最末级（如「德阳」）→ 过滤结果里点匹配项（icon 热区）→ 点确定。
+   * 导航式面板点树只翻层不选中，搜索结果才是可选叶子。
+   */
+  async function searchPanelAndPick(value) {
+    const layers = findPopupLayers();
+    const search = layers
+      .map((l) => l.querySelector('input:not([type="hidden"])'))
+      .find(Boolean);
+    if (!search || search.readOnly) {
+      return null;
+    }
+    // 取值的最末级行政名：四川省德阳市 → 德阳
+    const compactVal = norm(String(value), 40);
+    const tokens = compactVal
+      .split(/省|市|自治区|特别行政区/)
+      .map((t) => t.trim())
+      .filter((t) => t.length >= 2);
+    const kw = tokens[tokens.length - 1] || compactVal.slice(-3);
+    if (!kw) {
+      return null;
+    }
+    setNativeValue(search, kw);
+    await sleep(900);
+    const layers2 = findPopupLayers();
+    const host = layers2[layers2.length - 1];
+    if (!host) {
+      return null;
+    }
+    const cands = [...host.querySelectorAll("div,span")].filter(
+      (e) =>
+        isVisible(e) &&
+        (e.textContent || "").includes(kw) &&
+        (e.textContent || "").trim().length <= 20 &&
+        (e.textContent || "").trim().length > 0
+    );
+    const pick = cands.sort((a, b) => a.textContent.length - b.textContent.length)[0];
+    if (!pick) {
+      return null;
+    }
+    clickOptionIcon(pick);
+    await sleep(600);
+    await confirmPanelIfOpen(pick);
+    return { ok: true, via: "面板搜索" };
   }
 
   async function tryFillCustomChoiceField(field, value) {
@@ -1942,6 +1998,11 @@
         if (drilled) {
           return drilled;
         }
+        // 导航式级联面板（点树只翻层不选中）：走「搜索末级→点结果→确定」
+        const searched = await searchPanelAndPick(value);
+        if (searched) {
+          return searched;
+        }
       }
       await clickChoiceOption(matched);
       return { ok: true };
@@ -1951,6 +2012,12 @@
     const cascaded = await drillCascadeChoice(value);
     if (cascaded) {
       return cascaded;
+    }
+
+    // 面板搜索：带搜索框的级联面板（省市区树导航式）直接搜末级点结果
+    const searched = await searchPanelAndPick(value);
+    if (searched) {
+      return searched;
     }
 
     // 多值拆分：值是顿号/分号分隔的多个候选（如「英语 CET-4、英语 CET-6」），
@@ -2599,6 +2666,19 @@
       ) {
         return true;
       }
+      // 选项文本词序无关（如搜索结果「德阳市 四川省」对档案「四川省德阳市」）：
+      // 去分隔后字符多重集一致即视为同一选项
+      if (item.field.kind === "custom-choice" && v) {
+        const bag = (s) =>
+          norm(s, 80)
+            .replace(/[\s,，、/·]/g, "")
+            .split("")
+            .sort()
+            .join("");
+        if (bag(v) === bag(expectValue)) {
+          return true;
+        }
+      }
       return false;
     };
     const execAndVerify = async (item) => {
@@ -2622,6 +2702,7 @@
         filled.push({
           label, field: label,
           value: String(item.entry.value).slice(0, 60),
+          ...(result.via ? { via: result.via } : {}),
           // 纠偏：覆盖了站点解析预填的乱值（原值与档案不一致）
           ...(wasPrefilled ? { corrected: true, oldValue: String(item.field.currentValue).slice(0, 40) } : {}),
         });

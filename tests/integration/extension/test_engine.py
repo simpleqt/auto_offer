@@ -756,3 +756,19 @@ async def test_self_heal_disabled_by_option(page: Page) -> None:
     }, {"noSelfHeal": True})
     assert report["counts"]["failed"] == 1, report
     assert await page.input_value("#city-input") == ""
+
+
+async def test_search_panel_pick_with_confirm(page: Page) -> None:
+    """搜索式 area 面板：导航树点击不选中，走「面板搜索末级 → 点结果 → 确定」链路。"""
+    await page.goto(fixture_url("phoenix_form.html"))
+    report = await autofill(page, {
+        "schema": 1,
+        "profile": {"id": "demo", "label": "示例"},
+        "sections": [{"key": "basic", "title": "基本信息", "kind": "simple", "values": {
+            "户口所在地": "四川省德阳市",
+        }}],
+    })
+    assert report["counts"]["failed"] == 0, report["failed"]
+    assert await page.input_value("#hukou-input") == "德阳市 四川省"
+    via = [r.get("via") for r in report["filled"]]
+    assert "面板搜索" in via, report["filled"]

@@ -73,6 +73,15 @@
           </div>
         </div>
       </div>
+      <div class="form-item form-item--phoenix">
+        <div class="form-item__title"><label class="form-item__text">户口所在地</label></div>
+        <div class="form-item__control">
+          <div class="phoenix-select phoenix-select--editable" id="hukoupick">
+            <div class="phoenix-select__placeHolder phoenix-select__placeHolder--show">请选择</div>
+            <input id="hukou-input" class="phoenix-select__input" type="text" />
+          </div>
+        </div>
+      </div>
     </form>
   </div>
 
@@ -127,6 +136,67 @@
         panel.className = "common-unmodeled-layer";
         document.body.appendChild(panel);
         render();
+      };
+      sel.addEventListener("mousedown", open);
+      sel.addEventListener("click", open);
+    })();
+
+    // ---------- 搜索式 area 面板（导航树+搜索框+确定）:驱动「面板搜索选择」路径 ----------
+    (() => {
+      const sel = document.getElementById("hukoupick");
+      const input = document.getElementById("hukou-input");
+      const ph = sel.querySelector(".phoenix-select__placeHolder");
+      const NAV = ["北京市", "四川省", "广东省"];           // 导航层(点击只翻页不选中)
+      const RESULTS = ["德阳市 四川省", "成都市 四川省"];   // 搜索结果(可选叶子)
+      let panel = null;
+      let selected = null;
+      const build = (items, isResult) => {
+        panel.innerHTML = `
+          <div class="area-search-input"><input type="text" placeholder="搜索地区" /></div>
+          <div class="left-container">${items
+            .map(
+              (t) =>
+                `<div class="list-item-container"><span class="icon-container"><svg width="14" height="14"></svg></span><span class="item-text-label"><span>${t}</span></span></div>`
+            )
+            .join("")}</div>
+          <div class="right-container">已选地区${selected ? 1 : 0}/1</div>
+          <div class="area-footer-button"><div class="button-container"><span>取消</span></div><div class="button-container"><span>确定</span></div></div>`;
+        const searchInp = panel.querySelector(".area-search-input input");
+        searchInp.addEventListener("input", () => {
+          const kw = searchInp.value.trim();
+          if (!kw) { build(NAV, false); return; }
+          build(RESULTS.filter((t) => t.includes(kw)), true);
+          panel.querySelector(".area-search-input input").value = kw;
+          panel.querySelector(".area-search-input input").focus();
+        });
+        panel.querySelectorAll(".list-item-container").forEach((it) => {
+          if (!isResult) return; // 导航项点击无效果(树)
+          it.addEventListener("pointerdown", () => {
+            selected = it.textContent.trim();
+            panel.querySelector(".right-container").textContent = `已选地区1/1 ${selected}`;
+            it.style.background = "#e6f4ff";
+          });
+        });
+        [...panel.querySelectorAll(".button-container")].forEach((b) => {
+          b.addEventListener("pointerdown", () => {
+            if (b.textContent.trim() === "确定" && selected) {
+              input.value = selected;
+              ph.style.display = "none";
+              panel.remove();
+              panel = null;
+            }
+          });
+        });
+      };
+      const open = () => {
+        if (panel) return;
+        panel = document.createElement("div");
+        panel.className = "common-unmodeled-layer";
+        panel.style.left = "160px";
+        panel.style.width = "360px";
+        panel.style.height = "260px";
+        document.body.appendChild(panel);
+        build(NAV, false);
       };
       sel.addEventListener("mousedown", open);
       sel.addEventListener("click", open);
