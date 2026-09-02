@@ -52,6 +52,20 @@ def build_pyinstaller() -> None:
         "--onedir",
         "--name",
         "AutoOffer",
+        # 本地包为多根源码布局（core/server/cli 各为根）。editable 安装的元路径
+        # finder 对 PyInstaller 静态分析不可见，CI 里 `pip install -e .` 后打包
+        # 会把整个 autooffer_server/autooffer_core 漏出产物 —— v0.2.27 安装包
+        # 启动即 ModuleNotFoundError 的根因（#1），必须显式给出源码目录
+        "--paths",
+        str(ROOT / "core"),
+        "--paths",
+        str(ROOT / "server"),
+        "--paths",
+        str(ROOT / "cli"),
+        "--hiddenimport",
+        "autooffer_core",
+        "--hiddenimport",
+        "autooffer_server",
         "--add-data",
         f"{FRONTEND / 'dist'}{';' if sys.platform == 'win32' else ':'}frontend/dist",
         str(APP / "launcher.py"),

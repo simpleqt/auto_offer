@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import contextlib
+import sys
 from collections.abc import AsyncIterator
 from pathlib import Path
 from typing import Any
@@ -83,6 +84,11 @@ def _frontend_dist() -> Path | None:
         # 打包（onedir）布局：可执行文件同级的 frontend/dist
         Path(__file__).resolve().parent / "frontend" / "dist",
     ]
+    # PyInstaller 冻结态：--add-data 的 frontend/dist 解包到 _MEIPASS 下
+    # （PyInstaller 6 onedir 在 <安装目录>/_internal/frontend/dist）
+    meipass = getattr(sys, "_MEIPASS", None)
+    if meipass:
+        candidates.insert(0, Path(meipass) / "frontend" / "dist")
     for cand in candidates:
         if (cand / "index.html").exists():
             return cand
