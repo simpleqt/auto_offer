@@ -22,7 +22,9 @@ log = structlog.get_logger(__name__)
 CONFIDENCE_FLOOR = 0.55
 
 MAPPING_SYSTEM_PROMPT = """你是招聘表单的字段映射引擎。输入包含两部分：
-A. 招聘页面上的字段（label=标签，section=所属区块，kind=控件类型（select=下拉/date=日期/text=文本），placeholder=输入提示，options=候选选项）
+A. 招聘页面上的字段：label=标签，section=所属区块，kind=控件类型，
+   placeholder=输入提示，options=候选选项。
+   kind 取值：select=下拉、date=日期、text=文本。
 B. 求职者档案字段目录（label=标签，category=分区）
 
 任务：为 A 中每个字段找出 B 中语义相同或最接近的一个标签。

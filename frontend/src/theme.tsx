@@ -23,6 +23,7 @@ const ThemeContext = createContext<ThemeContextValue>({
   setMode: () => {},
 });
 
+// eslint-disable-next-line react-refresh/only-export-components -- hook 与 Provider 同文件共享 Context
 export const useThemeMode = () => useContext(ThemeContext);
 
 export function ThemeProvider({ children }: { children: ReactNode }) {
