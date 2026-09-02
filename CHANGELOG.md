@@ -3,6 +3,21 @@
 本项目遵循 [Conventional Commits](https://www.conventionalcommits.org/)，版本策略为 SemVer。
 由 `git-cliff` 从提交历史生成（配置见 `cliff.toml`；本文件在无 git-cliff 环境下按同格式手动维护）。
 
+## [v0.2.26] - 2026-09-02
+
+**选项点击链路强化**（星网 starnet 真站 21 轮 probe 驱动；北森新版验签限制记录在案）。
+
+### Features
+
+- (**extension**) 选项点击**优先打行内图标容器**：北森新版（constant-main/list-item-container）把交互监听挂在行左侧 icon-container 的 svg 上——点右侧文本是兄弟节点、冒泡不经过监听者；从选项元素向上 5 级内找 `[class*=icon]`/svg 点击
+- (**extension**) **两段式面板「确定」提交**：选后面板未关且有「确定/确认」按钮时自动补点（phoenix-button__content 为真实热区）；多值场景全部点完后统一提交
+- (**extension**) 匹配**大小写不敏感**：档案值「30k」能对上选项「20-30K」
+- (**extension**) **多值拆分选择**：值「英语 CET-4、英语 CET-6」按顿号/分号拆 token，全部 token 都有对应选项才逐个点选（多选标签控件），任一缺失不碰（防单选误点）
+
+### Known Issues
+
+- **北森 2022 新版表单前端（webpackChunkux_recruitment_portal_2022_form_pc）内置反自动化验签**：合成事件与机械化 trusted 点击均被拒（console 实锤 `__ux__logs__ 验签失败`），下拉选择字段（民族/籍贯/期望薪资等）在星网等新版站点需人工点选；文本/日期/附件字段不受影响。旧版组件（海格 area-text-label 系）正常。
+
 ## [v0.2.25] - 2026-09-02
 
 **填写效果与准确率强化版**：自愈回路 + 填充率可视化 + 一键快捷填写（对标牛客网申助手/job-hub 体验）。

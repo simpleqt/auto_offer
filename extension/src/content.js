@@ -1807,6 +1807,52 @@
     return null;
   }
 
+  /**
+   * 选项点击：优先打行内「图标容器」（北森新版把监听挂在左侧 icon-container 上，
+   * 点右侧文本是兄弟节点、冒泡不经过监听者）。从选项元素向上找含图标的行容器。
+   */
+  function clickOptionIcon(opt) {
+    let node = opt;
+    for (let depth = 0; node && depth < 5; depth += 1, node = node.parentElement) {
+      const icon = node.querySelector('[class*="icon-container"],[class*="icon"],svg');
+      if (icon) {
+        dispatchPointerSeq(icon);
+        return true;
+      }
+      if (node.matches('[class*="list-item-container"],li')) {
+        break;
+      }
+    }
+    dispatchPointerSeq(opt);
+    return false;
+  }
+
+  /**
+   * 两段式面板：选后面板未关 → 点「确定」提交（北森 constant-main 面板
+   * 是「选择+确定」两段式，不点确定值不落控件；phoenix-button__content 是真实热区）。
+   */
+  async function confirmPanelIfOpen(opt) {
+    const layers = findPopupLayers();
+    const host = layers.find((l) => (opt ? l.contains(opt) : false)) || layers[layers.length - 1];
+    if (!host) {
+      return;
+    }
+    const confirm = [...host.querySelectorAll("button,[class*=button],[class*=btn],div,span")]
+      .filter((b) => b.children.length <= 2 && isVisible(b))
+      .find((b) => /^(确定|确认|OK)$/.test(norm(b.textContent, 8)));
+    if (confirm) {
+      const content = confirm.querySelector('[class*="content"],span,div') || confirm;
+      dispatchPointerSeq(content);
+      await sleep(420);
+    }
+  }
+
+  async function clickChoiceOption(opt) {
+    clickOptionIcon(opt);
+    await sleep(320);
+    await confirmPanelIfOpen(opt);
+  }
+
   async function tryFillCustomChoiceField(field, value) {
     const el = field.element;
     const container = findChoiceFieldContainer(el, field.container);
@@ -1877,8 +1923,7 @@
           return drilled;
         }
       }
-      dispatchPointerSeq(matched); // Phoenix 选项监听 pointerdown，普通合成 click 不触发
-      await sleep(120);
+      await clickChoiceOption(matched);
       return { ok: true };
     }
 
@@ -1901,9 +1946,10 @@
         .filter(Boolean);
       if (picks.length === tokens.length) {
         for (const p of picks) {
-          dispatchPointerSeq(p);
+          clickOptionIcon(p);
           await sleep(340);
         }
+        await confirmPanelIfOpen(picks[0]); // 多选全部点完后再统一提交
         return { ok: true };
       }
     }
@@ -1928,8 +1974,7 @@
           choiceTextMatches(opt.getAttribute("aria-label") || "", value)
       );
       if (retryMatched) {
-        dispatchPointerSeq(retryMatched);
-        await sleep(120);
+        await clickChoiceOption(retryMatched);
         return { ok: true };
       }
     }
