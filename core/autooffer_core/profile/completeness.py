@@ -34,6 +34,7 @@ def profile_completeness(p: Profile) -> tuple[int, list[str]]:
     check(b.political_status, 2, "政治面貌")
     check(b.current_city, 2, "现居住城市")
     check(b.native_place, 2, "籍贯")
+    check(b.ethnicity, 1, "民族")
 
     if p.education:
         score += 10
@@ -82,4 +83,4 @@ def profile_completeness(p: Profile) -> tuple[int, list[str]]:
 
     check(any(a.kind == "resume" for a in p.attachments), 10, "默认简历附件")
 
-    return score, missing
+    return min(score, 100), missing

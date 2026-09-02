@@ -77,6 +77,40 @@ export function BasicFields() {
           </Form.Item>
         </Col>
         <Col span={8}>
+          <Form.Item name={['basic', 'ethnicity']} label="民族">
+            <Input placeholder="如 汉族" />
+          </Form.Item>
+        </Col>
+        <Col span={8}>
+          <Form.Item name={['basic', 'full_time']} label="是否全日制">
+            <Select
+              options={[
+                { value: '是', label: '是' },
+                { value: '否', label: '否' },
+              ]}
+              allowClear
+            />
+          </Form.Item>
+        </Col>
+        <Col span={8}>
+          <Form.Item name={['basic', 'unified_enrollment']} label="是否统招">
+            <Select
+              options={[
+                { value: '是', label: '是' },
+                { value: '否', label: '否' },
+              ]}
+              allowClear
+            />
+          </Form.Item>
+        </Col>
+        <Col span={8}>
+          <Form.Item name={['basic', 'schooling_length']} label="学制">
+            <Input placeholder="如 四年" />
+          </Form.Item>
+        </Col>
+      </Row>
+      <Row gutter={12}>
+        <Col span={8}>
           <Form.Item name={['basic', 'work_years']} label="工作年限">
             <Input placeholder="如 应届毕业生 / 3年" />
           </Form.Item>

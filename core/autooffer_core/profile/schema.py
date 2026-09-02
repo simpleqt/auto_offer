@@ -63,6 +63,14 @@ class BasicInfo(BaseModel):
     """国籍（招聘表常见必填，如「中国」）。"""
     work_years: str | None = None
     """工作年限（如「应届毕业生」「3年」），校园投递常问。"""
+    ethnicity: str | None = None
+    """民族（如「汉族」），校招表常见必填。"""
+    full_time: Literal["是", "否"] | None = None
+    """是否全日制（教育形式），校招/国企表常见。"""
+    unified_enrollment: Literal["是", "否"] | None = None
+    """是否统招（招生形式），校招/国企表常见。"""
+    schooling_length: str | None = None
+    """学制（如「四年」「3年」）。"""
     id_number: str | None = Field(default=None, json_schema_extra=RESTRICTED)
 
 

@@ -118,6 +118,10 @@ class _Flattener:
             "政治面貌": basic.political_status,
             "国籍": basic.nationality,
             "工作年限": basic.work_years,
+            "民族": basic.ethnicity,
+            "是否全日制": basic.full_time,
+            "是否统招": basic.unified_enrollment,
+            "学制": basic.schooling_length,
         }
         if self.include_sensitive and "id_number" in _SENSITIVE_BASIC:
             values["身份证号"] = basic.id_number

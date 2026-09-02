@@ -89,6 +89,12 @@ export interface BasicInfo {
   nationality: string | null;
   /** 如「应届毕业生」「3年」。 */
   work_years: string | null;
+  /** 如「汉族」。 */
+  ethnicity: string | null;
+  full_time: '是' | '否' | null;
+  unified_enrollment: '是' | '否' | null;
+  /** 如「四年」。 */
+  schooling_length: string | null;
   /** restricted 级：命中时需界面单独授权。 */
   id_number: string | null;
 }

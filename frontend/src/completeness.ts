@@ -29,6 +29,7 @@ export function profileCompleteness(p: Partial<Profile>): CompletenessResult {
   check(b.political_status, 2, '政治面貌');
   check(b.current_city, 2, '现居住城市');
   check(b.native_place, 2, '籍贯');
+  check(b.ethnicity, 1, '民族');
 
   const edu = p.education?.[0];
   if (p.education?.length) {
@@ -91,5 +92,5 @@ export function profileCompleteness(p: Partial<Profile>): CompletenessResult {
     '默认简历附件',
   );
 
-  return { score, missing };
+  return { score: Math.min(score, 100), missing };
 }

@@ -25,6 +25,7 @@ const FULL = {
     political_status: '共青团员',
     current_city: '成都市',
     native_place: '四川',
+    ethnicity: '汉族',
   },
   intention: { position: '算法工程师', city: ['成都'], salary_expectation: '20-30K' },
   education: [
