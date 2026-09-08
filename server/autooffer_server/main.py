@@ -150,7 +150,8 @@ def _mount_frontend(app: FastAPI, dist_dir: Path | str | None = None) -> None:
         """SPA 回退：非 API 路径一律返回 index.html，交给前端路由。"""
         candidate = (dist / full_path).resolve()
         # 路径规范化：编码 ../ 的穿越路径不得逃出 dist 目录
-        if full_path and candidate.is_file() and str(candidate).startswith(f"{dist.resolve()}/"):
+        # （is_relative_to 分隔符无关；startswith("dist/") 在 Windows 反斜杠下恒 False）
+        if full_path and candidate.is_file() and candidate.is_relative_to(dist.resolve()):
             return FileResponse(candidate)
         return FileResponse(dist / "index.html")
 
