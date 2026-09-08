@@ -240,6 +240,18 @@ class AgentRunner:
         planner_llm_fails = 0
         """Planner 连续 LLM 失败次数；达到 3 次按部分完成收尾，不判任务失败。"""
         while steps < self._config.max_steps:
+            if self._used_tokens() >= self._config.token_budget:
+                # token 预算护栏（与 max_steps 同级）：超限安全终止并产出
+                # 部分报告，不因本地模型死循环重试烧穿预算
+                counts = self._checklist.counts()
+                self._emit(
+                    "step", "runner",
+                    f"达到 token 预算护栏({self._config.token_budget})，安全终止"
+                    f"（成功 {counts['filled']} / 待确认 {counts['pending_confirm']}"
+                    f" / 失败 {counts['failed']}）",
+                )
+                self._history.add("达到 token 预算护栏，按部分完成收尾")
+                return
             steps += 1
             obs = await self._driver.observe(with_screenshot=self._vision_next)
             if self._observation_barren(obs) and empty_obs_streak < 2:
@@ -687,7 +699,9 @@ class AgentRunner:
                 values, restricted = self._resolver.resolve(
                     self._profile, action.profile_paths
                 )
-                extra = values or None
+                # 批内多个 request_profile 合并（逐个覆盖会丢掉前面的请求）
+                if values:
+                    extra = {**(extra or {}), **values}
                 if restricted:
                     await self._wait_human(
                         "表单需要受限敏感字段（如身份证号），请在界面确认是否提供: "
@@ -1047,13 +1061,17 @@ class AgentRunner:
 
     # ---------- 报告 ----------
 
-    def _build_report(self, url: str, started_at: str) -> FillReport:
-        usage_tokens = 0
+    def _used_tokens(self) -> int:
+        """三个智能体累计 token 用量（预算护栏与报告共用）。"""
+        total = 0
         for role in ("planner", "actor", "validator"):
             client = getattr(self, "_" + role, None)
-            total = getattr(getattr(client, "_llm", None), "total_usage", None)
-            if total is not None:
-                usage_tokens += total.total_tokens
+            usage = getattr(getattr(client, "_llm", None), "total_usage", None)
+            if usage is not None:
+                total += usage.total_tokens
+        return total
+
+    def _build_report(self, url: str, started_at: str) -> FillReport:
         return FillReport(
             task_id=self._task_id,
             url=url,
@@ -1062,7 +1080,7 @@ class AgentRunner:
             fields=self._checklist.to_report_fields(),
             started_at=started_at,
             finished_at=datetime.datetime.now().isoformat(timespec="seconds"),
-            total_tokens=usage_tokens,
+            total_tokens=self._used_tokens(),
             note=f"最终状态: {self.state}",
         )
 

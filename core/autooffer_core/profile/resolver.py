@@ -139,6 +139,31 @@ def _dump(v: Any) -> Any:
     return v
 
 
+def _strip_restricted(v: Any) -> Any:
+    """递归剔除 RESTRICTED 字段值（组路径取值时组内受限字段不得随组下发）。
+
+    例：路径 "basic" 的组值含 id_number（RESTRICTED）——不剥离会随
+    model_dump 整体进入 Actor 提示词，绕过"按次人工授权"门禁；
+    显式请求 "basic.id_number" 的路径级检测不受影响（仍走 restricted 上报）。
+    """
+    if isinstance(v, BaseModel):
+        model = type(v)
+        out: dict[str, Any] = {}
+        for name in model.model_fields:
+            info = model.model_fields[name]
+            extra = info.json_schema_extra
+            sens = extra.get("sensitivity") if isinstance(extra, dict) else None
+            if sens == "restricted":
+                continue
+            stripped = _strip_restricted(getattr(v, name, None))
+            if stripped is not None:
+                out[name] = stripped
+        return out
+    if isinstance(v, list):
+        return [_strip_restricted(x) for x in v]
+    return v
+
+
 class ProfileResolver:
     """档案取值链路的实现（目录 / 区块切片 / 按路径补取）。"""
 
@@ -168,7 +193,8 @@ class ProfileResolver:
     def resolve(
         self, profile: Profile, paths: list[str]
     ) -> tuple[dict[str, Any], list[str]]:
-        """按路径取值。restricted 路径不返回值，单独列出待人工授权。"""
+        """按路径取值。restricted 路径不返回值，单独列出待人工授权；
+        组路径的值先递归剥离组内 restricted 字段（如 basic 组内的身份证号）。"""
         values: dict[str, Any] = {}
         restricted: list[str] = []
         for path in dict.fromkeys(paths):  # 去重保序
@@ -177,5 +203,5 @@ class ProfileResolver:
                 restricted.append(path)
                 continue
             if _has_value(value):
-                values[path] = _dump(value)
+                values[path] = _dump(_strip_restricted(value))
         return values, restricted

@@ -66,6 +66,20 @@ def test_resolve_restricted_field_withheld() -> None:
     assert values["basic.name"] == "张三"
 
 
+def test_resolve_group_value_strips_restricted() -> None:
+    """组路径取值时组内 restricted 字段不得随组下发（防绕过人工授权）。"""
+    p = profile.model_copy(deep=True)
+    p.basic.id_number = "510100200205120000"
+    values, restricted = resolver.resolve(p, ["basic"])
+    assert "id_number" not in values["basic"]  # 身份证号被剥离
+    assert values["basic"]["name"] == "张三"  # 组内其余字段正常
+    assert restricted == []  # 组路径本身不触发门禁（显式路径才触发）
+    # 家庭组同理：成员电话是 restricted，不能随 extended.family_members 泄出
+    values2, _ = resolver.resolve(p, ["extended.family_members"])
+    for member in values2.get("extended.family_members", []):
+        assert "phone" not in member
+
+
 def test_resolve_missing_path_ignored() -> None:
     values, restricted = resolver.resolve(profile, ["extended.marital_status", "no.such.path"])
     assert values == {}  # 婚姻状况未填、路径不存在均不返回

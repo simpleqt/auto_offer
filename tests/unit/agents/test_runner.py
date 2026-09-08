@@ -958,3 +958,87 @@ async def test_runner_section_title_match_dispatches() -> None:
 
     assert driver.values[0] == "某某大学"  # 正常派发填写，未走翻页分支
     assert not any(c == ("click", 1) for c in driver.calls)
+
+
+@pytest.mark.asyncio
+async def test_runner_token_budget_guardrail() -> None:
+    """token 预算护栏：用量达上限即安全终止（部分完成），不判任务失败。"""
+    from autooffer_core.llm.interfaces import LLMUsage
+
+    driver = FakeDriver(make_observation())
+    profile = build_sample_profile()
+    planner_client = scripted([PlannerOutput(decision="finish", done=True, reason="完成")])
+    actor_client = scripted([ActionBatch(actions=[], summary="空")])
+    validator_client = scripted([ValidatorOutput(passed=True)])
+    # 预置累计用量超预算（ScriptedLLMClient 本身不累计，模拟端点侧计数）
+    for client in (planner_client, actor_client, validator_client):
+        client.total_usage = LLMUsage(total_tokens=500_000)  # type: ignore[attr-defined]
+    router = FakeRouter({
+        "planner": planner_client, "actor": actor_client, "validator": validator_client,
+    })
+    events = []
+    runner = AgentRunner(
+        task_id="t-budget", task_instruction="x", driver=driver, router=router,
+        executor=ActionExecutor(driver), profile=profile,
+        config=RunnerConfig(token_budget=400_000),
+        on_event=events.append,
+    )
+    report = await runner.run("https://example.com/apply")
+
+    assert runner.state == "AWAITING_REVIEW"  # 部分完成收尾，不 FAILED
+    assert planner_client.calls == 0  # 护栏先于第一轮规划触发
+    assert any("token 预算" in e.summary for e in events)
+    assert report.counts()["failed"] == 0
+
+
+@pytest.mark.asyncio
+async def test_runner_request_profile_batch_merged() -> None:
+    """批内多个 request_profile 的补取值合并进下一轮提示词（不再只留最后一个）。"""
+    driver = FakeDriver(make_observation())
+    profile = build_sample_profile()
+    planner_script = [
+        PlannerOutput(
+            sections=[PlannedSection(id="s1", title="基本信息")],
+            decision="dispatch_section", next_section_id="s1",
+            subtask_goal="填写基本信息", reason="派发",
+        ),
+        PlannerOutput(decision="finish", done=True, reason="完成"),
+    ]
+    actor_script = [
+        # 第一轮：两个 request_profile 分别要 basic 与 intention 的值
+        ActionBatch(
+            actions=[
+                Action(type="request_profile", profile_paths=["basic.name"],
+                       reason="补取姓名"),
+                Action(type="request_profile", profile_paths=["intention"],
+                       reason="补取求职意向"),
+            ],
+            section_complete=False, summary="先补档案",
+        ),
+        # 第二轮：用补取到的值填写
+        ActionBatch(
+            actions=[
+                Action(type="input_text", element_index=0, value="张三", reason="填姓名"),
+                Action(type="input_text", element_index=1,
+                       value="zhangsan@example.com", reason="填邮箱"),
+            ],
+            section_complete=True, summary="填写姓名与邮箱",
+        ),
+    ]
+    actor_client = scripted(actor_script)
+    router = FakeRouter({
+        "planner": scripted(planner_script),
+        "actor": actor_client,
+        "validator": scripted([ValidatorOutput(passed=True)]),
+    })
+    runner = AgentRunner(
+        task_id="t-merge", task_instruction="x", driver=driver, router=router,
+        executor=ActionExecutor(driver), profile=profile,
+    )
+    await runner.run("https://example.com/apply")
+
+    # 第二轮 Actor 提示词同时包含两份补取值（合并而非覆盖）
+    second_prompt = actor_client.messages_seen[1][-1].content
+    assert "本轮补取到的档案值" in second_prompt
+    assert "张三" in second_prompt  # basic.name 的值
+    assert "算法工程师" in second_prompt  # intention.position 的值（未被后一个请求覆盖掉）
