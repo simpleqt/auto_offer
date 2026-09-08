@@ -149,7 +149,7 @@ def test_mapping_requires_endpoint(tmp_path: Path) -> None:
 
 
 def test_option_match_picks_and_filters(mapping_client: TestClient) -> None:
-    """AI 选选项：逐字选项校验 + 置信度门槛。"""
+    """AI 选选项：逐字选项校验 + 置信度门槛 + occurrence 透传。"""
     resp = mapping_client.post(
         "/api/v1/option-match",
         json={
@@ -167,8 +167,26 @@ def test_option_match_picks_and_filters(mapping_client: TestClient) -> None:
     )
     assert resp.status_code == 200
     assert resp.json()["choices"] == [
-        {"label": "期望从事职业", "option": "算法工程师", "confidence": 0.9}
+        {"label": "期望从事职业", "option": "算法工程师", "confidence": 0.9, "occurrence": None}
     ]
+
+
+def test_option_match_rejects_idcard_shaped_value(mapping_client: TestClient) -> None:
+    """身份证形状的值不进 LLM 提示词（restricted 值兜底拦截）。"""
+    resp = mapping_client.post(
+        "/api/v1/option-match",
+        json={
+            "picks": [
+                {
+                    "label": "证件号码",
+                    "options": ["110101199001011234", "其他"],
+                    "value": "110101199001011234",
+                }
+            ]
+        },
+    )
+    assert resp.status_code == 200
+    assert resp.json()["choices"] == []
 
 
 def test_option_match_empty(mapping_client: TestClient) -> None:

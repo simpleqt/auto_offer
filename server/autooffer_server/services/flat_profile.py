@@ -89,6 +89,9 @@ class _Flattener:
     def __init__(self, include_sensitive: bool) -> None:
         self.include_sensitive = include_sensitive
         self.sections: list[dict[str, Any]] = []
+        # 受限（restricted）字段输出的标签：这些值授权后可以写入页面，
+        # 但不允许进入 AI 选选项的 LLM 提示词——插件据此后缀过滤 picks
+        self.restricted_labels: set[str] = set()
 
     def add_simple(self, key: str, title: str, values: dict[str, Any]) -> None:
         cleaned = _clean(values)
@@ -104,7 +107,7 @@ class _Flattener:
                 {"key": key, "title": title, "kind": "repeat", "items": cleaned_items}
             )
 
-    def _basic(self, basic: BasicInfo) -> None:
+    def _basic(self, basic: BasicInfo, ext: ExtendedInfo | None) -> None:
         values: dict[str, Any] = {
             "姓名": basic.name,
             "姓": basic.name[:1] if len(basic.name) >= 2 else None,
@@ -122,9 +125,13 @@ class _Flattener:
             "是否全日制": basic.full_time,
             "是否统招": basic.unified_enrollment,
             "学制": basic.schooling_length,
+            # 常见校招/国企表字段（扩展信息，非敏感）
+            "生源地": ext.origin_place if ext else None,
+            "入党时间": _fmt_month(ext.party_join_date) if ext and ext.party_join_date else None,
         }
         if self.include_sensitive and "id_number" in _SENSITIVE_BASIC:
             values["身份证号"] = basic.id_number
+            self.restricted_labels.add("身份证号")
         self.add_simple("basic", "基本信息", values)
 
     def _intention(self, p: Profile, ext: ExtendedInfo | None) -> None:
@@ -253,6 +260,9 @@ class _Flattener:
                     for m in ext.family_members
                 ],
             )
+            # 家庭电话是 restricted 值：标记给插件，禁止进 LLM 选选项提示词
+            if ext.family_members:
+                self.restricted_labels.add("电话")
             if ext.emergency_contact:
                 ec = ext.emergency_contact
                 self.add_simple(
@@ -264,6 +274,8 @@ class _Flattener:
                         "与紧急联系人关系": ec.relation,
                     },
                 )
+                if ec.phone:
+                    self.restricted_labels.add("紧急联系人电话")
 
     def _other(self, p: Profile, ext: ExtendedInfo | None) -> None:
         values: dict[str, Any] = {
@@ -293,7 +305,7 @@ class _Flattener:
 
     def flatten(self, p: Profile) -> dict[str, Any]:
         ext = p.extended
-        self._basic(p.basic)
+        self._basic(p.basic, ext)
         self._intention(p, ext)
         self._education(p)
         self._experiences(p)
@@ -344,6 +356,9 @@ class _Flattener:
             "profile": {"id": p.id, "label": p.label},
             "sections": self.sections,
             "attachments": attachments,
+            # restricted 字段已输出的标签（敏感授权开启时才有内容）：
+            # 插件据此把这些值挡在 AI 选选项（LLM）通道之外
+            "restrictedLabels": sorted(self.restricted_labels),
         }
 
 

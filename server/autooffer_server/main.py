@@ -31,6 +31,44 @@ _LOCAL_ORIGINS = [
     "http://localhost:5173",
 ]
 
+# 允许的 Host（本机回环 + Starlette TestClient）：防 DNS rebinding——
+# 攻击者域名解析到 127.0.0.1 后，浏览器视为同源绕过 SOP 直读本地服务
+_ALLOWED_HOSTS = {"127.0.0.1", "localhost", "[::1]", "testserver"}
+
+
+def _host_allowed(host: str) -> bool:
+    if not host:
+        return False
+    h = host.strip().lower()
+    # 剥端口（IPv6 形如 [::1]:8765）
+    hostpart = (h.split("]")[0] + "]") if h.startswith("[") else h.split(":")[0]
+    return hostpart in _ALLOWED_HOSTS
+
+
+class _HostGuardMiddleware:
+    """Host 头不在本机回环名单时直接 403（DNS rebinding 防御）。"""
+
+    def __init__(self, app: Any) -> None:
+        self.app = app
+
+    async def __call__(self, scope: Any, receive: Any, send: Any) -> None:
+        if scope["type"] == "http":
+            host = next(
+                (
+                    v.decode("latin-1")
+                    for k, v in scope.get("headers", [])
+                    if k == b"host"
+                ),
+                "",
+            )
+            if not _host_allowed(host):
+                from starlette.responses import JSONResponse
+
+                resp = JSONResponse({"detail": "invalid Host header"}, status_code=403)
+                await resp(scope, receive, send)
+                return
+        await self.app(scope, receive, send)
+
 
 def create_app(
     config: ServerConfig | None = None,
@@ -69,6 +107,7 @@ def create_app(
         allow_methods=["*"],
         allow_headers=["*"],
     )
+    app.add_middleware(_HostGuardMiddleware)
     app.state.ctx = context
     app.include_router(router)
     app.include_router(ws_router)
@@ -109,8 +148,9 @@ def _mount_frontend(app: FastAPI, dist_dir: Path | str | None = None) -> None:
     @app.get("/{full_path:path}", include_in_schema=False)
     async def spa(full_path: str) -> FileResponse:
         """SPA 回退：非 API 路径一律返回 index.html，交给前端路由。"""
-        candidate = dist / full_path
-        if full_path and candidate.is_file():
+        candidate = (dist / full_path).resolve()
+        # 路径规范化：编码 ../ 的穿越路径不得逃出 dist 目录
+        if full_path and candidate.is_file() and str(candidate).startswith(f"{dist.resolve()}/"):
             return FileResponse(candidate)
         return FileResponse(dist / "index.html")
 

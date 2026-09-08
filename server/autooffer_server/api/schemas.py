@@ -185,6 +185,9 @@ class OptionPickIn(BaseModel):
     label: str
     options: list[str] = []
     value: str = ""
+    occurrence: int | None = None
+    """repeat 多区块里同标签字段的序号（第 N 段）；服务端原样回显，
+    插件据此把选项落到正确的段而不是同标签全段覆盖。"""
 
 
 class OptionMatchIn(BaseModel):
@@ -195,6 +198,7 @@ class OptionChoiceOut(BaseModel):
     label: str
     option: str
     confidence: float
+    occurrence: int | None = None
 
 
 class OptionMatchOut(BaseModel):

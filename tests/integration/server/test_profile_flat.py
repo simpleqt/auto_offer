@@ -100,8 +100,12 @@ def test_flat_lists_attachments(client: TestClient) -> None:
 
 
 def test_attachment_download(client: TestClient, tmp_path: Any) -> None:
-    """附件字节下载：真实文件可下载；丢失文件 410；越界 404。"""
-    file = tmp_path / "resume_cn.pdf"
+    """附件字节下载：真实文件可下载；丢失文件 410；越界 404；
+    目录外的路径（伪造档案路径读任意文件）403。"""
+    # 附件必须落在服务配置的附件目录内（路径 confinement 契约）
+    attachments_dir = tmp_path / "data" / "attachments"
+    attachments_dir.mkdir(parents=True, exist_ok=True)
+    file = attachments_dir / "resume_cn.pdf"
     file.write_bytes(b"%PDF-1.4 fake resume bytes")
     payload = sample_profile_payload()
     payload["attachments"][0]["path"] = str(file)
@@ -111,7 +115,17 @@ def test_attachment_download(client: TestClient, tmp_path: Any) -> None:
     assert ok.status_code == 200
     assert ok.content.startswith(b"%PDF")
 
-    missing = client.get("/api/v1/profiles/demo-profile/attachments/1")  # 英文简历路径不存在
+    outside = tmp_path / "stolen.pdf"
+    outside.write_bytes(b"secret")
+    payload["attachments"][1]["path"] = str(outside)
+    client.put("/api/v1/profiles/demo-profile", json={"label": "x", "payload": payload})
+    resp = client.get("/api/v1/profiles/demo-profile/attachments/1")
+    assert resp.status_code == 403
+
+    lost = attachments_dir / "not_there.pdf"  # 目录内但不存在的文件 → 410
+    payload["attachments"][2]["path"] = str(lost)
+    client.put("/api/v1/profiles/demo-profile", json={"label": "x", "payload": payload})
+    missing = client.get("/api/v1/profiles/demo-profile/attachments/2")
     assert missing.status_code == 410
     oob = client.get("/api/v1/profiles/demo-profile/attachments/99")
     assert oob.status_code == 404

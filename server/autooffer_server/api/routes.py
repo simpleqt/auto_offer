@@ -6,6 +6,8 @@
 from __future__ import annotations
 
 import logging
+import os
+import re
 import uuid
 from pathlib import Path
 from typing import Annotated, Any
@@ -40,6 +42,18 @@ from autooffer_server.services.keystore import mask_key
 log = structlog.get_logger(__name__)
 
 router = APIRouter(prefix="/api/v1")
+
+# 身份证形状（选选项通道兜底拒绝：restricted 值不进 LLM 提示词）
+_IDCARD_RE = re.compile(r"^\d{17}[\dXx]$|^\d{15}$")
+
+
+def _resolve_confined(raw: str, roots: list[str]) -> str | None:
+    """realpath 并校验落在任一根目录内；越界返回 None（同步助手，供线程调用）。"""
+    abs_path = os.path.realpath(raw)
+    for r in roots:
+        if abs_path.startswith(os.path.realpath(r) + os.sep):
+            return abs_path
+    return None
 
 
 def _ctx(request: Request) -> Any:
@@ -192,13 +206,28 @@ async def get_profile_flat(
     """扁平档案（浏览器插件规则直填引擎消费）。
 
     sensitive=true 时输出 schema 标注的敏感/受限字段（身份证号、家庭情况等），
-    由插件弹窗单独授权后携带；默认剔除。
+    由插件弹窗单独授权后携带；默认剔除。敏感下发写审计事件（谁在何时拉过
+    敏感档案可回溯——restricted 契约：授权行为必须留痕）。
     """
+    import time
+
     from autooffer_server.services.flat_profile import flatten_profile
 
     payload: dict[str, Any] | None = await _ctx(request).repo.get_profile(profile_id)
     if payload is None:
         raise HTTPException(404, f"档案不存在: {profile_id}")
+    if sensitive:
+        try:
+            await _ctx(request).repo.add_event(
+                "extension",
+                seq=int(time.time()),
+                kind="state",
+                agent="extension",
+                summary="敏感档案下发（含 restricted 字段）",
+                data={"profile_id": profile_id},
+            )
+        except Exception:  # noqa: BLE001
+            log.warning("flat.audit_write_failed", profile_id=profile_id)
     return flatten_profile(payload, include_sensitive=sensitive)
 
 
@@ -208,6 +237,9 @@ async def map_fields_api(request: Request, body: MappingIn) -> dict[str, Any]:
 
     隐私契约：请求只含标签/选项文本；LLM 提示词只含标签目录，档案值不出服务。
     """
+    import asyncio
+
+    from autooffer_core.errors import LLMError
     from autooffer_server.services.flat_profile import flatten_profile
     from autooffer_server.services.mapping import PageField, map_fields
 
@@ -232,7 +264,16 @@ async def map_fields_api(request: Request, body: MappingIn) -> dict[str, Any]:
         )
         for f in body.fields
     ]
-    matches = await map_fields(page_fields, flat, llm)
+    try:
+        # 服务端截止 190s（略晚于插件 180s abort）：插件超时放弃后本地模型
+        # 不再无限空烧；映射内部自带一次格式纠错重试
+        matches = await asyncio.wait_for(map_fields(page_fields, flat, llm), timeout=190)
+    except TimeoutError:
+        raise HTTPException(504, "映射超时（本地模型响应过慢）") from None
+    except LLMError as exc:
+        raise HTTPException(502, f"映射模型调用失败: {exc}") from exc
+    except (ValueError, KeyError) as exc:
+        raise HTTPException(502, f"映射输出解析失败: {exc}") from exc
     return {"matches": [m.model_dump() for m in matches]}
 
 
@@ -241,8 +282,12 @@ async def option_match_api(request: Request, body: OptionMatchIn) -> dict[str, A
     """AI 选选项（M3）：固定选项字段中为档案值挑最接近的选项。
 
     隐私说明：字段值会进入 LLM 提示词——与简历解析同一信任域
-    （该值本就要写入目标页面），且仅逐字段发送。
+    （该值本就要写入目标页面），且仅逐字段发送。restricted 来源的值
+    （身份证号/家庭电话）应由插件先行过滤，此处再做身份证形状兜底拒绝。
     """
+    import asyncio
+
+    from autooffer_core.errors import LLMError
     from autooffer_server.services.mapping import OptionPick, match_options
 
     ctx = _ctx(request)
@@ -252,8 +297,23 @@ async def option_match_api(request: Request, body: OptionMatchIn) -> dict[str, A
         llm = await ctx.build_llm("profile_parser")
     except LookupError as exc:
         raise HTTPException(503, f"选选项需要可用的模型端点: {exc}") from exc
-    picks = [OptionPick(label=p.label, options=p.options, value=p.value) for p in body.picks]
-    choices = await match_options(picks, llm)
+    picks = [
+        OptionPick(
+            label=p.label, options=p.options, value=p.value, occurrence=p.occurrence
+        )
+        for p in body.picks
+        if not _IDCARD_RE.match(str(p.value or "").strip())
+    ]
+    if not picks:
+        return {"choices": []}
+    try:
+        choices = await asyncio.wait_for(match_options(picks, llm), timeout=130)
+    except TimeoutError:
+        raise HTTPException(504, "选选项超时（本地模型响应过慢）") from None
+    except LLMError as exc:
+        raise HTTPException(502, f"选选项模型调用失败: {exc}") from exc
+    except (ValueError, KeyError) as exc:
+        raise HTTPException(502, f"选选项输出解析失败: {exc}") from exc
     return {"choices": [c.model_dump() for c in choices]}
 
 
@@ -263,13 +323,25 @@ async def download_attachment(request: Request, profile_id: str, index: int) -> 
     import anyio
     from fastapi.responses import FileResponse
 
-    payload: dict[str, Any] | None = await _ctx(request).repo.get_profile(profile_id)
+    ctx = _ctx(request)
+    payload: dict[str, Any] | None = await ctx.repo.get_profile(profile_id)
     if payload is None:
         raise HTTPException(404, f"档案不存在: {profile_id}")
     attachments = payload.get("attachments", [])
     if index < 0 or index >= len(attachments):
         raise HTTPException(404, f"附件不存在: index={index}")
-    path = Path(str(attachments[index].get("path", "")))
+    raw = str(attachments[index].get("path", ""))
+    # 路径 confinement：附件 path 经 PUT /profiles 可被任意写入，不校验即
+    #「伪造档案 → GET 附件」读本机任意文件。只放行落在附件/上传目录内的
+    abs_path = await anyio.to_thread.run_sync(
+        _resolve_confined,
+        raw,
+        [str(ctx.config.attachments_dir), str(ctx.config.uploads_dir)],
+    )
+    if abs_path is None:
+        log.warning("attachment.path_outside_roots", profile_id=profile_id, path=raw[:120])
+        raise HTTPException(403, "附件路径不在允许目录内")
+    path = Path(abs_path)
     if not await anyio.to_thread.run_sync(path.is_file):
         raise HTTPException(410, f"附件文件已丢失: {path.name}")
     return FileResponse(path, filename=path.name)
@@ -589,6 +661,7 @@ async def delete_application(request: Request, record_id: str) -> dict[str, bool
 # ---------- 插件日志汇聚（与 exe 日志同写一个 app.log） ----------
 
 _LOG_LEVELS = {"debug": 10, "info": 20, "warn": 30, "warning": 30, "error": 40}
+_LOG_CTRL_RE = None
 
 
 @router.post("/logs")
@@ -596,17 +669,28 @@ async def receive_extension_logs(request: Request, body: LogsIn) -> dict[str, in
     """接收插件运行日志条目，写入本地 app.log（logger=extension）。
 
     插件与 exe 的时间线在同一文件里按时间排序，一次填写可端到端追溯。
+    上报文本剥控制字符与换行（防日志伪造——页面可控文本借插件通道
+    写入伪造条目会干扰审计追溯）。
     """
+    import re as _re
+
+    global _LOG_CTRL_RE
+    if _LOG_CTRL_RE is None:
+        _LOG_CTRL_RE = _re.compile(r"[\x00-\x1f\x7f\r\n\t]+")
+
+    def sanitize(v: object) -> str:
+        return _LOG_CTRL_RE.sub(" ", str(v))[:120]
+
     logger = logging.getLogger("extension")
     written = 0
     for e in body.entries[:100]:
         if not isinstance(e, dict):
             continue
-        msg = str(e.get("msg", ""))[:200]
+        msg = sanitize(e.get("msg", ""))[:200]
         if not msg:
             continue
         extra = " ".join(
-            f"{k}={str(v)[:120]}"
+            f"{k}={sanitize(v)}"
             for k, v in e.items()
             if k not in ("ts", "level", "msg") and v is not None
         )
