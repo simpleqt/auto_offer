@@ -22,7 +22,14 @@
   // 与 manifest.json 版本同步：插件升级后旧脚本可能仍驻留在未刷新的页面里。
   // 安装守护按版本比较（同版本幂等；新版本可覆盖旧安装），消息处理也校验
   // 版本——旧监听器不再应答新后台的消息，避免新旧引擎同时填写同一页面。
-  const SCRIPT_VERSION = "0.2.33";
+  // 优先运行时读取（content script 有 chrome.runtime）：发版只改 manifest，
+  // 不再有第二处硬编码漂移（v0.2.34 曾因漏改此常量导致全部消息拒答）
+  const SCRIPT_VERSION =
+    typeof chrome !== "undefined" &&
+    chrome.runtime &&
+    typeof chrome.runtime.getManifest === "function"
+      ? chrome.runtime.getManifest().version
+      : "dev";
   if (
     window.__AUTOOFFER_CONTENT__ &&
     window.__AUTOOFFER_CONTENT__.version === SCRIPT_VERSION

@@ -772,3 +772,12 @@ async def test_search_panel_pick_with_confirm(page: Page) -> None:
     assert await page.input_value("#hukou-input") == "德阳市 四川省"
     via = [r.get("via") for r in report["filled"]]
     assert "面板搜索" in via, report["filled"]
+
+
+def test_script_version_not_hardcoded() -> None:
+    """SCRIPT_VERSION 必须运行时读 manifest，禁止硬编码——
+    v0.2.34 曾因发版漏改常量导致引擎拒答所有消息（填写直接失败）。"""
+    src = CONTENT_JS.read_text(encoding="utf-8")
+    assert 'SCRIPT_VERSION = "' not in src, (
+        "SCRIPT_VERSION 硬编码会与 manifest 版本漂移，请改用 chrome.runtime.getManifest().version"
+    )
