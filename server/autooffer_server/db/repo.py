@@ -35,10 +35,17 @@ class Repo:
     def __init__(self, db_path: Path | str) -> None:
         path = Path(db_path)
         path.parent.mkdir(parents=True, exist_ok=True)
-        # check_same_thread=False：to_thread 会在不同线程访问同一连接池
+        # check_same_thread=False：to_thread 会在不同线程访问同一连接池；
+        # timeout=15：多任务并发写（审计单写者之外还有任务/档案更新）时
+        # 等锁而非立刻 database is locked
         self._engine = create_engine(
-            f"sqlite:///{path}", connect_args={"check_same_thread": False}
+            f"sqlite:///{path}",
+            connect_args={"check_same_thread": False, "timeout": 15},
         )
+        # WAL：读写不互斥，审计写入与界面查询并发时不再互相阻塞
+        with self._engine.connect() as conn:
+            conn.exec_driver_sql("PRAGMA journal_mode=WAL")
+            conn.commit()
         Base.metadata.create_all(self._engine)
         self._session = sessionmaker(self._engine, expire_on_commit=False)
 

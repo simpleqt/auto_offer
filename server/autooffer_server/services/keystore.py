@@ -62,6 +62,11 @@ class KeyStore:
         self._fallback.write_text(
             json.dumps(data, ensure_ascii=False), encoding="utf-8"
         )
+        # 明文回退落盘：类 Unix 上收紧到属主可读写（Windows 无此语义，忽略失败）
+        try:
+            self._fallback.chmod(0o600)
+        except OSError:
+            pass
 
     def _store_sync(self, key_id: str, secret: str) -> None:
         if self._keyring is not None and self._backend_ok:

@@ -29,12 +29,14 @@ class AgentTaskRunner:
         profile_id: str,
         on_event: Any,
         human_gate: Any,
+        options: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         from autooffer_core.actions.executor import ActionExecutor
         from autooffer_core.applications import ApplicationStore
         from autooffer_core.profile.schema import Profile
-        from autooffer_core.runner import AgentRunner
+        from autooffer_core.runner import AgentRunner, RunnerConfig
 
+        options = options or {}
         payload = await self._ctx.repo.get_profile(profile_id)
         if payload is None:
             raise LookupError(f"档案不存在: {profile_id}")
@@ -77,7 +79,7 @@ class AgentTaskRunner:
 
         attachments = {a.label: a.path for a in profile.attachments}
         auto_submit = bool(settings.get("auto_submit", False))
-        from autooffer_core.runner import RunnerConfig
+        auto_submit = bool(options.get("auto_submit", auto_submit))  # 任务级覆盖
 
         runner = AgentRunner(
             task_id=task_id,
@@ -94,7 +96,11 @@ class AgentTaskRunner:
             router=router,
             executor=ActionExecutor(driver, attachments=attachments),
             profile=profile,
-            config=RunnerConfig(auto_submit=auto_submit),
+            config=RunnerConfig(
+                auto_submit=auto_submit,
+                use_vision=bool(options.get("use_vision", False)),
+                max_steps=int(options.get("max_steps", 60)),
+            ),
             on_event=on_event,
             human_gate=human_gate,
         )

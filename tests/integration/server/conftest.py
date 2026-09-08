@@ -45,7 +45,14 @@ class FakeRunner:
         self.started = asyncio.Event()
 
     async def run(
-        self, *, task_id: str, url: str, profile_id: str, on_event: Any, human_gate: Any
+        self,
+        *,
+        task_id: str,
+        url: str,
+        profile_id: str,
+        on_event: Any,
+        human_gate: Any,
+        options: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         self.started.set()
         on_event({"kind": "step", "agent": "planner", "summary": "拆分区块"})

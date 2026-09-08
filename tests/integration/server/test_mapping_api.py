@@ -93,9 +93,16 @@ def test_mapping_filters_and_matches(mapping_client: TestClient) -> None:
     )
     assert resp.status_code == 200
     matches = resp.json()["matches"]
-    assert matches == [
-        {"field_label": "期望从事职业", "profile_label": "意向岗位", "confidence": 0.95}
-    ]
+    # 国籍/工作年限：与档案标签精确相等，走快路径（0.99）零 LLM——
+    # 幻觉映射（档案里不存在的标签）在快路径就轮不到 LLM 输出；
+    # 期望从事职业：LLM 命中（0.95）
+    by_field = {m["field_label"]: m for m in matches}
+    assert set(by_field) == {"国籍", "工作年限", "期望从事职业"}
+    assert by_field["国籍"]["profile_label"] == "国籍"
+    assert by_field["工作年限"]["profile_label"] == "工作年限"
+    assert by_field["期望从事职业"] == {
+        "field_label": "期望从事职业", "profile_label": "意向岗位", "confidence": 0.95
+    }
 
 
 def test_mapping_prompt_never_contains_values(mapping_client: TestClient) -> None:
@@ -193,3 +200,80 @@ def test_option_match_empty(mapping_client: TestClient) -> None:
     resp = mapping_client.post("/api/v1/option-match", json={"picks": []})
     assert resp.status_code == 200
     assert resp.json()["choices"] == []
+
+
+def test_mapping_alias_fast_path_skips_llm() -> None:
+    """别名/归一精确匹配零 LLM：常见措辞（手机/毕业院校）直配档案标签。"""
+    import asyncio
+
+    from autooffer_server.services.mapping import PageField, map_fields
+
+    class NoLLM:
+        async def complete(self, messages: list) -> Any:
+            raise AssertionError("快路径命中的字段不应调用 LLM")
+
+    flat = {
+        "sections": [
+            {"key": "basic", "title": "基本信息", "kind": "simple",
+             "values": {"姓名": "张三", "手机号码": "138", "电子邮箱": "a@b.c"}},
+            {"key": "education", "title": "教育经历", "kind": "repeat",
+             "items": [{"学校": "x", "专业": "y"}]},
+        ]
+    }
+    matches = asyncio.run(
+        map_fields(
+            [
+                PageField(label="联系电话", section="联系方式"),
+                PageField(label="毕业院校", section="教育经历"),
+                PageField(label="姓名", section="基本信息"),
+                PageField(label=" 邮 箱 ", section="联系方式"),  # 归一：去空格
+            ],
+            flat,
+            NoLLM(),
+        )
+    )
+    by_field = {m.field_label: m.profile_label for m in matches}
+    assert by_field["联系电话"] == "手机号码"
+    assert by_field["毕业院校"] == "学校"
+    assert by_field["姓名"] == "姓名"
+    assert by_field[" 邮 箱 "] == "电子邮箱"
+
+
+def test_mapping_cache_hit_skips_llm() -> None:
+    """同档案同字段集合第二次映射直接命中缓存（TTL 内零 LLM 调用）。"""
+    import asyncio
+
+    from autooffer_server.services import mapping as mapping_mod
+    from autooffer_server.services.mapping import PageField, map_fields
+
+    flat = {
+        "sections": [
+            {"key": "basic", "title": "基本信息", "kind": "simple",
+             "values": {"手机号码": "138"}},
+        ]
+    }
+    fields = [PageField(label="联系电话", section="联系方式")]
+
+    calls = 0
+
+    class CountingLLM:
+        async def complete(self, messages: list) -> Any:
+            nonlocal calls
+            calls += 1
+            from autooffer_core.llm.interfaces import LLMResponse
+
+            return LLMResponse(text='{"matches": []}')
+
+    mapping_mod._mapping_cache.clear()
+    r1 = asyncio.run(map_fields(fields, flat, CountingLLM(), profile_id="p1"))
+    assert r1 and r1[0].profile_label == "手机号码"
+    # 第二次：LLM 客户端换成必炸的——命中缓存则不会触发
+    class ExplodingLLM:
+        async def complete(self, messages: list) -> Any:
+            raise AssertionError("缓存命中不应调用 LLM")
+
+    r2 = asyncio.run(map_fields(fields, flat, ExplodingLLM(), profile_id="p1"))
+    assert r2 == r1
+    # 无 profile_id 的调用不走缓存（兼容旧调用方）
+    assert calls == 0
+    mapping_mod._mapping_cache.clear()

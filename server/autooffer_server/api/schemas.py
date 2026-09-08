@@ -192,6 +192,9 @@ class OptionPickIn(BaseModel):
 
 class OptionMatchIn(BaseModel):
     picks: list[OptionPickIn] = []
+    profile_id: str = ""
+    """可选：携带时服务端校验每个 value 属于该档案的扁平值集合
+    （防本机其它进程借端点用任意 prompt 白嫖 LLM）。"""
 
 
 class OptionChoiceOut(BaseModel):

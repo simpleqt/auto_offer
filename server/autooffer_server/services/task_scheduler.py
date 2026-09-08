@@ -30,6 +30,7 @@ class TaskRunner(Protocol):
 
     on_event：执行过程中的事件回调（step/state/report）。
     human_gate：需要人工处理时调用，等待其返回表示用户已处理。
+    options：调用方透传的运行参数（use_vision / auto_submit 覆盖等）。
     返回 FillReport 的字典形式。
     """
 
@@ -41,6 +42,7 @@ class TaskRunner(Protocol):
         profile_id: str,
         on_event: Any,
         human_gate: Any,
+        options: dict[str, Any] | None = None,
     ) -> dict[str, Any]: ...
 
 
@@ -92,53 +94,67 @@ class TaskScheduler:
 
     # ---------- 生命周期 ----------
 
-    async def submit(self, task_id: str, url: str, profile_id: str) -> None:
+    async def submit(
+        self, task_id: str, url: str, profile_id: str,
+        options: dict[str, Any] | None = None,
+    ) -> None:
         await self._repo.create_task(task_id, url, profile_id)
-        self._tasks[task_id] = asyncio.create_task(self._execute(task_id, url, profile_id))
+        self._tasks[task_id] = asyncio.create_task(
+            self._execute(task_id, url, profile_id, options)
+        )
         log.info("scheduler.submitted", task_id=task_id, url=url)
 
-    async def _execute(self, task_id: str, url: str, profile_id: str) -> None:
-        async with self._sem:
-            if await self._is_cancelled(task_id):
-                return
-            await self._set_state(task_id, "RUNNING")
-            seq = 0
+    async def _execute(
+        self, task_id: str, url: str, profile_id: str,
+        options: dict[str, Any] | None = None,
+    ) -> None:
+        try:
+            async with self._sem:
+                if await self._is_cancelled(task_id):
+                    return
+                await self._set_state(task_id, "RUNNING")
+                seq = 0
 
-            def on_event(event: Any) -> None:
-                nonlocal seq
-                seq += 1
-                payload = _event_payload(event, seq)
-                self._bus.publish(task_id, payload)
-                self._enqueue_audit(task_id, payload)
+                def on_event(event: Any) -> None:
+                    nonlocal seq
+                    seq += 1
+                    payload = _event_payload(event, seq)
+                    self._bus.publish(task_id, payload)
+                    self._enqueue_audit(task_id, payload)
 
-            async def human_gate(reason: str) -> None:
-                await self._set_state(task_id, "WAITING_HUMAN", wait_reason=reason)
-                gate = self._resume_gates.setdefault(task_id, asyncio.Event())
-                gate.clear()
-                await gate.wait()
-                await self._set_state(task_id, "RUNNING", wait_reason="")
+                async def human_gate(reason: str) -> None:
+                    await self._set_state(task_id, "WAITING_HUMAN", wait_reason=reason)
+                    gate = self._resume_gates.setdefault(task_id, asyncio.Event())
+                    gate.clear()
+                    await gate.wait()
+                    await self._set_state(task_id, "RUNNING", wait_reason="")
 
-            try:
-                report = await self._runner.run(
-                    task_id=task_id, url=url, profile_id=profile_id,
-                    on_event=on_event, human_gate=human_gate,
+                try:
+                    report = await self._runner.run(
+                        task_id=task_id, url=url, profile_id=profile_id,
+                        on_event=on_event, human_gate=human_gate, options=options,
+                    )
+                except asyncio.CancelledError:
+                    await self._set_state(task_id, "CANCELLED")
+                    raise
+                except Exception as exc:
+                    log.error("scheduler.task_failed", task_id=task_id, error=str(exc))
+                    await self._set_state(task_id, "FAILED", wait_reason=str(exc)[:500])
+                    return
+
+                import json
+
+                await self._repo.update_task(
+                    task_id,
+                    report=json.dumps(report, ensure_ascii=False),
+                    page_title=str(report.get("page_title", "")),
                 )
-            except asyncio.CancelledError:
-                await self._set_state(task_id, "CANCELLED")
-                raise
-            except Exception as exc:
-                log.error("scheduler.task_failed", task_id=task_id, error=str(exc))
-                await self._set_state(task_id, "FAILED", wait_reason=str(exc)[:500])
-                return
-
-            import json
-
-            await self._repo.update_task(
-                task_id,
-                report=json.dumps(report, ensure_ascii=False),
-                page_title=str(report.get("page_title", "")),
-            )
-            await self._set_state(task_id, "AWAITING_REVIEW")
+                await self._set_state(task_id, "AWAITING_REVIEW")
+        finally:
+            # 完成的任务即时清理（长期运行的桌面服务不再缓慢泄漏；
+            # 状态与报告已入库，cancel/resume 走 DB 兜底分支不受影响）
+            self._tasks.pop(task_id, None)
+            self._resume_gates.pop(task_id, None)
 
     # ---------- 控制 ----------
 

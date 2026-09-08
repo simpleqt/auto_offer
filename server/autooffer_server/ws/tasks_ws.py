@@ -26,8 +26,11 @@ async def task_events_ws(websocket: WebSocket, task_id: str) -> None:
     queue = ctx.bus.subscribe(task_id)
     log.info("ws.connected", task_id=task_id)
     try:
-        # 历史回放
-        for event in await ctx.repo.list_events(task_id):
+        # 历史回放（先订阅再回放：两步之间产生的事件会同时入队与入库，
+        # 记住已回放的 seq，推送阶段跳过——客户端不收到重复事件）
+        history = await ctx.repo.list_events(task_id)
+        replayed_seqs = {int(e.get("seq") or 0) for e in history}
+        for event in history:
             await websocket.send_json({"type": event["kind"], **event})
         row = await ctx.repo.get_task(task_id)
         if row is not None:
@@ -40,6 +43,8 @@ async def task_events_ws(websocket: WebSocket, task_id: str) -> None:
                 event = await asyncio.wait_for(queue.get(), timeout=_HEARTBEAT_S)
             except TimeoutError:
                 await websocket.send_json({"type": "ping"})
+                continue
+            if int(event.get("seq") or 0) in replayed_seqs:
                 continue
             await websocket.send_json({"type": event.get("kind", "step"), **event})
     except WebSocketDisconnect:

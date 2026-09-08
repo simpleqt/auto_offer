@@ -10,8 +10,10 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
+import time
 from typing import Any
 
 import structlog
@@ -208,13 +210,167 @@ def _catalog(flat: dict[str, Any]) -> list[dict[str, str]]:
     return catalog
 
 
+# ---------- 别名快路径 + 结果缓存（省 LLM 调用） ----------
+
+# 常见站点措辞 → 扁平档案标签（只收录语义唯一、无分区歧义的）。
+# 语义有歧义的（如 毕业时间→哪个分区的结束时间）仍交 LLM 按区块判定。
+_LABEL_ALIASES: dict[str, str] = {
+    "出生地": "籍贯",
+    "成长地": "籍贯",
+    "手机": "手机号码",
+    "联系电话": "手机号码",
+    "联系方式": "手机号码",
+    "电话": "手机号码",
+    "手机号": "手机号码",
+    "邮箱": "电子邮箱",
+    "电子邮件": "电子邮箱",
+    "mail": "电子邮箱",
+    "e-mail": "电子邮箱",
+    "毕业院校": "学校",
+    "就读院校": "学校",
+    "院校": "学校",
+    "就读学校": "学校",
+    "所学专业": "专业",
+    "就读专业": "专业",
+    "最高学历": "学历",
+    "应聘职位": "意向岗位",
+    "期望职位": "意向岗位",
+    "意向职位": "意向岗位",
+    "期望薪资": "期望月薪(税前)",
+    "期望月薪": "期望月薪(税前)",
+    "现月薪": "现月薪(税前)",
+    "目前月薪": "现月薪(税前)",
+    "居住城市": "现居住城市",
+    "所在城市": "现居住城市",
+    "现居城市": "现居住城市",
+    "证件号码": "身份证号",
+    "身份证号码": "身份证号",
+    "自我介绍": "自我评价",
+    "个人评价": "自我评价",
+    "个人简介": "自我评价",
+    "求职信": "自我评价",
+}
+
+_ALIASES_CANON: dict[str, str] = {}
+
+
+def _canon(label: str) -> str:
+    """标签归一：去空白/常见标点/括号内容、小写——精确匹配的比对口径。"""
+    s = re.sub(r"[\s:：,，.。;；、()（）*＊\-_/\\]", "", str(label or ""))
+    return s.lower()
+
+
+for _k, _v in _LABEL_ALIASES.items():
+    _ALIASES_CANON[_canon(_k)] = _v
+
+
+# 映射结果缓存：(profile_id, 档案目录哈希, 页面字段标签哈希) → matches。
+# 同站点重复填写（同档案）直接命中，零 LLM 调用；TTL 1 小时，容量 200 条。
+_CACHE_TTL_SECONDS = 3600
+_CACHE_MAX_ENTRIES = 200
+_mapping_cache: dict[tuple[str, str, str], tuple[float, list[MappingMatch]]] = {}
+
+
+def _cache_key(
+    profile_id: str, flat: dict[str, Any], fields: list[PageField]
+) -> tuple[str, str, str]:
+    catalog_part = json.dumps(_catalog(flat), ensure_ascii=False, sort_keys=True)
+    fields_part = json.dumps(
+        [
+            [f.label, f.section or "", f.kind or "", f.placeholder or ""]
+            for f in fields[:60]
+        ],
+        ensure_ascii=False,
+    )
+    return (
+        profile_id,
+        hashlib.sha256(catalog_part.encode("utf-8")).hexdigest(),
+        hashlib.sha256(fields_part.encode("utf-8")).hexdigest(),
+    )
+
+
+def _cache_get(key: tuple[str, str, str]) -> list[MappingMatch] | None:
+    hit = _mapping_cache.get(key)
+    if hit is None:
+        return None
+    ts, matches = hit
+    if time.time() - ts > _CACHE_TTL_SECONDS:
+        _mapping_cache.pop(key, None)
+        return None
+    return matches
+
+
+def _cache_put(key: tuple[str, str, str], matches: list[MappingMatch]) -> None:
+    if len(_mapping_cache) >= _CACHE_MAX_ENTRIES:
+        # 简单淘汰：清掉最早写入的一批（低频调用，无需 LRU）
+        for k in list(_mapping_cache)[: _CACHE_MAX_ENTRIES // 4]:
+            _mapping_cache.pop(k, None)
+    _mapping_cache[key] = (time.time(), matches)
+
+
 async def map_fields(
     fields: list[PageField],
     flat: dict[str, Any],
     llm: Any,
+    *,
+    profile_id: str = "",
 ) -> list[MappingMatch]:
-    """页面字段 → 档案标签映射。模型输出格式抖动时带纠错提示重试一次
-    （一次 JSON 解析失败不再让整个 /mapping 500，插件第二段全废）。"""
+    """页面字段 → 档案标签映射。
+
+    三级漏斗（省 LLM 调用）：
+    1. 结果缓存：同档案同页面字段集合直接命中（TTL 1h）；
+    2. 别名/归一精确匹配：常见措辞（联系电话→手机号码）零 LLM 直配；
+    3. 剩余字段才送 LLM，输出格式抖动时带纠错提示重试一次。
+    """
+    catalog = _catalog(flat)
+    if not fields or not catalog:
+        return []
+
+    cache_key = _cache_key(profile_id, flat, fields)
+    if profile_id:
+        cached = _cache_get(cache_key)
+        if cached is not None:
+            log.info("mapping.cache_hit", fields=len(fields), matches=len(cached))
+            return cached
+
+    # 快路径 1：标签归一后与档案标签精确相等（去空格/标点/大小写）
+    canon_by_label = {_canon(c["label"]): c["label"] for c in catalog}
+    # 快路径 2：别名词典（常见站点措辞 → 档案标签）
+    matches: list[MappingMatch] = []
+    unresolved: list[PageField] = []
+    for f in fields:
+        canon = _canon(f.label)
+        target = None
+        alias_target = _ALIASES_CANON.get(canon)
+        if alias_target is not None and _canon(alias_target) in canon_by_label:
+            target = canon_by_label[_canon(alias_target)]
+        elif canon in canon_by_label:
+            target = canon_by_label[canon]
+        if target is not None:
+            matches.append(
+                MappingMatch(field_label=f.label, profile_label=target, confidence=0.99)
+            )
+        else:
+            unresolved.append(f)
+    if unresolved:
+        llm_matches = await _map_fields_llm(unresolved, flat, llm)
+        matches.extend(llm_matches)
+    if profile_id and matches:
+        _cache_put(cache_key, matches)
+    log.info(
+        "mapping.done", fields=len(fields), matches=len(matches),
+        fast=sum(1 for m in matches if m.confidence >= 0.99),
+    )
+    return matches
+
+
+async def _map_fields_llm(
+    fields: list[PageField],
+    flat: dict[str, Any],
+    llm: Any,
+) -> list[MappingMatch]:
+    """页面字段 → 档案标签映射（LLM 通道）。模型输出格式抖动时带纠错提示
+    重试一次（一次 JSON 解析失败不再让整个 /mapping 500，插件第二段全废）。"""
     catalog = _catalog(flat)
     if not fields or not catalog:
         return []

@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Annotated, Any
 
 import structlog
-from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
+from fastapi import APIRouter, File, Form, HTTPException, Query, Request, UploadFile
 
 from autooffer_core import __version__
 from autooffer_core.applications import ApplicationStore
@@ -45,6 +45,26 @@ router = APIRouter(prefix="/api/v1")
 
 # 身份证形状（选选项通道兜底拒绝：restricted 值不进 LLM 提示词）
 _IDCARD_RE = re.compile(r"^\d{17}[\dXx]$|^\d{15}$")
+
+# 上传限制：20MB 上限 + 可执行/脚本扩展名黑名单（防超大文件 OOM 与恶意载荷落盘）
+MAX_UPLOAD_BYTES = 20 * 1024 * 1024
+_BLOCKED_UPLOAD_EXTS = {
+    ".exe", ".bat", ".cmd", ".sh", ".js", ".mjs", ".vbs", ".scr",
+    ".com", ".msi", ".jar", ".html", ".htm", ".hta",
+}
+
+
+async def _read_upload(file: UploadFile) -> bytes:
+    """读上传文件字节：扩展名黑名单 + 大小上限 + 空文件校验。"""
+    suffix = Path(file.filename or "").suffix.lower()
+    if suffix in _BLOCKED_UPLOAD_EXTS:
+        raise HTTPException(415, f"不支持的文件类型: {suffix or '(无扩展名)'}")
+    data = await file.read(MAX_UPLOAD_BYTES + 1)
+    if len(data) > MAX_UPLOAD_BYTES:
+        raise HTTPException(413, "文件超过 20MB 上限")
+    if not data:
+        raise HTTPException(422, "空文件")
+    return data
 
 
 def _resolve_confined(raw: str, roots: list[str]) -> str | None:
@@ -266,8 +286,11 @@ async def map_fields_api(request: Request, body: MappingIn) -> dict[str, Any]:
     ]
     try:
         # 服务端截止 190s（略晚于插件 180s abort）：插件超时放弃后本地模型
-        # 不再无限空烧；映射内部自带一次格式纠错重试
-        matches = await asyncio.wait_for(map_fields(page_fields, flat, llm), timeout=190)
+        # 不再无限空烧；映射内部：别名快路径 + 缓存 + 一次格式纠错重试
+        matches = await asyncio.wait_for(
+            map_fields(page_fields, flat, llm, profile_id=body.profile_id),
+            timeout=190,
+        )
     except TimeoutError:
         raise HTTPException(504, "映射超时（本地模型响应过慢）") from None
     except LLMError as exc:
@@ -283,11 +306,14 @@ async def option_match_api(request: Request, body: OptionMatchIn) -> dict[str, A
 
     隐私说明：字段值会进入 LLM 提示词——与简历解析同一信任域
     （该值本就要写入目标页面），且仅逐字段发送。restricted 来源的值
-    （身份证号/家庭电话）应由插件先行过滤，此处再做身份证形状兜底拒绝。
+    （身份证号/家庭电话）应由插件先行过滤，此处再做双重兜底：
+    身份证形状拒绝 + 值必须属于该档案的扁平值集合（防本机其它进程
+    借此端点用任意 prompt 白嫖 LLM）。
     """
     import asyncio
 
     from autooffer_core.errors import LLMError
+    from autooffer_server.services.flat_profile import flatten_profile
     from autooffer_server.services.mapping import OptionPick, match_options
 
     ctx = _ctx(request)
@@ -306,6 +332,28 @@ async def option_match_api(request: Request, body: OptionMatchIn) -> dict[str, A
     ]
     if not picks:
         return {"choices": []}
+    if body.profile_id:
+        payload: dict[str, Any] | None = await ctx.repo.get_profile(body.profile_id)
+        if payload is None:
+            raise HTTPException(404, f"档案不存在: {body.profile_id}")
+        allowed_values = set()
+        for sec in flatten_profile(payload, include_sensitive=False).get("sections", []):
+            items = (
+                [sec.get("values", {})]
+                if sec.get("kind") == "simple"
+                else sec.get("items", [])
+            )
+            for item in items:
+                for v in item.values():
+                    if v is not None and str(v).strip():
+                        allowed_values.add(str(v).strip())
+        before = len(picks)
+        picks = [p for p in picks if str(p.value or "").strip() in allowed_values]
+        dropped = before - len(picks)
+        if dropped:
+            log.info("option_match.foreign_values_dropped", dropped=dropped)
+        if not picks:
+            return {"choices": []}
     try:
         choices = await asyncio.wait_for(match_options(picks, llm), timeout=130)
     except TimeoutError:
@@ -395,7 +443,7 @@ async def upload_resume(
     ctx.config.ensure_dirs()
     name = Path(file.filename or "resume").name
     dest = ctx.config.attachments_dir / f"{uuid.uuid4().hex[:8]}_{name}"
-    dest.write_bytes(await file.read())
+    dest.write_bytes(await _read_upload(file))
     try:
         attachment = Attachment.model_validate(
             {
@@ -512,7 +560,7 @@ async def parse_resume_api(
     ctx.config.ensure_dirs()
     name = Path(file.filename or "resume").name
     dest = ctx.config.uploads_dir / f"{uuid.uuid4().hex[:8]}_{name}"
-    dest.write_bytes(await file.read())
+    dest.write_bytes(await _read_upload(file))
     try:
         profile, low_conf = await parse_resume(str(dest), llm)
     except AutoOfferError as exc:
@@ -541,7 +589,7 @@ async def upload_attachment(
     ctx.config.ensure_dirs()
     name = Path(file.filename or "attachment").name
     dest = ctx.config.attachments_dir / f"{uuid.uuid4().hex[:8]}_{name}"
-    dest.write_bytes(await file.read())
+    dest.write_bytes(await _read_upload(file))
     try:
         attachment = Attachment.model_validate(
             {
@@ -567,14 +615,17 @@ async def create_task(request: Request, body: TaskIn) -> dict[str, Any]:
     if await ctx.repo.get_profile(body.profile_id) is None:
         raise HTTPException(404, f"档案不存在: {body.profile_id}")
     task_id = f"task-{uuid.uuid4().hex[:10]}"
-    await ctx.scheduler.submit(task_id, body.url, body.profile_id)
+    await ctx.scheduler.submit(task_id, body.url, body.profile_id, body.options or None)
     row: dict[str, Any] | None = await ctx.repo.get_task(task_id)
     assert row is not None
     return row
 
 
 @router.get("/tasks", response_model=list[TaskOut])
-async def list_tasks(request: Request, limit: int = 50) -> list[dict[str, Any]]:
+async def list_tasks(
+    request: Request,
+    limit: Annotated[int, Query(ge=1, le=500)] = 50,
+) -> list[dict[str, Any]]:
     result: list[dict[str, Any]] = await _ctx(request).repo.list_tasks(limit)
     return result
 
@@ -601,7 +652,11 @@ async def cancel_task(request: Request, task_id: str) -> dict[str, bool]:
 
 
 @router.get("/tasks/{task_id}/events")
-async def task_events(request: Request, task_id: str, limit: int = 500) -> list[dict[str, Any]]:
+async def task_events(
+    request: Request,
+    task_id: str,
+    limit: Annotated[int, Query(ge=1, le=2000)] = 500,
+) -> list[dict[str, Any]]:
     result: list[dict[str, Any]] = await _ctx(request).repo.list_events(task_id, limit)
     return result
 
