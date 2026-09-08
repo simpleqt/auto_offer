@@ -19,7 +19,14 @@
 
 (() => {
   "use strict";
-  if (window.__AUTOOFFER_CONTENT__) {
+  // 与 manifest.json 版本同步：插件升级后旧脚本可能仍驻留在未刷新的页面里。
+  // 安装守护按版本比较（同版本幂等；新版本可覆盖旧安装），消息处理也校验
+  // 版本——旧监听器不再应答新后台的消息，避免新旧引擎同时填写同一页面。
+  const SCRIPT_VERSION = "0.2.33";
+  if (
+    window.__AUTOOFFER_CONTENT__ &&
+    window.__AUTOOFFER_CONTENT__.version === SCRIPT_VERSION
+  ) {
     return; // 已注入（scripting.executeScript 重复调用幂等）
   }
 
@@ -1183,6 +1190,24 @@
   const SCORE_THRESHOLD = 55;
   const SCORE_THRESHOLD_PREFILLED = 84;
 
+  /** 预填纠偏用的宽松值比较：紧凑文本相等，或（日期类）剥离非数字后相等。 */
+  const sameLooseValue = (a, b) => {
+    const x = compact(a);
+    const y = compact(b);
+    if (!x || !y) {
+      return false;
+    }
+    if (x === y) {
+      return true;
+    }
+    const na = String(a);
+    const nb = String(b);
+    if (/(19|20)\d{2}/.test(na) && /(19|20)\d{2}/.test(nb)) {
+      return na.replace(/[^\d]/g, "") === nb.replace(/[^\d]/g, "");
+    }
+    return false;
+  };
+
   function buildPlan(fields, entries, mapping, options) {
     const candidates = [];
     // 区间字段预配对：页面把起止合并为同标签的两个输入（如飞书「起止时间」），
@@ -1219,10 +1244,27 @@
             endEntries.set(e.itemIndex, ei);
           }
         });
+        // 配对顺序：优先按 placeholder/旁注文本分类（开始/结束线索），
+        // 无法分类时回退扫描序交替假设（start,end,start,end…）
+        const hints = group.map((x) =>
+          /开始|起始|从/.test(`${x.f.placeholder || ""} ${x.f.nearbyText || ""}`)
+            ? "start"
+            : /结束|止|至|到/.test(`${x.f.placeholder || ""} ${x.f.nearbyText || ""}`)
+              ? "end"
+              : ""
+        );
+        let order = group.map((_, i) => i);
+        if (hints.every((h) => h) && hints.filter((h) => h === "start").length ===
+              hints.filter((h) => h === "end").length) {
+          order = [
+            ...hints.map((h, i) => (h === "start" ? i : -1)).filter((i) => i >= 0),
+            ...hints.map((h, i) => (h === "end" ? i : -1)).filter((i) => i >= 0),
+          ];
+        }
         const itemIdxs = [...startEntries.keys()].sort((a, b) => a - b);
         itemIdxs.forEach((idx, k) => {
-          const fStart = group[k * 2];
-          const fEnd = group[k * 2 + 1];
+          const fStart = group[order[k * 2] ?? k * 2];
+          const fEnd = group[order[k * 2 + 1] ?? k * 2 + 1];
           const eiStart = startEntries.get(idx);
           const eiEnd = endEntries.get(idx);
           if (fStart && eiStart !== undefined) {
@@ -1278,11 +1320,13 @@
         let threshold = field.currentValue ? SCORE_THRESHOLD_PREFILLED : SCORE_THRESHOLD;
         // 纠偏：预填值与档案不一致（多为站点解析简历产生的乱配预填）时按普通阈值覆盖，
         // 值一致则不写（本就正确）。options.correctPrefilled=false 可关。
+        // 「一致」按宽松口径：日期格式差异（1999年3月 vs 1999-03）不算不一致，
+        // 否则会把语义相同的值重写一遍还标 corrected 误导报告。
         if (
           field.currentValue &&
           threshold === SCORE_THRESHOLD_PREFILLED &&
           options && options.correctPrefilled !== false &&
-          String(entry.value).trim() !== String(field.currentValue).trim()
+          !sameLooseValue(String(entry.value), String(field.currentValue))
         ) {
           threshold = SCORE_THRESHOLD;
         }
@@ -2382,6 +2426,9 @@
           if (direct) {
             return direct;
           }
+          // 级联/日历半途失败后面板常停在中间层：关掉再交收割/AI 轮，
+          // 不让残留面板污染后续字段的选项搜索
+          await closePopupLayers();
           return { ok: false, reason: `日历:${cal.reason}；下拉:${choice.reason}` };
         }
         return await tryFillCustomChoiceField(field, entry.value);
@@ -2571,12 +2618,15 @@
     return predicate();
   }
 
-  /** 档案条目多于页面区块时点「添加XX经历」补足（教育/项目/工作实习，最多补到 4 块）。
+  /** 档案条目多于页面区块时点「添加XX经历」补足（教育/项目/工作实习，最多补到 8 块）。
    *  支持初始零区块的模块（飞书项目/工作经历默认空，需点添加才出现字段）。 */
   async function ensureRepeatBlocks(flatProfile, options) {
     if (options && options.noAddBlocks) {
       return;
     }
+    // 总时长上限：站点点击无响应（上限提示浮层等）时不再耗满每击 7s 等待
+    const deadline = Date.now() + 25000;
+    const cheapCount = () => document.querySelectorAll(CONTROL_SELECTOR).length;
     for (const section of (flatProfile && flatProfile.sections) || []) {
       if (section.kind !== "repeat") {
         continue;
@@ -2592,6 +2642,9 @@
       // 上限 8：科研+工程混合的项目档案常超过 4 条；每次点击都有锚点增长校验兜底
       const target = Math.min(need, 8);
       for (let clicks = 0; clicks < target + 2; clicks += 1) {
+        if (Date.now() > deadline) {
+          break;
+        }
         const blocks = countAnchorFields(rule);
         if (blocks >= target) {
           break;
@@ -2600,12 +2653,17 @@
         if (!btn) {
           break;
         }
+        // 增长等待前置轻量检查：控件总数没变就不做全页扫描
+        //（countAnchorFields 每次都是全量 querySelectorAll+标签推断，长表单上
+        // 150ms 一轮会阻塞主线程）
+        const beforeTotal = cheapCount();
+        const grewFast = () => cheapCount() !== beforeTotal && countAnchorFields(rule) > blocks;
         clickActionElement(btn);
-        let grew = await waitFor(() => countAnchorFields(rule) > blocks, 3500);
+        let grew = await waitFor(grewFast, 3500);
         if (!grew) {
           // 部分自绘按钮（飞书 ud）不认合成 click：补发指针序列再等一次
           dispatchPointerSeq(btn);
-          grew = await waitFor(() => countAnchorFields(rule) > blocks, 3500);
+          grew = await waitFor(grewFast, 3500);
         }
         if (!grew) {
           break;
@@ -2652,6 +2710,14 @@
     }
     scroller.scrollTop = 0;
     await sleep(80);
+  }
+
+  /** 关闭打开的弹层面板（模拟外部点击）——级联下钻半途失败后面板停在
+   *  中间层，不关会让后续字段的面板搜索在错误层级进行。 */
+  async function closePopupLayers() {
+    document.body.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
+    document.body.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
+    await sleep(150);
   }
 
   /** 收割固定选项字段的选项清单（native select 直接读；自定义下拉取新出现的弹层）。 */
@@ -2802,9 +2868,91 @@
     return results;
   }
 
-  // ---------- 主入口 ----------
+  // ---------- 主入口（多步向导：逐页填写，有界翻页，累积报告） ----------
+
+  /** 可见且不像提交的「下一步」类按钮（多步向导推进用）。
+   *  命中词保守（下一步/保存并继续），带 提交/投递/发送 字样的一律不碰。 */
+  function findWizardNextButton() {
+    const BLOCK_RE = /提交|投递|发送|上传|登录|注册|支付/;
+    for (const el of document.querySelectorAll('button,a,[role="button"]')) {
+      if (!isVisible(el)) {
+        continue;
+      }
+      const t = norm(el.textContent, 12);
+      if (!t || BLOCK_RE.test(t)) {
+        continue;
+      }
+      if (/下一步|保存并继续|继续下一步/.test(t) || /^next$/i.test(compact(t))) {
+        return el;
+      }
+    }
+    return null;
+  }
+
+  /** 页面签名：可见控件 标签#occurrence 序列——翻页后无变化说明被必填
+   *  校验拦住，停止推进（防同页死循环重填）。 */
+  function pageSignature() {
+    return scanFields(detectSiteAdapter())
+      .fields.filter((f) => f.label)
+      .map((f) => `${f.section || ""}|${f.label}#${f.occurrenceIndex || 0}`)
+      .join(";");
+  }
+
+  function mergeFragments(frags) {
+    const first = frags[0];
+    const sum = (key) =>
+      frags.reduce((acc, f) => acc + ((f.counts && f.counts[key]) || 0), 0);
+    const uniqBy = (arr, keyFn) => {
+      const seen = new Set();
+      const out = [];
+      for (const x of arr) {
+        const k = keyFn(x);
+        if (!seen.has(k)) {
+          seen.add(k);
+          out.push(x);
+        }
+      }
+      return out;
+    };
+    return {
+      site: first.site,
+      pageTitle:
+        frags.map((f) => f.pageTitle).filter(Boolean).pop() || first.pageTitle,
+      url: first.url,
+      counts: { filled: sum("filled"), failed: sum("failed"), skipped: sum("skipped") },
+      filled: frags.flatMap((f) => f.filled || []),
+      failed: frags.flatMap((f) => f.failed || []),
+      skipped: frags.flatMap((f) => f.skipped || []),
+      unmatched: frags.flatMap((f) => f.unmatched || []),
+      formErrors: uniqBy(frags.flatMap((f) => f.formErrors || []), (t) => t),
+      optionFields: uniqBy(frags.flatMap((f) => f.optionFields || []), (f) => f.label),
+      uploadCount: frags.reduce((acc, f) => acc + (f.uploadCount || 0), 0),
+    };
+  }
 
   async function autofill(flatProfile, options) {
+    const frags = [];
+    const maxPages = 5; // 有界：防「下一步」误识别导致一路翻穿站点
+    for (let page = 0; page < maxPages; page += 1) {
+      frags.push(await fillOnePage(flatProfile, options));
+      if (options && options.noAdvance) {
+        break;
+      }
+      const next = findWizardNextButton();
+      if (!next) {
+        break;
+      }
+      const sigBefore = pageSignature();
+      clickActionElement(next);
+      await sleep(700);
+      if (pageSignature() === sigBefore) {
+        break;
+      }
+    }
+    return mergeFragments(frags);
+  }
+
+  async function fillOnePage(flatProfile, options) {
     const adapter = detectSiteAdapter();
     await ensureRepeatBlocks(flatProfile, options);
     const { fields, uploads } = scanFields(adapter);
@@ -3135,6 +3283,7 @@
   // ---------- 暴露 ----------
 
   window.__AUTOOFFER_CONTENT__ = {
+    version: SCRIPT_VERSION,
     autofill,
     detectSiteAdapter,
     scanFields,
@@ -3147,11 +3296,30 @@
 
   if (typeof chrome !== "undefined" && chrome.runtime && chrome.runtime.onMessage) {
     chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
+      // 版本校验：插件升级后驻留在旧页面里的旧引擎不再应答新后台的消息
+      if (msg && msg.version && msg.version !== SCRIPT_VERSION) {
+        return undefined;
+      }
+      if (msg && msg.type === "autooffer:probe") {
+        // 帧探测：本帧可扫描的可见字段数（background 据此决定往哪些帧派填报）
+        try {
+          const count = scanFields(detectSiteAdapter()).fields.filter(
+            (f) => f.element && f.element.isConnected
+          ).length;
+          sendResponse({ fields: count });
+        } catch {
+          sendResponse({ fields: 0 });
+        }
+        return undefined;
+      }
       if (msg && msg.type === "autooffer:fill") {
         autofill(msg.profile || {}, {
           mapping: msg.mapping || null,
           overrides: msg.overrides || null,
           attachments: msg.attachments || null,
+          noAddBlocks: msg.noAddBlocks || false,
+          noAdvance: msg.noAdvance || false,
+          noSelfHeal: msg.noSelfHeal || false,
         })
           .then(sendResponse)
           .catch((err) => sendResponse({ error: String((err && err.message) || err) }));

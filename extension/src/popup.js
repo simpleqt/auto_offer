@@ -130,7 +130,22 @@ async function startFill() {
   $("btn-fill").textContent = "填写中…";
   $("report").classList.add("hidden");
   // 阶段进度：后台把当前阶段写进 aoProgress，这里轮询显示（AI 映射较慢时不至于像卡死）
+  let ticks = 0;
+  const FILL_TIMEOUT_TICKS = 600; // 600ms × 600 = 6 分钟兜底
+  let timedOut = false;
   const progressTimer = setInterval(async () => {
+    ticks += 1;
+    if (ticks >= FILL_TIMEOUT_TICKS) {
+      timedOut = true;
+      clearInterval(progressTimer);
+      $("btn-fill").disabled = false;
+      $("btn-fill").textContent = "开始填写";
+      renderError(
+        "等待超时（6 分钟）：填写可能仍在后台进行（本地模型较慢），" +
+          "请稍后刷新页面重试，或查看运行日志排查。"
+      );
+      return;
+    }
     try {
       const { aoProgress } = await chrome.storage.local.get("aoProgress");
       if (aoProgress && aoProgress.text) {
@@ -148,12 +163,17 @@ async function startFill() {
       profileId,
       sensitive: $("opt-sensitive").checked,
     });
+    if (timedOut) {
+      return; // 超时提示已展示，丢弃迟到结果
+    }
     if (report && report.error) {
       throw new Error(report.error);
     }
     renderReport(report);
   } catch (err) {
-    renderError(String((err && err.message) || err));
+    if (!timedOut) {
+      renderError(String((err && err.message) || err));
+    }
   } finally {
     clearInterval(progressTimer);
     $("btn-fill").disabled = false;

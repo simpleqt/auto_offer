@@ -160,25 +160,70 @@ async function handleStatus() {
   }
 }
 
-async function runFillPass(tabId, flat, options) {
-  const report = await chrome.tabs.sendMessage(tabId, {
-    type: "autooffer:fill",
-    profile: flat,
-    ...options,
-  });
-  if (!report || report.error) {
-    throw new Error((report && report.error) || "内容脚本未返回报告");
+async function runFillPass(tabId, flat, options, frameIds) {
+  // 逐帧派发：iframe 渲染的表单（整页或分区）各自填报后合并报告。
+  // 单帧（绝大多数站点）时行为与原先一致。
+  const targets = frameIds && frameIds.length ? frameIds : [0];
+  const version = chrome.runtime.getManifest().version;
+  let primary = null;
+  for (const frameId of targets) {
+    const report = await chrome.tabs.sendMessage(
+      tabId,
+      { type: "autooffer:fill", version, profile: flat, ...options },
+      { frameId }
+    );
+    if (!report || report.error) {
+      throw new Error((report && report.error) || "内容脚本未返回报告");
+    }
+    primary = primary ? mergeReports(primary, report, { crossFrame: true }) : report;
   }
-  return report;
+  return primary;
 }
 
-function mergeReports(primary, secondary) {
+/** 枚举标签页里「有表单字段」的帧（顶层 + iframe）。
+ *  webNavigation 不可用或全部探测失败时退回顶层。 */
+async function fillableFrames(tabId) {
+  let frames = [{ frameId: 0 }];
+  try {
+    const all = await chrome.webNavigation.getAllFrames({ tabId });
+    if (Array.isArray(all) && all.length > 0) {
+      frames = all.map((f) => ({ frameId: f.frameId }));
+    }
+  } catch {
+    /* 无 webNavigation 权限时退回顶层 */
+  }
+  const version = chrome.runtime.getManifest().version;
+  const out = [];
+  for (const { frameId } of frames) {
+    try {
+      const probe = await chrome.tabs.sendMessage(
+        tabId,
+        { type: "autooffer:probe", version },
+        { frameId }
+      );
+      if (probe && probe.fields > 0) {
+        out.push(frameId);
+      }
+    } catch {
+      /* 该帧无内容脚本（无权限/非 http）——跳过 */
+    }
+  }
+  return out.length > 0 ? out : [0];
+}
+
+function mergeReports(primary, secondary, opts) {
   // 第二段只统计「新增」的填写：按 label#occurrence 去重——repeat 多区块的
-  // 同标签字段（第 2 段教育的「学校名称」）不再被第一段的同名行吃掉
+  // 同标签字段（第 2 段教育的「学校名称」）不再被第一段的同名行吃掉。
+  // 跨帧合并（iframe 各自独立表单）不去重：不同帧的同名字段是不同字段。
+  const crossFrame = Boolean(opts && opts.crossFrame);
   const keyOf = (r) => `${r.field || r.label}#${r.occurrence || 0}`;
   const filledKeys = new Set(primary.filled.map(keyOf));
-  const newFilled = secondary.filled.filter((r) => !filledKeys.has(keyOf(r)));
-  const newFailed = secondary.failed.filter((r) => !filledKeys.has(keyOf(r)));
+  const newFilled = crossFrame
+    ? secondary.filled
+    : secondary.filled.filter((r) => !filledKeys.has(keyOf(r)));
+  const newFailed = crossFrame
+    ? secondary.failed
+    : secondary.failed.filter((r) => !filledKeys.has(keyOf(r)));
   // skipped 取两段并集（field+reason 去重）：第二段整体覆盖会丢掉第一段的
   // 「已有值，跳过」——那是弹窗填充率公式的分子来源
   const seenSkip = new Set();
@@ -203,11 +248,20 @@ function mergeReports(primary, secondary) {
     filled: [...primary.filled, ...newFilled],
     failed: [...primary.failed, ...newFailed],
     skipped,
-    unmatched: secondary.unmatched || [],
-    optionFields: secondary.optionFields || [],
-    // 页面校验提示以最新一轮为准（第二段填得更全，标红更真），为空回退第一段
-    formErrors:
-      (secondary.formErrors && secondary.formErrors.length ? secondary.formErrors : primary.formErrors) || [],
+    unmatched: crossFrame
+      ? [...(primary.unmatched || []), ...(secondary.unmatched || [])]
+      : secondary.unmatched || [],
+    optionFields: crossFrame
+      ? [...(primary.optionFields || []), ...(secondary.optionFields || [])]
+      : secondary.optionFields || [],
+    // 页面校验提示以最新一轮为准（第二段填得更全，标红更真），为空回退第一段；
+    // 跨帧合并取并集
+    formErrors: crossFrame
+      ? [...new Set([...(primary.formErrors || []), ...(secondary.formErrors || [])])]
+      : (secondary.formErrors && secondary.formErrors.length
+          ? secondary.formErrors
+          : primary.formErrors) || [],
+    uploadCount: ((primary.uploadCount || 0) + (secondary.uploadCount || 0)) || undefined,
   };
 }
 
@@ -329,13 +383,28 @@ async function runAutofill(msg) {
     `${base}/api/v1/profiles/${encodeURIComponent(msg.profileId)}/flat?sensitive=${sensitive}`
   );
   await chrome.scripting.executeScript({
-    target: { tabId },
+    target: { tabId, allFrames: true },
     files: ["src/content.js"],
   });
+  // 帧探测：iframe 渲染的表单（整页内嵌投递页）也能填；
+  // 全帧无可填字段时退回顶层重试（探测可能早于渲染完成）
+  let frames = await fillableFrames(tabId);
 
   // 第一段：本地规则直填（零 LLM）
   await setProgress("规则直填…");
-  let report = await runFillPass(tabId, flat, {});
+  let report = await runFillPass(tabId, flat, {}, frames);
+  if (
+    frames.length === 1 &&
+    frames[0] === 0 &&
+    report.counts &&
+    report.counts.filled + report.counts.failed === 0
+  ) {
+    const retryFrames = await fillableFrames(tabId);
+    if (retryFrames.length > 1 || retryFrames[0] !== 0) {
+      frames = retryFrames;
+      report = await runFillPass(tabId, flat, {}, frames);
+    }
+  }
   await aoLog("info", "fill.pass1", {
     filled: report.counts ? report.counts.filled : 0,
     failed: report.counts ? report.counts.failed : 0,
@@ -391,7 +460,7 @@ async function runAutofill(msg) {
       secondBase.attachments = attachments;
     }
     if (Object.keys(secondBase).length > 0) {
-      const second = await runFillPass(tabId, flat, secondBase);
+      const second = await runFillPass(tabId, flat, secondBase, frames);
       // via 标注只认 AI：mapping 命中该字段才标「ai」——第二遍同样会跑
       // 规则引擎，规则补上的行不再是 AI 的功劳
       const mappingKeys = new Set(Object.keys(mapping));
@@ -419,7 +488,9 @@ async function runAutofill(msg) {
             {
               method: "POST",
               headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ picks }),
+              // profile_id 供服务端校验 value 确属该档案（防本机其它进程
+              // 借此端点白嫖 LLM 打任意 prompt）
+              body: JSON.stringify({ picks, profile_id: msg.profileId || "" }),
             },
             120000
           );
@@ -438,7 +509,7 @@ async function runAutofill(msg) {
         if (Object.keys(overrides).length === 0) {
           break;
         }
-        const second = await runFillPass(tabId, flat, { overrides });
+        const second = await runFillPass(tabId, flat, { overrides }, frames);
         const ovLabels = new Set(
           Object.keys(overrides).map((k) => (k.includes("#") ? k.split("#")[0] : k))
         );
