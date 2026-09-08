@@ -2136,10 +2136,195 @@
     return { ok: true, via: "面板搜索" };
   }
 
+  /**
+   * 并排级联选择器：同一下拉组里省/市/区县是平行的多个 select（长虹
+   * cascader-plugins-wrap 模式），上级选中后下级才加载选项、区县 select
+   * 可能动态出现。逐个 select 用「值剩余前缀」挑最长匹配选项；全部选完
+   * 以组合值做整体校验（单 select 回读只含一层必然不一致）。
+   * 不适用（非并排结构）返回 null 走原路径。
+   */
+  async function tryFillParallelCascade(field, value) {
+    const holder =
+      field.container ||
+      (field.element instanceof Element
+        ? field.element.closest(".ant-form-item, [class*='form-item'], [class*='field']")
+        : null);
+    if (!holder) {
+      return null;
+    }
+    const selectsOf = () =>
+      Array.from(holder.querySelectorAll(".ant-select, [class*='select--single'], select"))
+        .filter((s) => isVisible(s) && s.tagName !== "SELECT")
+        .map((s) => ({
+          root: s,
+          read: () => {
+            const v = s.querySelector(
+              '[class*="selection-selected"], [class*="selection__rendered"]'
+            );
+            const t = v ? norm(v.textContent, 24) : "";
+            return /^(请选择|请输入)?$/.test(t) ? "" : t;
+          },
+        }));
+    let selects = selectsOf();
+    if (selects.length < 2) {
+      return null; // 普通单 select：不是并排级联
+    }
+    // 已选层拼起来是值前缀 → 从剩余段继续；完全对不上则从头重选
+    let combined = selects.map((x) => x.read()).filter(Boolean).join("");
+    let remaining = norm(String(value), 60);
+    if (combined && remaining.startsWith(combined)) {
+      remaining = remaining.slice(combined.length);
+      if (!remaining) {
+        return { ok: true, trust: true, via: "并排级联" }; // 已完整（幂等重跑）
+      }
+    }
+    let moved = false;
+    for (let round = 0; round < 5; round += 1) {
+      selects = selectsOf();
+      const target = selects.find((x) => !x.read());
+      if (!target || !remaining) {
+        break;
+      }
+      await closeStalePanels();
+      const trig =
+        target.root.querySelector('[class*="selection"], [class*="selector"]') || target.root;
+      clickActionElement(trig);
+      let layers = [];
+      for (let i = 0; i < 6 && layers.length === 0; i += 1) {
+        await sleep(220);
+        layers = findPopupLayers().filter((l) => l.querySelector("li, [class*='option']"));
+      }
+      if (layers.length === 0) {
+        break;
+      }
+      const menu = layers[layers.length - 1];
+      const opts = Array.from(menu.querySelectorAll("li, [class*='option']")).filter(isVisible);
+      const scored = opts
+        .map((o) => ({ o, t: norm(o.textContent, 20) }))
+        .filter((x) => x.t.length >= 2 && remaining.startsWith(x.t))
+        .sort((a, b) => b.t.length - a.t.length);
+      if (scored.length === 0) {
+        await closeStalePanels();
+        break; // 值在这一层没有对应选项（如镇级）：止步于站点可表达层级
+      }
+      clickActionElement(scored[0].o);
+      moved = true;
+      await sleep(420);
+      remaining = remaining.slice(scored[0].t.length);
+      await closeStalePanels();
+      await sleep(160);
+    }
+    if (!moved && !combined) {
+      return null; // 一层都没选上：交回原路径（可能只是普通下拉长得像）
+    }
+    const finalAll = selectsOf()
+      .map((x) => x.read())
+      .filter(Boolean)
+      .join("");
+    const expect = norm(String(value), 60);
+    // 组合值是档案值的逐层前缀即视为成功（站点层级数可能少于档案粒度）
+    if (finalAll && (expect.startsWith(finalAll) || norm(finalAll, 60) === expect)) {
+      return { ok: true, trust: true, via: "并排级联" };
+    }
+    return { ok: false, reason: `并排级联未选全(${finalAll.slice(0, 16)})` };
+  }
+
+  /**
+   * 内联搜索型下拉（长虹学校库）：搜索框在 select 控件内部（antd
+   * ant-select-search__field），面板里没有输入框——searchPanelAndPick 找
+   * 不到。键入值过滤选项后点匹配项，失败清词不留污染。
+   */
+  async function tryInlineSearchSelect(field, value) {
+    const holder =
+      field.container ||
+      (field.element instanceof Element
+        ? field.element.closest(".ant-form-item, [class*='form-item'], [class*='field']")
+        : null);
+    if (!holder) {
+      return null;
+    }
+    // 仅可搜索型 select（antd 根节点带 show-search）；普通下拉也带隐藏的
+    // search__field 节点，误触发会把值打进非搜索框（长虹真站实测）
+    if (
+      !holder.querySelector('[class*="select"][class*="show-search"], [class*="select"][class*="search"]')
+    ) {
+      return null;
+    }
+    // 确定性开面板：先清残留面板（上游路径可能已把本面板关掉、或留着
+    // 别家面板让 aria-expanded 误判），再点自己的触发器，最后找搜索框
+    //（antd 搜索框在面板打开前是 display:none，必须先开后查）
+    const trig = holder.querySelector('[class*="select-selection"], [class*="selector"]');
+    const findSearch = () =>
+      Array.from(
+        holder.querySelectorAll('input[class*="search__field"], input[class*="search-input"]')
+      ).find((i) => isVisible(i) && !i.readOnly && !i.disabled);
+    await closeStalePanels();
+    let search = findSearch();
+    if (!search && trig) {
+      clickActionElement(trig);
+      await sleep(320);
+      search = findSearch();
+    }
+    if (!search) {
+      await closeStalePanels();
+      return null;
+    }
+    search.focus();
+    const kw = norm(String(value), 24);
+    if (!kw) {
+      return null;
+    }
+    // 不走 setNativeValue：它结尾派发 blur 会让 antd 立即收起下拉
+    //（长虹学校库实测：输入完成面板就没了），这里只发 input
+    const desc = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value");
+    if (desc && desc.set) {
+      desc.set.call(search, kw);
+    } else {
+      search.value = kw;
+    }
+    search.dispatchEvent(new Event("input", { bubbles: true }));
+    await sleep(900);
+    // 过滤后常只剩一行选项（「使用X作为我的学校"），面板高度 <60px 会被
+    // findPopupLayers 的通用阈值筛掉 —— 这里用轻量探测器只看可见性
+    const layers = [...document.querySelectorAll('[class*="select-dropdown"], [role="listbox"]')]
+      .filter((l) => isVisible(l) && l.getBoundingClientRect().height >= 20)
+      .filter((l) => l.querySelector("li, [class*='option']"));
+    if (layers.length === 0) {
+      setNativeValue(search, "");
+      await closeStalePanels();
+      return null;
+    }
+    const menu = layers[layers.length - 1];
+    const opts = Array.from(menu.querySelectorAll("li, [class*='option']")).filter(isVisible);
+    // 优先精确等值，其次最短文本（过滤结果常带「使用X作为我的学校」辅助项）
+    const hit = opts
+      .map((o) => ({ o, t: norm(o.textContent, 30) }))
+      .filter((x) => x.t === kw || x.t.includes(kw) || kw.includes(x.t))
+      .sort((a, b) => (a.t === kw ? 0 : 1) - (b.t === kw ? 0 : 1) || a.t.length - b.t.length)[0];
+    if (!hit) {
+      setNativeValue(search, "");
+      await closeStalePanels();
+      return null;
+    }
+    clickActionElement(hit);
+    await sleep(400);
+    await closeStalePanels();
+    // 校验：展示值应与档案值一致（词序无关由回读口径兜底）
+    const shown = holder.querySelector('[class*="selection-selected"]');
+    const shownText = shown ? norm(shown.textContent, 30) : "";
+    if (shownText && (shownText.includes(kw) || kw.includes(shownText))) {
+      return { ok: true, via: "内联搜索" };
+    }
+    return { ok: true, trust: true, via: "内联搜索" };
+  }
+
   async function tryFillCustomChoiceField(field, value) {
     const el = field.element;
     const container = findChoiceFieldContainer(el, field.container);
     container.scrollIntoView({ block: "center", inline: "nearest" });
+    // 上一字段遗留的弹层先清掉：不清的话点本字段的触发器可能被旧面板
+    // 拦截（antd 关旧开新有竞态），或把旧面板的选项当成自己的
+    await closeStalePanels();
     clickActionElement(el instanceof Element ? el : container);
     // 自研组件库弹层有过渡动画（AUI ~300ms opacity）：先耐心等面板出现，
     // 不能在动画期间误判「未打开」去补点 wrapper——那会把已开的面板点成关闭
@@ -2225,6 +2410,13 @@
     const searched = await searchPanelAndPick(value);
     if (searched) {
       return searched;
+    }
+
+    // 内联搜索型 select（长虹学校库）：搜索框在控件内部而非面板里，
+    // 默认选项只有第一页，键入值过滤后点匹配项
+    const inlineSearched = await tryInlineSearchSelect(field, value);
+    if (inlineSearched) {
+      return inlineSearched;
     }
 
     // 多值拆分：值是顿号/分号分隔的多个候选（如「英语 CET-4、英语 CET-6」），
@@ -2394,6 +2586,13 @@
         return { ok: true };
       }
       if (field.kind === "custom-choice") {
+        // 并排级联（长虹 cascader-plugins-wrap）：省/市/区是同一表单项下
+        // 平行的多个 select，选完上级下级才加载选项（甚至动态出现第三个）。
+        // 逐级用「值前缀」选层，整串值不再塞给第一个 select
+        const parallel = await tryFillParallelCascade(field, entry.value);
+        if (parallel) {
+          return parallel;
+        }
         // 「至今」：结束时间类字段的伴随开关（自绘 checkbox）；已勾选则跳过（幂等）
         if (norm(entry.value, 6) === "至今") {
           const toggle = findSiblingToggle(field, "至今");
@@ -2721,6 +2920,23 @@
   }
 
   /** 收割固定选项字段的选项清单（native select 直接读；自定义下拉取新出现的弹层）。 */
+  /** 清掉遗留弹层（上一字段收割/填写失败的 dropdown 可能还开着）。
+   *  antd v3 对合成 body 点击不认账，必须补发 Escape；面板清不干净时，
+   *  后续字段的收割会扫到别人的选项（长虹真站：学校下拉收到「无经验/1年」）。 */
+  async function closeStalePanels() {
+    for (let i = 0; i < 3 && findPopupLayers().length > 0; i += 1) {
+      const active = document.activeElement;
+      if (active) {
+        active.dispatchEvent(
+          new KeyboardEvent("keydown", { key: "Escape", keyCode: 27, bubbles: true })
+        );
+      }
+      document.body.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
+      document.body.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
+      await sleep(220);
+    }
+  }
+
   async function harvestFieldOptions(field) {
     try {
       if (field.kind === "select") {
@@ -2738,12 +2954,24 @@
         setNativeValue(field.element, "");
         await sleep(150);
       }
-      // 失败尝试后面板往往仍开着：直接收割，避免再点触发器把面板关掉
-      let layers = findPopupLayers();
+      await closeStalePanels();
+      // 点自己的触发器开面板，优先收割「新出现」的层：antd 每个组件有独立
+      // dropdown 节点常驻 body（display:none），点新触发器时旧节点可能还没
+      // 关闭，全量收割会把上一字段的选项算进来
+      const before = findPopupLayers();
+      const beforeSig = before.map((l) => norm(l.textContent, 60)).join("|");
+      clickActionElement(trigger);
+      await sleep(400);
+      const all = findPopupLayers();
+      let layers = all.filter((l) => !before.includes(l));
       if (layers.length === 0) {
-        clickActionElement(trigger);
-        await sleep(300);
-        layers = findPopupLayers();
+        const afterSig = all.map((l) => norm(l.textContent, 60)).join("|");
+        // 同节点重渲染（antd 复用 dropdown DOM）或无关闭监听的自绘面板
+        //（基准页 fixture：面板只随选中移除，Escape/外点均无效）——
+        // 内容变了、或清理后仍有面板开着，都按「本字段的面板」兜底收割
+        if (afterSig !== beforeSig || all.length > 0) {
+          layers = all;
+        }
       }
       // 噪声过滤：功能按钮/日期回显 + 日历格特征（纯数字日格、N月月格）——
       // 它们不是可选业务选项，混进 AI 选选项会把日期字段填成数字
@@ -2763,10 +2991,7 @@
           opts.push(t);
         }
       }
-      // 关面板：模拟外部点击
-      document.body.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
-      document.body.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
-      await sleep(150);
+      await closeStalePanels();
       return opts;
     } catch {
       return [];
