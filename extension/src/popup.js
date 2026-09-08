@@ -192,17 +192,21 @@ function renderReport(report) {
     (site ? `<span class="badge site">${site}</span>` : "");
   const errBox = $("form-errors");
   const formErrors = report.formErrors || [];
-  if (formErrors.length > 0) {
+  // AI 阶段整体失败（本地服务未启动/LLM 未配置/超时）：给出根因提示，
+  // 否则用户只看到失败数偏高，不知道是 AI 段挂了
+  const mappingError = report.mappingError ? [`AI 阶段失败：${report.mappingError}`] : [];
+  const errAll = [...mappingError, ...formErrors];
+  if (errAll.length > 0) {
     errBox.classList.remove("hidden");
     errBox.innerHTML =
-      `<div class="err-title">页面校验提示（请人工核查）</div>` +
-      formErrors.map((t) => `<div class="err-item">⚠ ${t}</div>`).join("");
+      `<div class="err-title">${mappingError.length ? "AI 阶段提示" : "页面校验提示（请人工核查）"}</div>` +
+      errAll.map((t) => `<div class="err-item">⚠ ${t}</div>`).join("");
   } else {
     errBox.classList.add("hidden");
   }
   const list = $("report-list");
   list.innerHTML = "";
-  const VIA_LABELS = { ai: "AI映射", 附件: "附件", 自愈重试: "自愈" };
+  const VIA_LABELS = { ai: "AI映射", 附件: "附件", 自愈重试: "自愈", 面板搜索: "面板搜索" };
   const rows = [
     ...(report.filled || []).map((r) => [
       "filled",

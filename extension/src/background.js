@@ -83,16 +83,15 @@ async function fetchAttachments(base, profileId, attachments) {
   const out = [];
   for (let i = 0; i < attachments.length && i < 5; i += 1) {
     const meta = attachments[i];
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 20000);
     try {
-      const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), 20000);
       // meta.index 是档案附件列表下标（服务端扁平化只带默认简历时与循环序号不同）
       const idx = Number.isInteger(meta.index) ? meta.index : i;
       const resp = await fetch(
         `${base}/api/v1/profiles/${encodeURIComponent(profileId)}/attachments/${idx}`,
         { signal: controller.signal }
       );
-      clearTimeout(timer);
       if (!resp.ok) {
         continue;
       }
@@ -109,6 +108,8 @@ async function fetchAttachments(base, profileId, attachments) {
       });
     } catch {
       /* 单个附件失败不影响整体 */
+    } finally {
+      clearTimeout(timer);
     }
   }
   return out;
@@ -172,10 +173,23 @@ async function runFillPass(tabId, flat, options) {
 }
 
 function mergeReports(primary, secondary) {
-  // 第二段只统计「新增」的填写：已在第一段填过的标签去重
-  const filledLabels = new Set(primary.filled.map((r) => r.label));
-  const newFilled = secondary.filled.filter((r) => !filledLabels.has(r.label));
-  const newFailed = secondary.failed.filter((r) => !filledLabels.has(r.label));
+  // 第二段只统计「新增」的填写：按 label#occurrence 去重——repeat 多区块的
+  // 同标签字段（第 2 段教育的「学校名称」）不再被第一段的同名行吃掉
+  const keyOf = (r) => `${r.field || r.label}#${r.occurrence || 0}`;
+  const filledKeys = new Set(primary.filled.map(keyOf));
+  const newFilled = secondary.filled.filter((r) => !filledKeys.has(keyOf(r)));
+  const newFailed = secondary.failed.filter((r) => !filledKeys.has(keyOf(r)));
+  // skipped 取两段并集（field+reason 去重）：第二段整体覆盖会丢掉第一段的
+  // 「已有值，跳过」——那是弹窗填充率公式的分子来源
+  const seenSkip = new Set();
+  const skipped = [];
+  for (const r of [...primary.skipped, ...secondary.skipped]) {
+    const k = `${r.field}#${r.reason}`;
+    if (!seenSkip.has(k)) {
+      seenSkip.add(k);
+      skipped.push(r);
+    }
+  }
   return {
     site: primary.site || secondary.site,
     // 页面元信息随第一段报告透传（投递上报要靠 pageTitle 提取公司名）
@@ -184,20 +198,33 @@ function mergeReports(primary, secondary) {
     counts: {
       filled: primary.counts.filled + newFilled.length,
       failed: primary.counts.failed + newFailed.length,
-      skipped: secondary.counts.skipped,
+      skipped: skipped.length,
     },
     filled: [...primary.filled, ...newFilled],
     failed: [...primary.failed, ...newFailed],
-    skipped: secondary.skipped,
+    skipped,
     unmatched: secondary.unmatched || [],
     optionFields: secondary.optionFields || [],
+    // 页面校验提示以最新一轮为准（第二段填得更全，标红更真），为空回退第一段
+    formErrors:
+      (secondary.formErrors && secondary.formErrors.length ? secondary.formErrors : primary.formErrors) || [],
   };
 }
 
-/** 组装 AI 选选项请求：选项未匹配的失败字段 + 映射命中但值不贴选项的字段。 */
-function buildOptionPicks(first, mapping, values) {
+/** 组装 AI 选选项请求：选项未匹配的失败字段 + 映射命中但值不贴选项的字段。
+ *  restrictedValues：受限敏感字段的值集合（身份证号/家庭电话等）——这些值
+ *  禁止进入 option-match 请求（LLM prompt），命中即丢弃该项。 */
+function buildOptionPicks(first, mapping, values, restrictedValues) {
   const picks = [];
-  const seen = new Set();
+  const seen = new Set(); // label#occurrence 键（失败行回路）
+  const seenPlain = new Set(); // 裸 label 键（映射回路）
+  const blocked = (value) => {
+    const v = String(value == null ? "" : value).trim();
+    return (
+      (restrictedValues && restrictedValues.has(v)) ||
+      /^\d{17}[\dXx]|\d{15}$/.test(v) // 身份证形状兜底（无论来源）
+    );
+  };
   const optionsByLabel = new Map(
     ((first && first.optionFields) || []).map((f) => [f.label, f.options])
   );
@@ -207,39 +234,81 @@ function buildOptionPicks(first, mapping, values) {
     return v === o || v.includes(o) || o.includes(v.slice(0, 8));
   };
   for (const row of (first && first.failed) || []) {
-    if (row.options && row.options.length > 1 && !seen.has(row.label)) {
-      seen.add(row.label);
-      picks.push({ label: row.label, options: row.options, value: row.value });
+    const key = `${row.label}#${row.occurrence || 0}`;
+    if (row.options && row.options.length > 1 && !seen.has(key) && !blocked(row.value)) {
+      seen.add(key);
+      picks.push({
+        label: row.label,
+        occurrence: row.occurrence || 0,
+        options: row.options,
+        value: row.value,
+      });
     }
   }
   for (const [fieldLabel, profileLabel] of Object.entries(mapping || {})) {
-    if (seen.has(fieldLabel)) {
+    if (seen.has(fieldLabel) || seenPlain.has(fieldLabel)) {
       continue;
     }
     const options = optionsByLabel.get(fieldLabel);
     const value = values[profileLabel];
     if (options && options.length > 1 && value && !options.some((o) => looseMatch(value, o))) {
-      seen.add(fieldLabel);
-      picks.push({ label: fieldLabel, options, value });
+      if (!blocked(value)) {
+        // 映射回路拿不到 occurrence（值只知首条），保持裸 label 语义：
+        // 此类多为全局单值字段（民族/薪资/排名），无多段歧义
+        seenPlain.add(fieldLabel);
+        picks.push({ label: fieldLabel, options, value });
+      }
     }
   }
   // 回读不一致的固定选项字段（规则直填路径）：值与选项对不上时交给 AI 重挑，
   // 例如档案「前10%」对选项「年级前5%/前10%/前20%」
   for (const row of (first && first.failed) || []) {
-    if (seen.has(row.label) || !/回读不一致/.test(row.reason || "")) {
+    const key = `${row.label}#${row.occurrence || 0}`;
+    if (seen.has(key) || !/回读不一致/.test(row.reason || "")) {
       continue;
     }
     const options = optionsByLabel.get(row.label);
     const value = row.value || values[row.label];
     if (options && options.length > 1 && value && !options.some((o) => looseMatch(value, o))) {
-      seen.add(row.label);
-      picks.push({ label: row.label, options, value });
+      if (!blocked(value)) {
+        seen.add(key);
+        picks.push({ label: row.label, occurrence: row.occurrence || 0, options, value });
+      }
     }
   }
   return picks;
 }
 
+/** 受限敏感字段的值集合（flat.restrictedLabels 标记的字段取值）：
+ *  这些值不进 option-match 请求（LLM prompt）——「值不出本机」契约。 */
+function restrictedValueSet(flat, values) {
+  const set = new Set();
+  for (const label of (flat && flat.restrictedLabels) || []) {
+    const v = values[label];
+    if (v) {
+      set.add(String(v).trim());
+    }
+  }
+  return set;
+}
+
+/** 同页并发互斥：弹窗与快捷键（或连按 Alt+F）并发触发两次填写会交错
+ *  操作同一 DOM（各自开面板/点添加按钮），结果不可预测。 */
+const inflightTabs = new Set();
+
 async function handleAutofill(msg) {
+  if (inflightTabs.has(msg.tabId)) {
+    throw new Error("该页面正在填写中，请等本次完成后再触发");
+  }
+  inflightTabs.add(msg.tabId);
+  try {
+    return await runAutofill(msg);
+  } finally {
+    inflightTabs.delete(msg.tabId);
+  }
+}
+
+async function runAutofill(msg) {
   const base = await apiBase();
   const tabId = msg.tabId;
   if (!tabId) {
@@ -274,6 +343,7 @@ async function handleAutofill(msg) {
   });
 
   const values = flatValueMap(flat);
+  const restrictedValues = restrictedValueSet(flat, values);
   try {
     // 二段-1：AI 标签映射（仅标签，不含任何值）
     const unmatched = report.unmatched || [];
@@ -298,9 +368,13 @@ async function handleAutofill(msg) {
       });
     }
 
-    // 二段-2：附件字节下载（插件侧 DataTransfer 注入）
+    // 二段-2：附件字节下载（插件侧 DataTransfer 注入）。
+    // 按需下载：第一段报告的上传控件数 > 0 才拉字节——无上传框的页面
+    // 不再白下载最多 5×8MB 转 Base64
     let attachments = [];
+    const uploadCount = Number(report.uploadCount) || 0;
     if (
+      uploadCount > 0 &&
       Array.isArray(flat.attachments) &&
       flat.attachments.length > 0 &&
       msg.uploadAttachments !== false
@@ -318,8 +392,11 @@ async function handleAutofill(msg) {
     }
     if (Object.keys(secondBase).length > 0) {
       const second = await runFillPass(tabId, flat, secondBase);
+      // via 标注只认 AI：mapping 命中该字段才标「ai」——第二遍同样会跑
+      // 规则引擎，规则补上的行不再是 AI 的功劳
+      const mappingKeys = new Set(Object.keys(mapping));
       for (const row of second.filled) {
-        if (!row.via) {
+        if (!row.via && mappingKeys.has(row.field || row.label)) {
           row.via = "ai";
         }
       }
@@ -330,7 +407,7 @@ async function handleAutofill(msg) {
     // 每轮：失败字段收割选项 → AI 挑选项 → override 补填 → 级联展开出新选项再下一轮。
     if (msg.aiMapping !== false) {
       for (let round = 0; round < 3; round += 1) {
-        const picks = buildOptionPicks(report, round === 0 ? mapping : {}, values);
+        const picks = buildOptionPicks(report, round === 0 ? mapping : {}, values, restrictedValues);
         if (picks.length === 0) {
           break;
         }
@@ -347,7 +424,12 @@ async function handleAutofill(msg) {
             120000
           );
           for (const c of (choiceResp && choiceResp.choices) || []) {
-            overrides[c.label] = c.option;
+            // occurrence 键：AI 为第 N 段同标签字段挑的选项只落到第 N 段
+            overrides[
+              typeof c.occurrence === "number"
+                ? `${c.label}#${c.occurrence}`
+                : c.label
+            ] = c.option;
           }
         } catch (err) {
           report.mappingError = String((err && err.message) || err);
@@ -357,8 +439,11 @@ async function handleAutofill(msg) {
           break;
         }
         const second = await runFillPass(tabId, flat, { overrides });
+        const ovLabels = new Set(
+          Object.keys(overrides).map((k) => (k.includes("#") ? k.split("#")[0] : k))
+        );
         for (const row of second.filled) {
-          if (!row.via) {
+          if (!row.via && ovLabels.has(row.field || row.label)) {
             row.via = "ai";
           }
         }
@@ -458,12 +543,24 @@ if (chrome.commands && chrome.commands.onCommand) {
       await aoLog("warn", "fill.hotkey_skip", { reason: "未选择档案（先在弹窗选一次）" });
       return;
     }
-    await handleAutofill({
-      type: "ao:autofill",
-      tabId: tab.id,
-      url: tab.url,
-      profileId: aoProfileId,
-      sensitive: false,
-    });
+    // 快捷键路径没有弹窗接住异常：失败必须落日志并清进度，
+    // 否则静默无响应且 SW 控制台刷 unhandled rejection
+    try {
+      await handleAutofill({
+        type: "ao:autofill",
+        tabId: tab.id,
+        url: tab.url,
+        profileId: aoProfileId,
+        sensitive: false,
+      });
+    } catch (err) {
+      await aoLog("error", "fill.hotkey_failed", {
+        url: tab.url,
+        error: String((err && err.message) || err),
+      });
+      await chrome.storage.local
+        .set({ aoProgress: { text: `填写失败：${String((err && err.message) || err).slice(0, 60)}`, ts: Date.now() } })
+        .catch(() => {});
+    }
   });
 }

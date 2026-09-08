@@ -929,10 +929,13 @@
         currentValue = norm(el.value || "", 80);
       }
 
-      const optionText =
+      const selectOptions =
         tag === "select"
-          ? norm(Array.from(el.options || []).map((o) => o.textContent).join(" "), 160)
-          : "";
+          ? Array.from(el.options || [])
+              .map((o) => norm(o.textContent, 40))
+              .filter((t) => t && t !== "请选择")
+          : null;
+      const optionText = selectOptions ? norm(selectOptions.join(" "), 160) : "";
 
       // occurrence 按「区块+标签」计数：不同区块（工作/项目经历）各自从 0 起
       const labelKey = `${section}|${kind}|${label}`;
@@ -946,6 +949,10 @@
         section,
         nearbyText,
         optionText,
+        // native select 的逐项选项文本（供 AI 映射/选选项通道；含空格的
+        // 英文多词选项不被拆散——optionText 按空白切分会把
+        // "Bachelor Degree" 拆成两个伪选项）
+        options: selectOptions || undefined,
         currentValue,
         kind,
         occurrenceIndex,
@@ -1086,28 +1093,28 @@
     return Boolean(labelShape) && labelShape !== shape;
   }
 
-  function scoreField(field, entry) {
+  /** 域硬否决（家庭/科研/奖惩/教育）与控件值形否决。
+   *  规则通道与 AI 映射直通共用：LLM 错映射（如把项目描述配到科研描述）
+   *  也由同一道闸拦下，教育/科研/奖惩/家庭隔离对 AI 结果同样生效。 */
+  function domainConflict(field, entry) {
     const fieldText = [field.label, field.nearbyText, field.section, field.optionText].join(" ");
-    if (/上传|附件|照片|证件照|简历附件/.test(fieldText)) {
-      return 0;
-    }
     // 家庭域双向硬约束
     const fieldFamily = FAMILY_FIELD_RE.test(fieldText);
     const entryFamily = FAMILY_CATEGORY_RE.test(entry.category);
     if (fieldFamily !== entryFamily && (fieldFamily || entryFamily)) {
-      return 0;
+      return true;
     }
     // 科研域双向硬约束（科研/工程项目标签相同，按模块标题隔离）
     const fieldResearch = RESEARCH_FIELD_RE.test(fieldText);
     const entryResearch = RESEARCH_CATEGORY_RE.test(entry.category);
     if (fieldResearch !== entryResearch && (fieldResearch || entryResearch)) {
-      return 0;
+      return true;
     }
     // 奖惩域双向硬约束（获奖/项目模块都可能裸标「描述」，按模块标题隔离）
     const fieldAward = AWARD_FIELD_RE.test(fieldText);
     const entryAward = AWARD_CATEGORY_RE.test(entry.category);
     if (fieldAward !== entryAward && (fieldAward || entryAward)) {
-      return 0;
+      return true;
     }
     // 教育域硬约束：入学/毕业/学校等教育专属标签只能配教育条目。
     // 档案里 教育/实习/项目/科研 五类条目都带 开始/结束时间，星网真站实测
@@ -1118,14 +1125,25 @@
       EDUCATION_FIELD_RE.test(`${field.label || ""} ${field.nearbyText || ""}`) &&
       !EDUCATION_CATEGORY_RE.test(entry.category)
     ) {
-      return 0;
+      return true;
     }
     // 下拉类控件不吃自由文本强形状值：手机号/邮箱/身份证/URL 不可能出现在选项里
     if (field.kind === "custom-choice" || field.kind === "select") {
       const vs = valueShape(entry.value);
       if (vs === "phone" || vs === "email" || vs === "idcard" || vs === "url") {
-        return 0;
+        return true;
       }
+    }
+    return false;
+  }
+
+  function scoreField(field, entry) {
+    const fieldText = [field.label, field.nearbyText, field.section, field.optionText].join(" ");
+    if (/上传|附件|照片|证件照|简历附件/.test(fieldText)) {
+      return 0;
+    }
+    if (domainConflict(field, entry)) {
+      return 0;
     }
     if (shapeConflict(field, entry)) {
       return 0;
@@ -1223,12 +1241,30 @@
       if (rangeHandled.has(fi)) {
         continue;
       }
-      // AI 映射直通：页面标签 → 档案标签（仍过值形否决保险）
+      // AI 映射直通：页面标签 → 档案标签。域否决与值形否决照常生效——
+      // AI 结果只是「建议配对」，错配（跨域/值形冲突）与规则通道同罪同罚。
       const mappedLabel = mapping && field.label ? mapping[field.label] : null;
       if (mappedLabel) {
-        const ei = entries.findIndex((e) => e.label === mappedLabel);
-        if (ei >= 0 && !shapeConflict(field, entries[ei]) && !field.currentValue) {
-          candidates.push({ fi, ei, score: 999 });
+        // repeat 多段：第 N 个同标签字段配第 N 条档案条目（第 2 段实习
+        // 不再永远吃第 1 条档案内容）；无对应 occurrence 时回退第一条
+        const cands = [];
+        entries.forEach((e, ei) => {
+          if (e.label === mappedLabel) {
+            cands.push({ e, ei });
+          }
+        });
+        const occ = field.occurrenceIndex || 0;
+        let pick =
+          cands.find((x) => x.e.itemIndex === occ) ||
+          (occ === 0 ? cands.find((x) => x.e.itemIndex == null) : null) ||
+          cands[0];
+        if (
+          pick &&
+          !domainConflict(field, pick.e) &&
+          !shapeConflict(field, pick.e) &&
+          !field.currentValue
+        ) {
+          candidates.push({ fi, ei: pick.ei, score: 999 });
           continue;
         }
       }
@@ -2197,7 +2233,9 @@
 
   // ---------- 填写与校验 ----------
 
-  /** 元素失效时按 标签+控件类型 重定位（React 重渲染）。 */
+  /** 元素失效时按 区块+标签+控件类型+occurrence 重定位（React 重渲染）。
+   *  occurrenceIndex 必须参与：repeat 多区块里同标签字段有多份，
+   *  只按标签重绑会把第 1 段的字段绑到第 2 段的元素上（跨块串值）。 */
   function refreshField(item, adapter) {
     const field = item.field;
     if (!field.element || field.element.isConnected) {
@@ -2208,6 +2246,8 @@
         (f) =>
           f.kind === field.kind &&
           f.label === field.label &&
+          (f.section || "") === (field.section || "") &&
+          (f.occurrenceIndex || 0) === (field.occurrenceIndex || 0) &&
           f.element &&
           f.element.isConnected
       )
@@ -2297,8 +2337,12 @@
         return ok ? { ok: true } : { ok: false, reason: "未找到匹配选项" };
       }
       if (field.kind === "select") {
-        setSelectValue(el, entry.value);
-        return { ok: true };
+        const matched = setSelectValue(el, entry.value);
+        // 无匹配时不落值（给 select 设不存在的值等于清空选择），
+        // 如实报失败走选项收割 → AI 选选项兜底
+        return matched
+          ? { ok: true }
+          : { ok: false, reason: "未匹配到选项" };
       }
       if (field.kind === "native-date") {
         const type = (el.getAttribute("type") || "").toLowerCase();
@@ -2635,7 +2679,10 @@
         await sleep(300);
         layers = findPopupLayers();
       }
-      const noise = /^(请选择|删除|全部|确定|取消)$|^\d{4}-\d{1,2}(-\d{1,2})?$/;
+      // 噪声过滤：功能按钮/日期回显 + 日历格特征（纯数字日格、N月月格）——
+      // 它们不是可选业务选项，混进 AI 选选项会把日期字段填成数字
+      const noise =
+        /^(请选择|删除|全部|确定|取消)$|^\d{4}-\d{1,2}(-\d{1,2})?$|^\d{1,2}$|^\d{1,2}月(份)?$/;
       const nodes = [];
       const seen = new Set();
       for (const layer of layers) {
@@ -2764,10 +2811,19 @@
     const entries = buildEntries(flatProfile);
     const mapping = (options && options.mapping) || null;
     const { plan, usedFields } = buildPlan(fields, entries, mapping, options);
-    // AI 选选项覆盖：字段标签 → 选中的选项值
+    // AI 选选项覆盖：字段标签（或 标签#occurrence）→ 选中的选项值。
+    // repeat 多区块同标签字段必须按 occurrence 区分，否则 AI 为第 2 段
+    // 「学历」挑的选项会同时写进 3 段；裸 label 键保留兼容旧调用方。
     const overrides = (options && options.overrides) || {};
+    const overrideFor = (field) => {
+      const occKey = `${field.label}#${field.occurrenceIndex || 0}`;
+      if (Object.prototype.hasOwnProperty.call(overrides, occKey)) {
+        return overrides[occKey];
+      }
+      return overrides[field.label];
+    };
     for (const item of plan) {
-      const ov = overrides[item.field.label];
+      const ov = overrideFor(item.field);
       if (ov) {
         item.entry = { ...item.entry, value: String(ov) };
       }
@@ -2775,19 +2831,25 @@
 
     const filled = [];
     const failed = [];
+    // 日期归一（比较口径）：年/月/日统一补零再去分隔符——
+    // "2024-3-5" 与站点回读 "2024-03-05" 必须归到同一形态，否则校验恒假
     const normDate = (s) =>
       String(s)
         .replace(/(\d{4})年(\d{1,2})月(?:(\d{1,2})日?)?/g, (_, y, mo, d) =>
-          d ? `${y}-${mo}-${d}` : `${y}-${mo}`
+          d ? `${y}-${mo.padStart(2, "0")}-${d.padStart(2, "0")}` : `${y}-${mo.padStart(2, "0")}`
+        )
+        .replace(/(\d{4})-(\d{1,2})(?:-(\d{1,2}))?/g, (_, y, mo, d) =>
+          d ? `${y}-${mo.padStart(2, "0")}-${d.padStart(2, "0")}` : `${y}-${mo.padStart(2, "0")}`
         )
         .replace(/-/g, "");
-    // 回读校验统一口径（主循环与自愈回路共用）
+    // 回读校验统一口径（主循环与自愈回路共用）。期望值上限与 readBack 的
+    // 400 对齐——期望值截 260 而回读 400 时，260~400 字长文本恒判失败
     const verifyReadBack = (item, expectValue) => {
       refreshField(item, adapter);
       let v = readBack(item.field);
       if (
         v.includes(expectValue) ||
-        (expectValue.length > 400 && norm(expectValue, 400) === v) ||
+        norm(expectValue, 400) === v ||
         norm(expectValue) === v ||
         normDate(v).includes(normDate(expectValue))
       ) {
@@ -2816,23 +2878,35 @@
     const execAndVerify = async (item) => {
       const wasPrefilled = Boolean(item.field.currentValue && item.field.currentValue.length > 0);
       const result = await fillOne(item, adapter);
-      let verified =
-        item.field.kind === "checkbox" ||
-        result.trust ||
-        verifyReadBack(item, String(item.entry.value));
+      // checkbox 真校验：回读 checked 态与期望布尔核对（不再免检计已填）
+      const computeVerified = () => {
+        if (item.field.kind === "checkbox") {
+          refreshField(item, adapter);
+          const should = ["true", "yes", "是", "1", "checked", "on", "接受", "同意"].includes(
+            String(item.entry.value == null ? "" : item.entry.value).trim().toLowerCase()
+          );
+          const v = readBack(item.field);
+          return should ? v === "是" : v === "";
+        }
+        return result.trust || verifyReadBack(item, String(item.entry.value));
+      };
+      let verified = computeVerified();
       // 文本类回读竞态：React 提交有延迟，稍候重读一次
       if (!verified && result.ok) {
         await sleep(280);
-        verified = verifyReadBack(item, String(item.entry.value));
+        verified = computeVerified();
       }
       return { result, verified, wasPrefilled };
     };
     for (const item of plan) {
       const { result, verified, wasPrefilled } = await execAndVerify(item);
       const label = item.field.label || item.field.nearbyText || "(无标签)";
+      // occurrence 随行携带：background 合并报告/AI 选选项按 label#occurrence
+      // 区分 repeat 多区块的同标签字段（不再互相覆盖）
       if (result.ok && verified) {
         filled.push({
           label, field: label,
+          occurrence: item.field.occurrenceIndex || 0,
           value: String(item.entry.value).slice(0, 60),
           ...(result.via ? { via: result.via } : {}),
           // 纠偏：覆盖了站点解析预填的乱值（原值与档案不一致）
@@ -2853,8 +2927,11 @@
           value: item.entry.value,
           reason: result.reason || "执行失败",
         };
-        // 选项未匹配类失败：收割选项清单，供 AI 选选项通道二段使用
-        if (/未匹配到选项/.test(row.reason) && item.field.kind !== "radio") {
+        // 选项未匹配类失败：收割选项清单，供 AI 选选项通道二段使用。
+        // 日期形状的值跳过——日历链失败后面板里是日格/月格（"13"、"6月"），
+        // 不是选项，混进 AI 选选项会让日期被填成数字
+        const isDateValue = /^\d{4}(-\d{1,2}){0,2}$/.test(String(item.entry.value || ""));
+        if (/未匹配到选项/.test(row.reason) && item.field.kind !== "radio" && !isDateValue) {
           let opts = await harvestFieldOptions(item.field);
           if (opts.length > 0 && opts.length < 30) {
             // 虚拟列表首收常不全：面板已渲染后再收一次合并
@@ -2893,10 +2970,19 @@
         mapping,
         options
       ).plan;
-      for (const ovLabel of Object.keys(overrides)) {
-        const it = freshPlan.find((p) => p.field.label === ovLabel);
+      // override 键形如 标签#occurrence（裸 label 键对全部同标签项生效，兼容旧调用）
+      for (const [ovKey, ovVal] of Object.entries(overrides)) {
+        const hashAt = ovKey.lastIndexOf("#");
+        const isOccKey = hashAt > 0 && /^\d+$/.test(ovKey.slice(hashAt + 1));
+        const ovLabel = isOccKey ? ovKey.slice(0, hashAt) : ovKey;
+        const ovOcc = isOccKey ? Number(ovKey.slice(hashAt + 1)) : null;
+        const it = freshPlan.find(
+          (p) =>
+            p.field.label === ovLabel &&
+            (ovOcc == null || (p.field.occurrenceIndex || 0) === ovOcc)
+        );
         if (it) {
-          it.entry = { ...it.entry, value: String(overrides[ovLabel]) };
+          it.entry = { ...it.entry, value: String(ovVal) };
         }
       }
       const healedLabels = new Set();
@@ -2943,10 +3029,12 @@
             section: f.section || "",
             kind: f.kind || "",
             placeholder: String((f.element && f.element.placeholder) || "").slice(0, 30),
-            options: String(f.optionText || "")
-              .split(/[\s,，、]+/)
-              .filter(Boolean)
-              .slice(0, 20),
+            options: (Array.isArray(f.options) && f.options.length
+              ? f.options
+              : String(f.optionText || "")
+                  .split(/[\s,，、]+/)
+                  .filter(Boolean)
+            ).slice(0, 20),
           });
         }
       }
@@ -2995,7 +3083,9 @@
       if (f.kind === "select" && f.optionText && f.optionText.length > 1) {
         addOptField(
           f.label,
-          String(f.optionText).split(/[\s,，、]+/).filter(Boolean)
+          Array.isArray(f.options) && f.options.length
+            ? f.options
+            : String(f.optionText).split(/[\s,，、]+/).filter(Boolean)
         );
       }
     }
@@ -3033,6 +3123,9 @@
       unmatched,
       formErrors,
       optionFields,
+      // 页面上传控件数：background 据此决定是否需要下载附件字节（无上传框的
+      // 页面不再白下载 5×8MB 转Base64）
+      uploadCount: uploads.length,
       // 供 background 上报投递记录（服务端按 URL 去重更新）
       pageTitle: document.title,
       url: location.href,
