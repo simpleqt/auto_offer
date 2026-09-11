@@ -149,7 +149,8 @@ class ExtendedInfo(BaseModel):
     weight_kg: int | None = Field(default=None, json_schema_extra=SENSITIVE)
     health_status: str | None = Field(default=None, json_schema_extra=SENSITIVE)
     party_join_date: DateYM | None = None
-    hukou_location: str | None = Field(default=None, json_schema_extra=SENSITIVE)
+    # 户籍=招聘表必问的行政信息（与生源地同级），非敏感默认下发
+    hukou_location: str | None = None
     origin_place: str | None = None
     references: list[Reference] = []
     links: dict[str, str] = {}

@@ -127,6 +127,9 @@ class _Flattener:
             "学制": basic.schooling_length,
             # 常见校招/国企表字段（扩展信息，非敏感）
             "生源地": ext.origin_place if ext else None,
+            # 户籍是招聘表单必问的行政信息（与生源地同级），默认下发；
+            # 此前归敏感默认剔除，导致页面「户口所在地」被 AI 错配成籍贯
+            "户籍所在地": ext.hukou_location if ext else None,
             "入党时间": _fmt_month(ext.party_join_date) if ext and ext.party_join_date else None,
         }
         if self.include_sensitive and "id_number" in _SENSITIVE_BASIC:
@@ -321,7 +324,6 @@ class _Flattener:
                             "身高（厘米）": ext.height_cm,
                             "体重（公斤）": ext.weight_kg,
                             "健康状况": ext.health_status,
-                            "户籍所在地": ext.hukou_location,
                         }
                     )
                     sec["values"] = _clean(sec["values"])

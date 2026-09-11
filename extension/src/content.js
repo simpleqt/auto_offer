@@ -196,6 +196,7 @@
     专业: ["所学专业", "专业名称"],
     现居住城市: ["当前居住地", "现居城市", "居住城市", "现居住地"],
     籍贯: ["祖籍", "家乡"],
+    户籍所在地: ["户口所在地", "户籍所在地", "户籍", "户口"],
     政治面貌: ["政治状态"],
     民族: ["族别", "民族成分", "少数民族"],
     是否全日制: ["全日制", "全日制情况", "教育形式"],
@@ -1129,6 +1130,16 @@
     const entryAward = AWARD_CATEGORY_RE.test(entry.category);
     if (fieldAward !== entryAward && (fieldAward || entryAward)) {
       return true;
+    }
+    // 户籍域双向隔离：户口≠籍贯（户口所在地可能不同于籍贯），户口类页面
+    // 字段不得由 籍贯/生源地 条目顶替，反向亦然——宁可空着报告无匹配，
+    // 不猜错（档案缺户籍值时 AI 曾把户口所在地错配成籍贯）
+    const fieldHukou = /户口|户籍/.test(`${field.label || ""} ${field.nearbyText || ""}`);
+    const entryHukou = /^(户籍所在地|户口所在地)$/.test(entry.label || "");
+    const fieldOrigin = /^(籍贯|生源地|祖籍|家乡)/.test(field.label || "");
+    const entryOrigin = /^(籍贯|生源地)$/.test(entry.label || "");
+    if ((fieldHukou && entryOrigin) || (fieldOrigin && entryHukou)) {
+      return 0;
     }
     // 教育域硬约束：入学/毕业/学校等教育专属标签只能配教育条目。
     // 档案里 教育/实习/项目/科研 五类条目都带 开始/结束时间，星网真站实测

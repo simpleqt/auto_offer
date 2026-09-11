@@ -98,3 +98,25 @@ def test_research_section_separate_and_last() -> None:
 def test_no_research_section_when_absent() -> None:
     flat = flatten_profile(_profile_payload())
     assert all(s["key"] != "research" for s in flat["sections"])
+
+
+def test_hukou_exported_by_default_marriage_gated() -> None:
+    """户籍默认下发（招聘表必问）；婚姻/身高仍走敏感门控。"""
+    payload = _profile_payload()
+    payload["extended"] = {
+        "marital_status": "未婚",
+        "height_cm": 180,
+        "hukou_location": "四川省成都市",
+        "origin_place": "四川省德阳市",
+    }
+
+    plain = flatten_profile(payload)  # type: ignore[arg-type]
+    basic_plain = next(s for s in plain["sections"] if s["key"] == "basic")
+    assert basic_plain["values"].get("户籍所在地") == "四川省成都市"
+    assert "婚姻状况" not in basic_plain["values"]
+    assert "身高（厘米）" not in basic_plain["values"]
+
+    sensitive = flatten_profile(payload, include_sensitive=True)  # type: ignore[arg-type]
+    basic_sensitive = next(s for s in sensitive["sections"] if s["key"] == "basic")
+    assert basic_sensitive["values"].get("户籍所在地") == "四川省成都市"
+    assert basic_sensitive["values"].get("婚姻状况") == "未婚"
