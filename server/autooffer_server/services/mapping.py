@@ -275,11 +275,13 @@ def _cache_key(
     profile_id: str, flat: dict[str, Any], fields: list[PageField]
 ) -> tuple[str, str, str]:
     catalog_part = json.dumps(_catalog(flat), ensure_ascii=False, sort_keys=True)
+    # 字段排序后再哈希：unmatched 列表的顺序受页面渲染/草稿状态影响，
+    # 同字段集不同顺序应命中同一条缓存（否则重复填写频繁 miss）
     fields_part = json.dumps(
-        [
+        sorted(
             [f.label, f.section or "", f.kind or "", f.placeholder or ""]
             for f in fields[:60]
-        ],
+        ),
         ensure_ascii=False,
     )
     return (

@@ -1894,7 +1894,7 @@
         200
       );
       clickOptionIcon(prefix.o);
-      await sleep(800); // 等层切换渲染（面包屑/子列表）
+      await sleep(650); // 等层切换渲染（面包屑/子列表）
       let layerNow = "";
       const layersNow = findPopupLayers();
       if (layersNow.length) {
@@ -1906,7 +1906,7 @@
       }
       if (layerNow === layerBefore && layersNow.length) {
         dispatchPointerSeq(prefix.o);
-        await sleep(800);
+        await sleep(650);
       }
       remaining = remaining.slice(prefix.t.length);
     }
@@ -1988,7 +1988,7 @@
       });
     if (!confirms.length) {
       // 全部禁用：等 600ms 后重找一次（选中状态落地有时差）
-      await sleep(600);
+      await sleep(450);
       const retryHost = findPopupLayers().find((l) => (opt ? l.contains(opt) : false)) || findPopupLayers()[0];
       if (!retryHost) {
         return;
@@ -2030,7 +2030,7 @@
     const uniq = confirms.filter((b, i) => !confirms.some((o, j) => j !== i && o.contains(b)));
     for (const btn of uniq.slice(0, 4)) {
       dispatchPointerSeq(deepestIn(btn));
-      await sleep(450);
+      await sleep(380);
       if (findPopupLayers().length === 0) {
         return; // 面板已关 = 提交成功
       }
@@ -2039,7 +2039,7 @@
 
   async function clickChoiceOption(opt) {
     clickOptionIcon(opt);
-    await sleep(320);
+    await sleep(260);
     await confirmPanelIfOpen(opt);
   }
 
@@ -2111,7 +2111,7 @@
       return null;
     }
     clickOptionIcon(pick);
-    await sleep(600);
+    await sleep(500);
     // 选中确认：面板「已选 N/1」计数为 0 说明结果项没选上（时序/首次点击未达）——
     // 重试一次（元素被 React 重建时重新查找）。注意计数格式「已选地区0/1」，
     // 分子是斜杠前的数字（旧正则抓到分母会误判已选中）
@@ -2132,7 +2132,7 @@
         break;
       }
       clickOptionIcon(again);
-      await sleep(550);
+      await sleep(450);
     }
     await confirmPanelIfOpen(pick);
     // 降级命中（镇级搜不到落在区县）：站点可表达的最深层级，回读必然与整串
@@ -2198,7 +2198,7 @@
       clickActionElement(trig);
       let layers = [];
       for (let i = 0; i < 6 && layers.length === 0; i += 1) {
-        await sleep(220);
+        await sleep(170);
         layers = findPopupLayers().filter((l) => l.querySelector("li, [class*='option']"));
       }
       if (layers.length === 0) {
@@ -2216,7 +2216,7 @@
       }
       clickActionElement(scored[0].o);
       moved = true;
-      await sleep(420);
+      await sleep(350);
       remaining = remaining.slice(scored[0].t.length);
       await closeStalePanels();
       await sleep(160);
@@ -2269,7 +2269,7 @@
     let search = findSearch();
     if (!search && trig) {
       clickActionElement(trig);
-      await sleep(320);
+      await sleep(260);
       search = findSearch();
     }
     if (!search) {
@@ -2290,7 +2290,7 @@
       search.value = kw;
     }
     search.dispatchEvent(new Event("input", { bubbles: true }));
-    await sleep(900);
+    await sleep(700);
     // 过滤后常只剩一行选项（「使用X作为我的学校"），面板高度 <60px 会被
     // findPopupLayers 的通用阈值筛掉 —— 这里用轻量探测器只看可见性
     const layers = [...document.querySelectorAll('[class*="select-dropdown"], [role="listbox"]')]
@@ -2314,7 +2314,7 @@
       return null;
     }
     clickActionElement(hit);
-    await sleep(400);
+    await sleep(320);
     await closeStalePanels();
     // 校验：展示值应与档案值一致（词序无关由回读口径兜底）
     const shown = holder.querySelector('[class*="selection-selected"]');
@@ -2335,8 +2335,8 @@
     clickActionElement(el instanceof Element ? el : container);
     // 自研组件库弹层有过渡动画（AUI ~300ms opacity）：先耐心等面板出现，
     // 不能在动画期间误判「未打开」去补点 wrapper——那会把已开的面板点成关闭
-    for (let i = 0; i < 5 && findPopupLayers().length === 0; i += 1) {
-      await sleep(220);
+    for (let i = 0; i < 6 && findPopupLayers().length === 0; i += 1) {
+      await sleep(160);
     }
     if (findPopupLayers().length === 0) {
       const wrapper =
@@ -2365,7 +2365,7 @@
       // 的级联场景（说明列表已就绪，交给下钻逻辑处理）。
       const valText = norm(String(value), 40);
       for (let i = 0; i < 3; i += 1) {
-        await sleep(550);
+        await sleep(400);
         options = findVisibleChoiceOptions(container);
         matched = findChoiceMatch(options);
         if (matched) {
@@ -2940,7 +2940,7 @@
       }
       document.body.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
       document.body.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
-      await sleep(220);
+      await sleep(150);
     }
   }
 
@@ -2968,7 +2968,7 @@
       const before = findPopupLayers();
       const beforeSig = before.map((l) => norm(l.textContent, 60)).join("|");
       clickActionElement(trigger);
-      await sleep(400);
+      await sleep(320);
       const all = findPopupLayers();
       let layers = all.filter((l) => !before.includes(l));
       if (layers.length === 0) {
@@ -3287,7 +3287,7 @@
       let verified = computeVerified();
       // 文本类回读竞态：React 提交有延迟，稍候重读一次
       if (!verified && result.ok) {
-        await sleep(280);
+        await sleep(220);
         verified = computeVerified();
       }
       return { result, verified, wasPrefilled };
