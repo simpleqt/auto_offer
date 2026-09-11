@@ -781,3 +781,27 @@ def test_script_version_not_hardcoded() -> None:
     assert 'SCRIPT_VERSION = "' not in src, (
         "SCRIPT_VERSION 硬编码会与 manifest 版本漂移，请改用 chrome.runtime.getManifest().version"
     )
+
+
+async def test_only_fields_subset_mode(page: Page) -> None:
+    """AI 轮子集补填：onlyFields 指定外的匹配字段不填（性能优化回归）。"""
+    await page.goto(fixture_url("zhiye_like.html"))
+    flat: dict[str, Any] = {
+        "schema": 1,
+        "profile": {"id": "demo", "label": "示例"},
+        "sections": [
+            {
+                "key": "basic",
+                "title": "基本信息",
+                "kind": "simple",
+                "values": {"姓名": "张三", "电子邮箱": "zhangsan@example.com"},
+            }
+        ],
+    }
+    report = await autofill(page, flat, {"onlyFields": ["姓名"]})
+    labels = [r["label"] for r in report["filled"]]
+    assert "姓名" in labels
+    assert await page.input_value("#name") == "张三"
+    # 邮箱不在子集内：不碰
+    assert "电子邮箱" not in labels
+    assert await page.input_value("#email") == ""

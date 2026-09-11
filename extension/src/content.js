@@ -3190,7 +3190,21 @@
     const { fields, uploads } = scanFields(adapter);
     const entries = buildEntries(flatProfile);
     const mapping = (options && options.mapping) || null;
-    const { plan, usedFields } = buildPlan(fields, entries, mapping, options);
+    let { plan, usedFields } = buildPlan(fields, entries, mapping, options);
+    // 子集模式（AI 轮补填）：只填指定字段（裸 label 或 label#occurrence 键）。
+    // 重页面（Moka ~600 容器）全量重跑一轮 1-3 分钟，AI 轮只碰相关字段
+    const only = (options && options.onlyFields) || null;
+    if (only && only.length) {
+      const onlySet = new Set(only);
+      plan = plan.filter(
+        (it) =>
+          onlySet.has(it.field.label) ||
+          onlySet.has(`${it.field.label}#${it.field.occurrenceIndex || 0}`)
+      );
+      usedFields = new Set(
+        [...usedFields].filter((label) => onlySet.has(label))
+      );
+    }
     // AI 选选项覆盖：字段标签（或 标签#occurrence）→ 选中的选项值。
     // repeat 多区块同标签字段必须按 occurrence 区分，否则 AI 为第 2 段
     // 「学历」挑的选项会同时写进 3 段；裸 label 键保留兼容旧调用方。
@@ -3549,6 +3563,7 @@
           mapping: msg.mapping || null,
           overrides: msg.overrides || null,
           attachments: msg.attachments || null,
+          onlyFields: msg.onlyFields || null,
           noAddBlocks: msg.noAddBlocks || false,
           noAdvance: msg.noAdvance || false,
           noSelfHeal: msg.noSelfHeal || false,

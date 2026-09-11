@@ -455,6 +455,10 @@ async function runAutofill(msg) {
     const secondBase = {};
     if (Object.keys(mapping).length > 0) {
       secondBase.mapping = mapping;
+      // 子集补填：只碰映射命中的字段——重页面（Moka ~600 容器）全量重跑
+      // 一轮要 1-3 分钟，是弹窗 6 分钟超时的主因
+      secondBase.onlyFields = Object.keys(mapping);
+      secondBase.noAddBlocks = true;
     }
     if (attachments.length > 0) {
       secondBase.attachments = attachments;
@@ -509,7 +513,13 @@ async function runAutofill(msg) {
         if (Object.keys(overrides).length === 0) {
           break;
         }
-        const second = await runFillPass(tabId, flat, { overrides }, frames);
+        // 子集补填 + 关自愈：本就是重试轮，只碰 override 涉及的字段
+        const second = await runFillPass(
+          tabId,
+          flat,
+          { overrides, onlyFields: Object.keys(overrides), noAddBlocks: true, noSelfHeal: true },
+          frames
+        );
         const ovLabels = new Set(
           Object.keys(overrides).map((k) => (k.includes("#") ? k.split("#")[0] : k))
         );
