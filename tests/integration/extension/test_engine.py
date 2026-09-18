@@ -886,3 +886,72 @@ async def test_fill_cancel_semantics(page: Page) -> None:
     )
     assert not report2.get("cancelled"), report2
     assert await page.input_value("#name") == "张三"
+
+
+WIZARD_PROFILE: dict[str, Any] = {
+    "schema": 1,
+    "profile": {"id": "demo", "label": "示例"},
+    "sections": [
+        {
+            "key": "basic",
+            "title": "基本信息",
+            "kind": "simple",
+            "values": {
+                "姓名": "张三",
+                "电子邮箱": "zhangsan@example.com",
+                "自我评价": "做事踏实。",
+            },
+        }
+    ],
+}
+
+
+async def test_wizard_ai_round_rewinds_to_first_page(page: Page) -> None:
+    """多步向导 AI 轮跨页：第一遍走到底停在末页，补填轮回退首页重走——
+    否则前几页的未匹配字段永远得不到 AI 通道处理（结构性失效）。"""
+    await page.goto(fixture_url("wizard_like.html"))
+    # 第一遍：逐页填写，向导停在最后一页
+    report = await autofill(page, WIZARD_PROFILE)
+    assert [r["label"] for r in report["filled"]] == ["姓名", "电子邮箱", "自我评价"], report
+    assert not await page.is_hidden("#step-3"), "第一遍后应停在最后一页"
+
+    # 模拟 AI 轮：首页字段被清空后需补填（不带 restartWizard 时只能填末页）
+    await page.evaluate(
+        """() => {
+          const el = document.querySelector("#name");
+          el.value = "";
+          el.dispatchEvent(new Event("input", { bubbles: true }));
+        }"""
+    )
+    report2 = await autofill(
+        page,
+        WIZARD_PROFILE,
+        {"onlyFields": ["姓名"], "noAddBlocks": True, "restartWizard": True},
+    )
+    assert "姓名" in [r["label"] for r in report2["filled"]], report2
+    assert await page.input_value("#name") == "张三"
+
+
+async def test_wizard_ai_round_without_rewind_misses_first_page(page: Page) -> None:
+    """对照：不带 restartWizard 的补填轮从末页出发，填不到首页字段。"""
+    await page.goto(fixture_url("wizard_like.html"))
+    await autofill(page, WIZARD_PROFILE)
+    await page.evaluate(
+        """() => {
+          const el = document.querySelector("#name");
+          el.value = "";
+          el.dispatchEvent(new Event("input", { bubbles: true }));
+        }"""
+    )
+    report = await autofill(
+        page, WIZARD_PROFILE, {"onlyFields": ["姓名"], "noAddBlocks": True}
+    )
+    assert "姓名" not in [r["label"] for r in report["filled"]], report
+
+
+async def test_restart_wizard_noop_on_single_page(page: Page) -> None:
+    """单页表单带 restartWizard：无「上一步」按钮，回退为空操作不影响填写。"""
+    await page.goto(fixture_url("zhiye_like.html"))
+    report = await autofill(page, ZHIYE_PROFILE, {"restartWizard": True})
+    assert "姓名" in [r["label"] for r in report["filled"]]
+    assert await page.input_value("#name") == "张三"

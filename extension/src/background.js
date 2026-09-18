@@ -61,7 +61,16 @@ async function fetchJson(url, init = undefined, timeoutMs = 8000) {
   try {
     const resp = await fetch(url, { ...init, signal: controller.signal });
     if (!resp.ok) {
-      throw new Error(`HTTP ${resp.status}`);
+      // 透传服务端 detail（如「映射超时（本地模型响应过慢）」）——
+      // 此前只抛 HTTP 504，弹窗看不到根因
+      let detail = "";
+      try {
+        const body = await resp.json();
+        detail = String((body && body.detail) || "").slice(0, 120);
+      } catch {
+        /* 非 JSON 响应 */
+      }
+      throw new Error(detail ? `HTTP ${resp.status}: ${detail}` : `HTTP ${resp.status}`);
     }
     return await resp.json();
   } finally {
@@ -442,9 +451,11 @@ async function runAutofill(msg) {
     throw new Error("缺少目标标签页");
   }
   const sensitive = msg.sensitive ? 1 : 0;
+  // 进度按标签页隔离存储：两个页签并发填写时进度文本不再互相覆盖
+  const progressKey = `aoProgress:${tabId}`;
   const setProgress = (text) =>
     chrome.storage.local
-      .set({ aoProgress: { text, ts: Date.now() } })
+      .set({ [progressKey]: { text, ts: Date.now() } })
       .catch(() => {});
   await aoLog("info", "fill.start", {
     url: msg.url || "",
@@ -535,6 +546,9 @@ async function runAutofill(msg) {
       // 一轮要 1-3 分钟，是弹窗 6 分钟超时的主因
       secondBase.onlyFields = Object.keys(mapping);
       secondBase.noAddBlocks = true;
+      // 第一遍已把向导走到底、停在最后一页：回退首页重走，前几页的
+      // 未匹配字段才能得到 AI 通道处理
+      secondBase.restartWizard = true;
     }
     if (attachments.length > 0) {
       secondBase.attachments = attachments;
@@ -592,11 +606,18 @@ async function runAutofill(msg) {
         if (Object.keys(overrides).length === 0) {
           break;
         }
-        // 子集补填 + 关自愈：本就是重试轮，只碰 override 涉及的字段
+        // 子集补填 + 关自愈：本就是重试轮，只碰 override 涉及的字段；
+        // 回退向导首页，前几页的失败字段才有机会被本轮补上
         const second = await runFillPass(
           tabId,
           flat,
-          { overrides, onlyFields: Object.keys(overrides), noAddBlocks: true, noSelfHeal: true },
+          {
+            overrides,
+            onlyFields: Object.keys(overrides),
+            noAddBlocks: true,
+            noSelfHeal: true,
+            restartWizard: true,
+          },
           frames
         );
         const ovLabels = new Set(
@@ -616,7 +637,7 @@ async function runAutofill(msg) {
   }
 
   const { aoHistory = [] } = await chrome.storage.local.get("aoHistory");
-  await setProgress("");
+  await chrome.storage.local.remove(progressKey).catch(() => {});
   aoHistory.unshift({
     ts: Date.now(),
     url: msg.url || "",
@@ -722,7 +743,7 @@ if (chrome.commands && chrome.commands.onCommand) {
         error: String((err && err.message) || err),
       });
       await chrome.storage.local
-        .set({ aoProgress: { text: `填写失败：${String((err && err.message) || err).slice(0, 60)}`, ts: Date.now() } })
+        .set({ [`aoProgress:${tab.id}`]: { text: `填写失败：${String((err && err.message) || err).slice(0, 60)}`, ts: Date.now() } })
         .catch(() => {});
     }
   });

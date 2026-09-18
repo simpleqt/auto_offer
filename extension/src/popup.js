@@ -165,9 +165,10 @@ async function startFill() {
       return;
     }
     try {
-      const { aoProgress } = await chrome.storage.local.get("aoProgress");
-      if (aoProgress && aoProgress.text) {
-        $("btn-fill").textContent = aoProgress.text;
+      const store = await chrome.storage.local.get(`aoProgress:${activeTab.id}`);
+      const prog = store[`aoProgress:${activeTab.id}`];
+      if (prog && prog.text) {
+        $("btn-fill").textContent = prog.text;
       }
     } catch {
       /* 读取失败忽略 */

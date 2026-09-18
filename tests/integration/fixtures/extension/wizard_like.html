@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <title>示例公司 - 三步向导申请</title>
+  <style>
+    body { font: 14px/1.6 system-ui, "Microsoft YaHei"; padding: 24px; background: #f5f6f8; }
+    .card { max-width: 640px; margin: 0 auto; background: #fff; padding: 20px 28px; border-radius: 8px; }
+    h3.section { font-size: 16px; margin: 18px 0 10px; }
+    .ant-form-item { display: flex; align-items: center; margin-bottom: 14px; }
+    .ant-form-item-label { width: 110px; color: #333; text-align: right; padding-right: 12px; }
+    .ant-form-item-control { flex: 1; }
+    input[type="text"], input[type="email"], textarea {
+      width: 100%; box-sizing: border-box; padding: 6px 10px; border: 1px solid #d9d9d9; border-radius: 6px;
+    }
+    textarea { height: 64px; }
+    fieldset.step { border: 0; padding: 0; margin: 0; }
+    fieldset.step[hidden] { display: none; }
+    .wizard-actions { margin-top: 18px; display: flex; gap: 12px; justify-content: flex-end; }
+    .wizard-actions button { padding: 6px 18px; border-radius: 6px; border: 1px solid #d9d9d9; cursor: pointer; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h3 class="section">申请向导</h3>
+    <form id="the-form">
+      <fieldset class="step" id="step-1">
+        <legend class="section">基本信息</legend>
+        <div class="ant-form-item">
+          <div class="ant-form-item-label"><label>姓名</label></div>
+          <div class="ant-form-item-control"><input id="name" type="text" /></div>
+        </div>
+      </fieldset>
+      <fieldset class="step" id="step-2" hidden>
+        <legend class="section">联系方式</legend>
+        <div class="ant-form-item">
+          <div class="ant-form-item-label"><label>电子邮箱</label></div>
+          <div class="ant-form-item-control"><input id="email" type="email" /></div>
+        </div>
+      </fieldset>
+      <fieldset class="step" id="step-3" hidden>
+        <legend class="section">其他信息</legend>
+        <div class="ant-form-item">
+          <div class="ant-form-item-label"><label>自我评价</label></div>
+          <div class="ant-form-item-control"><textarea id="intro"></textarea></div>
+        </div>
+      </fieldset>
+      <div class="wizard-actions">
+        <button type="button" id="prev">上一步</button>
+        <button type="button" id="next">下一步</button>
+      </div>
+    </form>
+  </div>
+  <script>
+    // 三步向导：按钮按当前页显隐（首页无上一步，末页无下一步）
+    var page = 1;
+    var prevBtn = document.getElementById("prev");
+    var nextBtn = document.getElementById("next");
+    function render() {
+      for (var i = 1; i <= 3; i += 1) {
+        document.getElementById("step-" + i).hidden = i !== page;
+      }
+      prevBtn.hidden = page === 1;
+      nextBtn.hidden = page === 3;
+    }
+    prevBtn.addEventListener("click", function () {
+      if (page > 1) { page -= 1; render(); }
+    });
+    nextBtn.addEventListener("click", function () {
+      if (page < 3) { page += 1; render(); }
+    });
+    render();
+  </script>
+</body>
+</html>

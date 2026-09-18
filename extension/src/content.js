@@ -3155,6 +3155,43 @@
     return null;
   }
 
+  /** 可见且不像提交的「上一步」类按钮（向导回退用），匹配词与下一步对称保守。 */
+  function findWizardPrevButton() {
+    const BLOCK_RE = /提交|投递|发送|上传|登录|注册|支付/;
+    for (const el of document.querySelectorAll('button,a,[role="button"]')) {
+      if (!isVisible(el)) {
+        continue;
+      }
+      const t = norm(el.textContent, 12);
+      if (!t || BLOCK_RE.test(t)) {
+        continue;
+      }
+      if (/上一步|返回上一步|前一步/.test(t) || /^prev(ious)?$/i.test(compact(t))) {
+        return el;
+      }
+    }
+    return null;
+  }
+
+  /** 回退到向导第一页：第一遍填写把向导走到底、停在最后一页——
+   *  AI 映射/选选项轮不回退就只能填到最后一页的字段（前几页未匹配
+   *  字段永远得不到 AI 通道处理）。点「上一步」类按钮，签名无变化即停
+   *  （已到首页/误识别），上限 5 步。 */
+  async function rewindWizard() {
+    for (let i = 0; i < 5; i += 1) {
+      const prev = findWizardPrevButton();
+      if (!prev) {
+        return;
+      }
+      const sigBefore = pageSignature();
+      clickActionElement(prev);
+      await sleep(700);
+      if (pageSignature() === sigBefore) {
+        return;
+      }
+    }
+  }
+
   /** 页面签名：可见控件 标签#occurrence 序列——翻页后无变化说明被必填
    *  校验拦住，停止推进（防同页死循环重填）。 */
   function pageSignature() {
@@ -3200,6 +3237,9 @@
     const frags = [];
     const maxPages = 5; // 有界：防「下一步」误识别导致一路翻穿站点
     try {
+      if (options && options.restartWizard) {
+        await rewindWizard();
+      }
       for (let page = 0; page < maxPages; page += 1) {
         frags.push(await fillOnePage(flatProfile, options));
         if (options && options.noAdvance) {
