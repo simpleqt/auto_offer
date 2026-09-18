@@ -128,7 +128,9 @@ export default function TaskDetail({
                     ? 'default'
                     : 'error'
               }
-              text={connState === 'open' ? '实时' : connState === 'reconnecting' ? '重连中' : connState}
+              text={
+                connState === 'open' ? '实时' : connState === 'reconnecting' ? '重连中' : connState
+              }
             />
           </Space>
         }
