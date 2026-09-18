@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import functools
 import logging
 import os
 import re
@@ -12,6 +13,7 @@ import uuid
 from pathlib import Path
 from typing import Annotated, Any
 
+import anyio
 import structlog
 from fastapi import APIRouter, File, Form, HTTPException, Query, Request, UploadFile
 
@@ -52,6 +54,13 @@ _BLOCKED_UPLOAD_EXTS = {
     ".exe", ".bat", ".cmd", ".sh", ".js", ".mjs", ".vbs", ".scr",
     ".com", ".msi", ".jar", ".html", ".htm", ".hta",
 }
+
+
+async def _to_thread(fn: Any, /, *args: Any, **kwargs: Any) -> Any:
+    """同步文件 IO 下线程池（与 Repo 层 asyncio.to_thread 约定一致）：
+    上传落盘/台账 JSON 全量读写/设置文件都过这里，不再阻塞事件循环
+    （阻塞期间 WS 心跳与任务事件推送会卡顿）。"""
+    return await anyio.to_thread.run_sync(functools.partial(fn, *args, **kwargs))
 
 
 async def _read_upload(file: UploadFile) -> bytes:
@@ -114,14 +123,14 @@ async def usage_report(request: Request) -> dict[str, Any]:
 @router.get("/settings", response_model=AppSettings)
 async def get_settings(request: Request) -> dict[str, Any]:
     """读取应用设置（浏览器连接模式 / CDP 端点 / 启动最小化）。"""
-    result: dict[str, Any] = _ctx(request).settings.get()
+    result: dict[str, Any] = await _to_thread(_ctx(request).settings.get)
     return result
 
 
 @router.put("/settings", response_model=AppSettings)
 async def put_settings(request: Request, body: AppSettings) -> dict[str, Any]:
     """更新应用设置。运行参数在任务启动时读取，对下一个任务生效。"""
-    result: dict[str, Any] = _ctx(request).settings.update(body.model_dump())
+    result: dict[str, Any] = await _to_thread(_ctx(request).settings.update, body.model_dump())
     return result
 
 
@@ -445,7 +454,7 @@ async def upload_resume(
     ctx.config.ensure_dirs()
     name = Path(file.filename or "resume").name
     dest = ctx.config.attachments_dir / f"{uuid.uuid4().hex[:8]}_{name}"
-    dest.write_bytes(await _read_upload(file))
+    await _to_thread(dest.write_bytes, await _read_upload(file))
     try:
         attachment = Attachment.model_validate(
             {
@@ -453,7 +462,7 @@ async def upload_resume(
                 "label": label or Path(name).stem,
                 "path": str(dest.resolve()),
                 "meta": {
-                    "size_kb": max(1, dest.stat().st_size // 1024),
+                    "size_kb": max(1, (await _to_thread(dest.stat)).st_size // 1024),
                     "filename": name,
                     "active": 1,
                 },
@@ -562,7 +571,7 @@ async def parse_resume_api(
     ctx.config.ensure_dirs()
     name = Path(file.filename or "resume").name
     dest = ctx.config.uploads_dir / f"{uuid.uuid4().hex[:8]}_{name}"
-    dest.write_bytes(await _read_upload(file))
+    await _to_thread(dest.write_bytes, await _read_upload(file))
     try:
         profile, low_conf = await parse_resume(str(dest), llm)
     except AutoOfferError as exc:
@@ -591,7 +600,7 @@ async def upload_attachment(
     ctx.config.ensure_dirs()
     name = Path(file.filename or "attachment").name
     dest = ctx.config.attachments_dir / f"{uuid.uuid4().hex[:8]}_{name}"
-    dest.write_bytes(await _read_upload(file))
+    await _to_thread(dest.write_bytes, await _read_upload(file))
     try:
         attachment = Attachment.model_validate(
             {
@@ -599,7 +608,10 @@ async def upload_attachment(
                 "label": label or name,
                 "path": str(dest.resolve()),
                 "language": language,
-                "meta": {"size_kb": max(1, dest.stat().st_size // 1024), "filename": name},
+                "meta": {
+                    "size_kb": max(1, (await _to_thread(dest.stat)).st_size // 1024),
+                    "filename": name,
+                },
             }
         )
     except ValueError as exc:
@@ -675,7 +687,7 @@ def _app_store(ctx: Any) -> ApplicationStore:
 @router.get("/applications")
 async def list_applications(request: Request, status: str | None = None) -> list[dict[str, Any]]:
     store = _app_store(_ctx(request))
-    records = store.list(status=status)  # type: ignore[arg-type]
+    records = await _to_thread(store.list, status=status)  # type: ignore[arg-type]
     return [r.model_dump() for r in records]
 
 
@@ -685,7 +697,8 @@ async def report_application(
 ) -> dict[str, Any]:
     """插件填写完成后上报投递记录；同 URL 的 filled 记录更新而非重复添加。"""
     store = _app_store(_ctx(request))
-    record = store.add_or_update(
+    record = await _to_thread(
+        store.add_or_update,
         url=body.url,
         profile_id=body.profile_id,
         page_title=body.page_title,
@@ -704,7 +717,7 @@ async def update_application(
     request: Request, record_id: str, body: ApplicationStatusIn
 ) -> dict[str, Any]:
     store = _app_store(_ctx(request))
-    record = store.update_status(record_id, body.status, note=body.note)  # type: ignore[arg-type]
+    record = await _to_thread(store.update_status, record_id, body.status, note=body.note)  # type: ignore[arg-type]
     if record is None:
         raise HTTPException(404, f"投递记录不存在: {record_id}")
     payload: dict[str, Any] = record.model_dump()
@@ -714,7 +727,7 @@ async def update_application(
 @router.delete("/applications/{record_id}")
 async def delete_application(request: Request, record_id: str) -> dict[str, bool]:
     store = _app_store(_ctx(request))
-    return {"deleted": store.remove(record_id)}
+    return {"deleted": await _to_thread(store.remove, record_id)}
 
 
 # ---------- 插件日志汇聚（与 exe 日志同写一个 app.log） ----------

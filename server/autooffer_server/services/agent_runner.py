@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from typing import TYPE_CHECKING, Any
 
 import structlog
@@ -60,7 +61,7 @@ class AgentTaskRunner:
         router = await self._ctx.build_router(usage_sink=_record_usage)
 
         # 浏览器模式优先级：界面设置（settings.json）> 启动参数（config）
-        settings = self._ctx.settings.get()
+        settings = await asyncio.to_thread(self._ctx.settings.get)
         browser_mode = settings.get("browser_mode", "managed")
         cdp_endpoint = settings.get("cdp_endpoint") or self._ctx.config.cdp_endpoint
 
@@ -112,7 +113,9 @@ class AgentTaskRunner:
 
         # 填写完成自动登记投递列表
         store = ApplicationStore(self._ctx.config.data_dir / "applications.json")
-        record = store.add_from_report(report, page_title=report.page_title)
+        record = await asyncio.to_thread(
+            store.add_from_report, report, page_title=report.page_title
+        )
         log.info("agent_runner.application_recorded", task_id=task_id, record_id=record.id)
 
         result: dict[str, Any] = report.model_dump()

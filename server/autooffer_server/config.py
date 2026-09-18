@@ -2,18 +2,13 @@
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
 
 from pydantic import BaseModel
 
+from autooffer_core.paths import default_data_dir
 
-def default_data_dir() -> Path:
-    """用户数据目录：Windows 用 %APPDATA%/AutoOffer，其它平台用 ~/.autooffer。"""
-    appdata = os.environ.get("APPDATA")
-    if appdata:
-        return Path(appdata) / "AutoOffer"
-    return Path.home() / ".autooffer"
+__all__ = ["ServerConfig", "default_data_dir"]
 
 
 class ServerConfig(BaseModel):

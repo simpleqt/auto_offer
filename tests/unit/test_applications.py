@@ -103,3 +103,16 @@ def test_remove(tmp_path: Path) -> None:
     assert store.remove(r.id) is True
     assert store.remove(r.id) is False
     assert store.list() == []
+
+
+def test_default_store_path_matches_server_data_dir() -> None:
+    """CLI/核心与桌面服务共用同一数据目录（唯一事实源 core.paths）。
+
+    此前 ApplicationStore 自带 ~/AutoOffer 默认，非 Windows 平台上
+    CLI 登记的投递在桌面「投递列表」不可见。"""
+    from autooffer_core.applications import ApplicationStore
+    from autooffer_core.paths import default_data_dir
+    from autooffer_server.config import default_data_dir as server_default
+
+    assert server_default() == default_data_dir()
+    assert ApplicationStore()._path == default_data_dir() / "applications.json"
