@@ -66,7 +66,7 @@ def mapping_client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> TestClien
 
     monkeypatch.setattr(AppContext, "build_llm", fake_build_llm)
     app = create_app(ctx=ctx)
-    with TestClient(app) as c:
+    with TestClient(app, base_url="http://127.0.0.1") as c:
         yield c
 
 
@@ -143,7 +143,7 @@ def test_mapping_requires_endpoint(tmp_path: Path) -> None:
     config = ServerConfig.create(tmp_path / "data", headless=True)
     ctx = AppContext(config, runner=FakeRunner(), keystore=MemoryKeyStore())
     app = create_app(ctx=ctx)
-    with TestClient(app) as c:
+    with TestClient(app, base_url="http://127.0.0.1") as c:
         c.put(
             "/api/v1/profiles/demo-profile",
             json={"label": "示例", "payload": sample_profile_payload()},
@@ -277,3 +277,94 @@ def test_mapping_cache_hit_skips_llm() -> None:
     # 无 profile_id 的调用不走缓存（兼容旧调用方）
     assert calls == 0
     mapping_mod._mapping_cache.clear()
+
+
+def test_mapping_cache_key_includes_options() -> None:
+    """缓存键须含 options：候选选项进 LLM 提示词、影响映射结果——
+    同标签不同选项的两个页面共享缓存条目会拿到错误复用。"""
+    import asyncio
+
+    from autooffer_server.services import mapping as mapping_mod
+    from autooffer_server.services.mapping import PageField, map_fields
+
+    flat = {
+        "sections": [
+            {"key": "basic", "title": "基本信息", "kind": "simple",
+             "values": {"手机号码": "138"}},
+        ]
+    }
+    llm_json = json.dumps(
+        {"matches": [{"field": "状态栏", "profile": "手机号码", "confidence": 0.9}]},
+        ensure_ascii=False,
+    )
+    calls = 0
+
+    class CountingLLM:
+        async def complete(self, messages: list) -> Any:
+            nonlocal calls
+            calls += 1
+            from autooffer_core.llm.interfaces import LLMResponse
+
+            return LLMResponse(text=llm_json)
+
+    mapping_mod._mapping_cache.clear()
+    try:
+        f1 = PageField(label="状态栏", section="信息", options=["在校", "离职"])
+        f2 = PageField(label="状态栏", section="信息", options=["已婚", "未婚"])
+        asyncio.run(map_fields([f1], flat, CountingLLM(), profile_id="p-opt"))
+        assert calls == 1
+        # 选项不同 → 不能命中缓存
+        asyncio.run(map_fields([f2], flat, CountingLLM(), profile_id="p-opt"))
+        assert calls == 2
+        # 选项相同（顺序不同）→ 命中
+        f1b = PageField(label="状态栏", section="信息", options=["离职", "在校"])
+        asyncio.run(map_fields([f1b], flat, CountingLLM(), profile_id="p-opt"))
+        assert calls == 2
+    finally:
+        mapping_mod._mapping_cache.clear()
+
+
+def test_mapping_cache_key_covers_fields_beyond_60() -> None:
+    """缓存键须覆盖全量字段：曾只哈希前 60 个，>60 字段的页面与
+    「前 60 相同」的页面共享条目，多出的字段静默拿不到映射。"""
+    import asyncio
+
+    from autooffer_server.services import mapping as mapping_mod
+    from autooffer_server.services.mapping import PageField, map_fields
+
+    flat = {
+        "sections": [
+            {"key": "basic", "title": "基本信息", "kind": "simple",
+             "values": {"手机号码": "138"}},
+        ]
+    }
+    llm_json = json.dumps(
+        {"matches": [{"field": "字段01", "profile": "手机号码", "confidence": 0.9}]},
+        ensure_ascii=False,
+    )
+    calls = 0
+
+    class CountingLLM:
+        async def complete(self, messages: list) -> Any:
+            nonlocal calls
+            calls += 1
+            from autooffer_core.llm.interfaces import LLMResponse
+
+            return LLMResponse(text=llm_json)
+
+    mapping_mod._mapping_cache.clear()
+    try:
+        base = [PageField(label=f"字段{i:02d}", section="区") for i in range(1, 61)]
+        tail_a = [PageField(label=f"尾部A{j}", section="区") for j in range(1, 11)]
+        tail_b = [PageField(label=f"尾部B{j}", section="区") for j in range(1, 11)]
+
+        asyncio.run(map_fields(base + tail_a, flat, CountingLLM(), profile_id="p-60"))
+        assert calls == 1
+        # 前 60 相同、后 10 不同 → 不得命中
+        asyncio.run(map_fields(base + tail_b, flat, CountingLLM(), profile_id="p-60"))
+        assert calls == 2
+        # 完全相同 → 命中
+        asyncio.run(map_fields(base + tail_a, flat, CountingLLM(), profile_id="p-60"))
+        assert calls == 2
+    finally:
+        mapping_mod._mapping_cache.clear()

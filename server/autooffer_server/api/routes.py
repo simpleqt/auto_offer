@@ -149,7 +149,9 @@ async def upsert_model(request: Request, body: EndpointIn) -> dict[str, Any]:
     data["supports_vision"] = -1 if existing is None else _vision_int(existing)
     await ctx.repo.save_endpoint(data)
     saved: dict[str, Any] | None = await ctx.repo.get_endpoint(body.id)
-    assert saved is not None
+    if saved is None:
+        # 不用 assert：python -O 下被剥除，保存失败会变成 500 None 响应
+        raise HTTPException(500, "端点保存后读取失败")
     return saved
 
 
@@ -617,7 +619,9 @@ async def create_task(request: Request, body: TaskIn) -> dict[str, Any]:
     task_id = f"task-{uuid.uuid4().hex[:10]}"
     await ctx.scheduler.submit(task_id, body.url, body.profile_id, body.options or None)
     row: dict[str, Any] | None = await ctx.repo.get_task(task_id)
-    assert row is not None
+    if row is None:
+        # 不用 assert：python -O 下被剥除，创建失败会变成 500 None 响应
+        raise HTTPException(500, "任务创建后读取失败")
     return row
 
 

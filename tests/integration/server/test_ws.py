@@ -6,7 +6,7 @@ from typing import Any
 
 from fastapi.testclient import TestClient
 
-from tests.integration.server.conftest import FakeRunner, sample_profile_payload
+from tests.integration.server.conftest import FakeRunner, sample_profile_payload, ws_connect
 
 
 def collect(ws: Any, *, limit: int = 12) -> list[dict[str, Any]]:
@@ -30,7 +30,7 @@ def test_ws_streams_events_and_final_state(client: TestClient) -> None:
         "/api/v1/tasks", json={"url": "https://example.com/apply", "profile_id": "p1"}
     ).json()["id"]
 
-    with client.websocket_connect(f"/ws/tasks/{task_id}") as ws:
+    with ws_connect(client, f"/ws/tasks/{task_id}") as ws:
         events = collect(ws)
 
     kinds = [e.get("type") for e in events]
@@ -56,7 +56,7 @@ def test_ws_replays_history_for_late_subscriber(client: TestClient) -> None:
             break
         time.sleep(0.05)
 
-    with client.websocket_connect(f"/ws/tasks/{task_id}") as ws:
+    with ws_connect(client, f"/ws/tasks/{task_id}") as ws:
         events = collect(ws)
 
     assert events, "迟到订阅者应收到历史回放"
@@ -68,13 +68,13 @@ def test_ws_waiting_human_state_pushed(ctx_factory: Any) -> None:
     from autooffer_server.main import create_app
 
     runner = FakeRunner(pause_reason="检测到验证码，请手动完成")
-    with TestClient(create_app(ctx=ctx_factory(runner))) as c:
+    with TestClient(create_app(ctx=ctx_factory(runner)), base_url="http://127.0.0.1") as c:
         c.put("/api/v1/profiles/p1", json={"payload": sample_profile_payload()})
         task_id = c.post(
             "/api/v1/tasks", json={"url": "https://x.com", "profile_id": "p1"}
         ).json()["id"]
 
-        with c.websocket_connect(f"/ws/tasks/{task_id}") as ws:
+        with ws_connect(c, f"/ws/tasks/{task_id}") as ws:
             found = False
             for _ in range(12):
                 msg = ws.receive_json()

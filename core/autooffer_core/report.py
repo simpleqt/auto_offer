@@ -41,6 +41,9 @@ class FillReport(BaseModel):
     total_llm_calls: int = 0
     total_tokens: int = 0
     note: str | None = None
+    final_state: str | None = None
+    """Runner 终态（DONE/AWAITING_REVIEW/FAILED/…）。服务层据此映射任务状态——
+    此前终态只埋在 note 字符串里，失败任务也被一律置为 AWAITING_REVIEW。"""
 
     def counts(self) -> dict[FieldStatus, int]:
         """按状态统计字段数量。"""

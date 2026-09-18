@@ -30,7 +30,7 @@ def test_stale_active_tasks_cancelled_on_startup(ctx_factory: Any, tmp_path: Pat
     asyncio.run(ctx.repo.create_task("z-done", "https://example.com", "p1"))
     asyncio.run(ctx.repo.update_task("z-done", state="DONE"))
 
-    with TestClient(app):
+    with TestClient(app, base_url="http://127.0.0.1"):
         pass  # 进入即触发 lifespan 启动清理
 
     states = {
@@ -48,6 +48,6 @@ def test_stale_active_tasks_cancelled_on_startup(ctx_factory: Any, tmp_path: Pat
 def test_no_stale_tasks_startup_is_noop(ctx_factory: Any) -> None:
     ctx = ctx_factory(FakeRunner())
     app = create_app(ctx=ctx)
-    with TestClient(app):
+    with TestClient(app, base_url="http://127.0.0.1"):
         pass
     assert asyncio.run(ctx.repo.cancel_stale_active_tasks("再次清理")) == 0

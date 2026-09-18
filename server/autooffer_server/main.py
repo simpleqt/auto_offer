@@ -31,9 +31,10 @@ _LOCAL_ORIGINS = [
     "http://localhost:5173",
 ]
 
-# 允许的 Host（本机回环 + Starlette TestClient）：防 DNS rebinding——
-# 攻击者域名解析到 127.0.0.1 后，浏览器视为同源绕过 SOP 直读本地服务
-_ALLOWED_HOSTS = {"127.0.0.1", "localhost", "[::1]", "testserver"}
+# 允许的 Host（本机回环）：防 DNS rebinding——攻击者域名解析到 127.0.0.1
+# 后，浏览器视为同源绕过 SOP 直读本地服务。测试统一用 base_url=
+# http://127.0.0.1，Starlette TestClient 专用值 testserver 不再放行
+_ALLOWED_HOSTS = {"127.0.0.1", "localhost", "[::1]"}
 
 # 允许的 Origin（变更类请求与 WebSocket）：本机回环（桌面 UI 同源 /
 # Vite 开发代理）与浏览器插件。恶意网页对本地服务发起跨站 POST

@@ -37,11 +37,19 @@ class FakeRunner:
     """假执行体：产出若干事件后返回填写报告。
 
     pause_reason 非空时先触发一次人工介入门（用于测试 WAITING_HUMAN → resume）。
+    final_state 模拟 runner 终态（FAILED/DONE），验证服务层状态映射。
     """
 
-    def __init__(self, *, pause_reason: str | None = None, fail: bool = False) -> None:
+    def __init__(
+        self,
+        *,
+        pause_reason: str | None = None,
+        fail: bool = False,
+        final_state: str | None = None,
+    ) -> None:
         self.pause_reason = pause_reason
         self.fail = fail
+        self.final_state = final_state
         self.started = asyncio.Event()
 
     async def run(
@@ -71,6 +79,7 @@ class FakeRunner:
                 FieldRecord(label="姓名", status="filled", value="张三"),
                 FieldRecord(label="期望薪资", status="pending_confirm"),
             ],
+            final_state=self.final_state,
         )
         on_event({"kind": "report", "agent": "runner", "summary": "报告生成"})
         return report.model_dump()
@@ -93,7 +102,7 @@ def fake_runner() -> FakeRunner:
 @pytest.fixture
 def client(ctx_factory: Any, fake_runner: FakeRunner) -> Iterator[TestClient]:
     app = create_app(ctx=ctx_factory(fake_runner))
-    with TestClient(app) as c:
+    with TestClient(app, base_url="http://127.0.0.1") as c:
         yield c
 
 
@@ -101,3 +110,9 @@ def sample_profile_payload() -> dict[str, Any]:
     from autooffer_core.testing import build_sample_profile
 
     return build_sample_profile().model_dump(mode="json")
+
+
+def ws_connect(client: TestClient, path: str) -> Any:
+    """WS 测试连接：starlette 测试会话硬编码 host=testserver，而生产
+    Host 白名单已不再放行该值——注入回环 Host 过防线（显式头会覆盖）。"""
+    return client.websocket_connect(path, headers={"host": "127.0.0.1:80"})

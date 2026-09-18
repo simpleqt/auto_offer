@@ -282,11 +282,15 @@ def _cache_key(
 ) -> tuple[str, str, str]:
     catalog_part = json.dumps(_catalog(flat), ensure_ascii=False, sort_keys=True)
     # 字段排序后再哈希：unmatched 列表的顺序受页面渲染/草稿状态影响，
-    # 同字段集不同顺序应命中同一条缓存（否则重复填写频繁 miss）
+    # 同字段集不同顺序应命中同一条缓存（否则重复填写频繁 miss）。
+    # options 参与键（进 LLM 提示词，影响映射结果）；全量字段参与键——
+    # 曾只取前 60 个，>60 字段的页面与「前 60 相同」的其它页面共享
+    # 缓存条目，多出的字段静默拿不到映射
     fields_part = json.dumps(
         sorted(
             [f.label, f.section or "", f.kind or "", f.placeholder or ""]
-            for f in fields[:60]
+            + sorted((f.options or [])[:20])
+            for f in fields
         ),
         ensure_ascii=False,
     )

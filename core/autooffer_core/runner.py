@@ -1082,6 +1082,7 @@ class AgentRunner:
             finished_at=datetime.datetime.now().isoformat(timespec="seconds"),
             total_tokens=self._used_tokens(),
             note=f"最终状态: {self.state}",
+            final_state=self.state,
         )
 
 

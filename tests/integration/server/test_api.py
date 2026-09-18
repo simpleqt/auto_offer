@@ -178,7 +178,7 @@ def test_task_waiting_human_then_resume(ctx_factory: Any) -> None:
     from tests.integration.server.conftest import FakeRunner
 
     runner = FakeRunner(pause_reason="检测到登录页，请手动登录")
-    with TestClient(create_app(ctx=ctx_factory(runner))) as c:
+    with TestClient(create_app(ctx=ctx_factory(runner)), base_url="http://127.0.0.1") as c:
         c.put("/api/v1/profiles/p1", json={"payload": sample_profile_payload()})
         task_id = c.post(
             "/api/v1/tasks", json={"url": "https://example.com/login", "profile_id": "p1"}
@@ -195,7 +195,9 @@ def test_task_failure_recorded(ctx_factory: Any) -> None:
     from autooffer_server.main import create_app
     from tests.integration.server.conftest import FakeRunner
 
-    with TestClient(create_app(ctx=ctx_factory(FakeRunner(fail=True)))) as c:
+    with TestClient(
+        create_app(ctx=ctx_factory(FakeRunner(fail=True))), base_url="http://127.0.0.1"
+    ) as c:
         c.put("/api/v1/profiles/p1", json={"payload": sample_profile_payload()})
         task_id = c.post(
             "/api/v1/tasks", json={"url": "https://x.com", "profile_id": "p1"}
@@ -209,7 +211,7 @@ def test_task_cancel(ctx_factory: Any) -> None:
     from tests.integration.server.conftest import FakeRunner
 
     runner = FakeRunner(pause_reason="等待人工")
-    with TestClient(create_app(ctx=ctx_factory(runner))) as c:
+    with TestClient(create_app(ctx=ctx_factory(runner)), base_url="http://127.0.0.1") as c:
         c.put("/api/v1/profiles/p1", json={"payload": sample_profile_payload()})
         task_id = c.post(
             "/api/v1/tasks", json={"url": "https://x.com", "profile_id": "p1"}

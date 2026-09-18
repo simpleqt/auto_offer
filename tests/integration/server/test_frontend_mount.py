@@ -27,7 +27,7 @@ def _make_dist(tmp_path: Path) -> Path:
 
 def test_spa_index_and_fallback(tmp_path: Path) -> None:
     dist = _make_dist(tmp_path)
-    with TestClient(create_app(frontend_dir=dist)) as c:
+    with TestClient(create_app(frontend_dir=dist), base_url="http://127.0.0.1") as c:
         r = c.get("/")
         assert r.status_code == 200
         assert "APP" in r.text
@@ -40,7 +40,7 @@ def test_spa_index_and_fallback(tmp_path: Path) -> None:
 
 def test_spa_assets_served(tmp_path: Path) -> None:
     dist = _make_dist(tmp_path)
-    with TestClient(create_app(frontend_dir=dist)) as c:
+    with TestClient(create_app(frontend_dir=dist), base_url="http://127.0.0.1") as c:
         r = c.get("/assets/app.js")
         assert r.status_code == 200
         assert r.text == "console.log('hi')"
@@ -48,7 +48,7 @@ def test_spa_assets_served(tmp_path: Path) -> None:
 
 def test_api_and_docs_not_shadowed(tmp_path: Path) -> None:
     dist = _make_dist(tmp_path)
-    with TestClient(create_app(frontend_dir=dist)) as c:
+    with TestClient(create_app(frontend_dir=dist), base_url="http://127.0.0.1") as c:
         assert c.get("/api/v1/system/health").status_code == 200
         assert c.get("/docs").status_code == 200
         assert c.get("/openapi.json").status_code == 200
@@ -61,6 +61,9 @@ def test_no_frontend_dir_degrades_to_api_only(tmp_path: Path) -> None:
     """
     config = ServerConfig.create(tmp_path / "data", headless=True)
     ctx = AppContext(config, keystore=MemoryKeyStore())
-    with TestClient(create_app(ctx=ctx, frontend_dir=tmp_path / "does-not-exist")) as c:
+    with TestClient(
+        create_app(ctx=ctx, frontend_dir=tmp_path / "does-not-exist"),
+        base_url="http://127.0.0.1",
+    ) as c:
         assert c.get("/api/v1/system/health").status_code == 200
         assert c.get("/").status_code == 404

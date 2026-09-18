@@ -149,7 +149,20 @@ class TaskScheduler:
                     report=json.dumps(report, ensure_ascii=False),
                     page_title=str(report.get("page_title", "")),
                 )
-                await self._set_state(task_id, "AWAITING_REVIEW")
+                # 终态映射：runner FAILED（Planner 判败/超步数/token 超限）不得
+                # 报成 AWAITING_REVIEW——此前状态语义两套已矛盾；DONE（自动
+                # 提交成功）如实透传；其余（含无 final_state 的旧报告）审核态
+                final = str(report.get("final_state") or "")
+                if final == "FAILED":
+                    await self._set_state(
+                        task_id,
+                        "FAILED",
+                        wait_reason=str(report.get("note") or "任务失败")[:500],
+                    )
+                elif final == "DONE":
+                    await self._set_state(task_id, "DONE")
+                else:
+                    await self._set_state(task_id, "AWAITING_REVIEW")
         finally:
             # 完成的任务即时清理（长期运行的桌面服务不再缓慢泄漏；
             # 状态与报告已入库，cancel/resume 走 DB 兜底分支不受影响）
