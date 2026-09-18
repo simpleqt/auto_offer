@@ -96,3 +96,45 @@ def test_icon_path_exists_and_loadable() -> None:
     user32 = ctypes.windll.user32
     hicon = user32.LoadImageW(None, str(icon), 1, 32, 32, 0x10)
     assert hicon, "LoadImageW 加载 ico 失败"
+
+
+def test_shutdown_server_runs_lifespan_cleanup(tmp_path: Path) -> None:
+    """关停协议：置 should_exit 后 uvicorn 走 lifespan（scheduler 关停/
+    浏览器释放/审计排空），线程干净退出——此前关窗即 daemon 线程硬杀。"""
+    import threading
+    import time
+
+    from app.launcher import _run_server, _shutdown_server
+
+    from autooffer_server.config import ServerConfig
+    from autooffer_server.context import AppContext
+    from autooffer_server.main import create_app
+    from tests.integration.server.conftest import FakeRunner, MemoryKeyStore
+
+    ctx = AppContext(
+        ServerConfig.create(tmp_path / "data", headless=True),
+        runner=FakeRunner(),
+        keystore=MemoryKeyStore(),
+    )
+    app = create_app(ctx=ctx)
+    port = _find_free_port(18790)
+    holder: dict[str, object] = {}
+    t = threading.Thread(target=_run_server, args=(app, "127.0.0.1", port, holder), daemon=True)
+    t.start()
+
+    import urllib.request
+
+    base = f"http://127.0.0.1:{port}"
+    for _ in range(100):
+        try:
+            with urllib.request.urlopen(f"{base}/api/v1/system/health", timeout=1) as r:  # noqa: S310
+                if r.status == 200:
+                    break
+        except Exception:
+            time.sleep(0.1)
+    else:
+        raise AssertionError("服务未在 10s 内就绪")
+    assert holder["server"] is not None
+
+    _shutdown_server(holder, t, timeout_s=10.0)
+    assert not t.is_alive(), "服务线程应在关停后退出"

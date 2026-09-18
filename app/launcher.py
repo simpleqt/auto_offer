@@ -243,11 +243,33 @@ def _set_window_icon(window: Any, icon_path: Path) -> None:
     window.events.shown += _apply
 
 
-def _run_server(app: Any, host: str, port: int) -> None:
-    """在线程内运行 Uvicorn；进程退出时随主线程结束。"""
+def _run_server(
+    app: Any, host: str, port: int, holder: dict[str, Any]
+) -> None:
+    """线程内运行 Uvicorn；server 实例经 holder 交回主线程，
+    关窗后由主线程置 should_exit 触发优雅关停。"""
     config = uvicorn.Config(app, host=host, port=port, log_level="info")
     server = uvicorn.Server(config)
+    holder["server"] = server
     server.run()
+
+
+def _shutdown_server(
+    holder: dict[str, Any], thread: threading.Thread, timeout_s: float = 10.0
+) -> None:
+    """优雅关停：置 should_exit 让 uvicorn 走 lifespan 收尾（scheduler 取消
+    运行中任务并排空审计队列、关闭共享浏览器），随后等线程退出。
+
+    此前关窗即随 daemon 线程硬杀——尾部审计事件丢失、Chromium 孤儿进程、
+    持久上下文 profile 锁残留可能导致下次启动失败。"""
+    server = holder.get("server")
+    if server is not None:
+        server.should_exit = True
+    thread.join(timeout=timeout_s)
+    if thread.is_alive():
+        log.warning("app.server_shutdown_timeout（lifespan 未在 %.0fs 内完成）", timeout_s)
+    else:
+        log.info("app.server_stopped")
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -310,7 +332,10 @@ def main(argv: list[str] | None = None) -> int:
             )
         log.info("app.listening %s", base_url)
 
-        t = threading.Thread(target=_run_server, args=(app, config.host, port), daemon=True)
+        server_holder: dict[str, Any] = {}
+        t = threading.Thread(
+            target=_run_server, args=(app, config.host, port, server_holder), daemon=True
+        )
         t.start()
 
         # 轮询健康检查，最多等 15 秒
@@ -343,9 +368,11 @@ def main(argv: list[str] | None = None) -> int:
                 while True:
                     time.sleep(3600)
             except KeyboardInterrupt:
-                return 0
+                pass
             finally:
+                _shutdown_server(server_holder, t)
                 single.release()
+            return 0
 
         window = webview.create_window("AutoOffer", base_url, width=1200, height=800)
         icon = _icon_path()
@@ -362,6 +389,9 @@ def main(argv: list[str] | None = None) -> int:
             window.events.loaded += _minimize_on_loaded
         webview.start()
         log.info("app.window_closed")
+        # 关窗后优雅关停服务（lifespan：取消任务/排空审计/关浏览器），
+        # 再退出进程——不再随 daemon 线程硬杀
+        _shutdown_server(server_holder, t)
         return 0
     finally:
         single.release()
