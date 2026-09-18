@@ -20,7 +20,7 @@ import {
   Typography,
   message,
 } from 'antd';
-import { putProfile } from '../api/client';
+import { ApiError, getProfile, putProfile } from '../api/client';
 import type { Profile } from '../api/types';
 import { getUnsaved, setUnsaved } from '../unsaved';
 import { datesToDayjs, dayjsToDates } from '../profile-date';
@@ -28,7 +28,14 @@ import { profileCompleteness } from '../completeness';
 import { BasicFields, EducationFields, ExperienceFields } from './ProfileBasicSections';
 import { Attachments, ExtendedFields, QABank } from './ProfileExtendedSections';
 
-export default function ProfileEditor({ profile }: { profile: Profile }) {
+export default function ProfileEditor({
+  profile,
+  expectedUpdatedAt,
+}: {
+  profile: Profile;
+  /** 乐观锁凭据（服务端 updated_at）：不一致时保存返回 409 */
+  expectedUpdatedAt?: string;
+}) {
   const [form] = Form.useForm();
   const qc = useQueryClient();
   const [saving, setSaving] = useState(false);
@@ -68,26 +75,43 @@ export default function ProfileEditor({ profile }: { profile: Profile }) {
     setSaving(true);
     try {
       const payload = dayjsToDates({ ...profile, ...values }) as Profile;
-      await putProfile(profile.id, payload);
+      const saved = await putProfile(profile.id, payload, expectedUpdatedAt);
       setUnsaved(false);
       setDirty(false);
       // 失效列表与实体缓存：完整度圆环/updated_at 否则保持旧值，
-      // 下次进编辑器也会先渲染旧数据
+      // 下次进编辑器也会先渲染旧数据；版本缓存直接写入返回值，
+      // 连快速二次保存也不会拿着旧版本假 409
+      qc.setQueryData(['profile-version', profile.id], { updated_at: saved.updated_at });
       qc.invalidateQueries({ queryKey: ['profiles'] });
       qc.invalidateQueries({ queryKey: ['profile', profile.id] });
       message.success('档案已保存');
     } catch (e) {
-      message.error((e as Error).message);
+      if (e instanceof ApiError && e.status === 409) {
+        // 并发修改（其他窗口/插件先保存了）：拉最新版本回填表单，
+        // 用户核对后重存——不再 last-write-wins 静默覆盖
+        message.warning('档案已被其他窗口修改，已加载最新版本，请核对后重新保存');
+        try {
+          onProfileUpdated(await getProfile(profile.id));
+          qc.invalidateQueries({ queryKey: ['profile-version', profile.id] });
+        } catch {
+          /* 拉取失败时至少提示了冲突 */
+        }
+      } else {
+        message.error((e as Error).message);
+      }
     } finally {
       setSaving(false);
     }
   }
 
-  /** 服务端已改档案（如简历解析覆盖）→ 整表刷新为服务端版本 */
+  /** 服务端已改档案（如简历解析覆盖/附件变更）→ 整表刷新为服务端版本 */
   function onProfileUpdated(fresh: Profile) {
     form.setFieldsValue(datesToDayjs(fresh));
     setUnsaved(false);
     setDirty(false);
+    // 服务端侧变更会推进 updated_at：同步失效版本缓存，
+    // 下一次保存才不会拿旧凭据假 409
+    qc.invalidateQueries({ queryKey: ['profile-version', profile.id] });
   }
 
   return (

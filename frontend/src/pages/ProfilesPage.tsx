@@ -18,7 +18,14 @@ import {
 } from 'antd';
 import { DeleteOutlined, FileTextOutlined, PlusOutlined, UploadOutlined } from '@ant-design/icons';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { deleteProfile, getProfile, listProfiles, parseResume, putProfile } from '../api/client';
+import {
+  deleteProfile,
+  getProfile,
+  getProfileVersion,
+  listProfiles,
+  parseResume,
+  putProfile,
+} from '../api/client';
 import { emptyProfile, fmtTime, newProfileId } from '../profile-utils';
 import { getUnsaved, setUnsaved } from '../unsaved';
 import ProfileEditor from './ProfileEditor';
@@ -35,6 +42,12 @@ export default function ProfilesPage() {
   const { data: activeProfile, isLoading: profileLoading } = useQuery({
     queryKey: ['profile', selectedId],
     queryFn: () => getProfile(selectedId!),
+    enabled: !!selectedId,
+  });
+  // 档案版本（乐观锁凭据）：保存时带上，服务端不一致则 409
+  const { data: profileVersion } = useQuery({
+    queryKey: ['profile-version', selectedId],
+    queryFn: () => getProfileVersion(selectedId!),
     enabled: !!selectedId,
   });
 
@@ -204,7 +217,11 @@ export default function ProfilesPage() {
           {profileLoading ? (
             <Spin />
           ) : activeProfile ? (
-            <ProfileEditor key={activeProfile.id} profile={activeProfile} />
+            <ProfileEditor
+              key={activeProfile.id}
+              profile={activeProfile}
+              expectedUpdatedAt={profileVersion?.updated_at}
+            />
           ) : (
             <Empty
               image={Empty.PRESENTED_IMAGE_SIMPLE}

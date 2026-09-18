@@ -230,6 +230,15 @@ async def get_profile(request: Request, profile_id: str) -> dict[str, Any]:
     return row
 
 
+@router.get("/profiles/{profile_id}/version")
+async def get_profile_version(request: Request, profile_id: str) -> dict[str, str]:
+    """档案版本（乐观锁凭据）。"""
+    version: str | None = await _ctx(request).repo.get_profile_version(profile_id)
+    if version is None:
+        raise HTTPException(404, f"档案不存在: {profile_id}")
+    return {"updated_at": version}
+
+
 @router.get("/profiles/{profile_id}/flat")
 async def get_profile_flat(
     request: Request, profile_id: str, sensitive: bool = False
@@ -416,8 +425,18 @@ async def put_profile(request: Request, profile_id: str, body: ProfileIn) -> dic
         raise HTTPException(422, f"档案校验失败: {exc}") from exc
     ctx = _ctx(request)
     payload: dict[str, Any] = profile.model_dump(mode="json")
-    await ctx.repo.save_profile(profile_id, profile.label, payload)
-    return payload
+    new_version = await ctx.repo.save_profile(
+        profile_id, profile.label, payload,
+        expected_updated_at=body.expected_updated_at,
+    )
+    if new_version is None:
+        current = await ctx.repo.get_profile_version(profile_id) or "?"
+        raise HTTPException(
+            409,
+            f"档案已被其他窗口/插件修改（服务端版本较新），请刷新后重试；当前版本 {current}",
+        )
+    # 返回新版本号：前端直接更新乐观锁缓存，连快速二次保存也不会假 409
+    return {"payload": payload, "updated_at": new_version}
 
 
 def _deactivate_resumes(attachments: list[dict[str, Any]]) -> None:
@@ -641,9 +660,30 @@ async def create_task(request: Request, body: TaskIn) -> dict[str, Any]:
 async def list_tasks(
     request: Request,
     limit: Annotated[int, Query(ge=1, le=500)] = 50,
+    state: Annotated[str | None, Query()] = None,
 ) -> list[dict[str, Any]]:
-    result: list[dict[str, Any]] = await _ctx(request).repo.list_tasks(limit)
+    """任务列表；state 过滤（QUEUED/RUNNING/WAITING_HUMAN/AWAITING_REVIEW/
+    DONE/FAILED/CANCELLED），非法值按无过滤处理。"""
+    if state and state not in {
+        "QUEUED", "RUNNING", "WAITING_HUMAN",
+        "AWAITING_REVIEW", "DONE", "FAILED", "CANCELLED",
+    }:
+        state = None
+    result: list[dict[str, Any]] = await _ctx(request).repo.list_tasks(limit, state)
     return result
+
+
+@router.delete("/tasks/{task_id}")
+async def delete_task(request: Request, task_id: str) -> dict[str, bool]:
+    """删除任务及事件；活跃任务先取消再删。"""
+    ctx = _ctx(request)
+    row: dict[str, Any] | None = await ctx.repo.get_task(task_id)
+    if row is None:
+        raise HTTPException(404, f"任务不存在: {task_id}")
+    if row["state"] in {"QUEUED", "RUNNING", "WAITING_HUMAN"}:
+        await ctx.scheduler.cancel(task_id)
+    deleted = await ctx.repo.delete_task(task_id)
+    return {"deleted": deleted}
 
 
 @router.get("/tasks/{task_id}", response_model=TaskOut)

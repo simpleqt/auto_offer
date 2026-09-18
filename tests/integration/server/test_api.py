@@ -119,7 +119,9 @@ def test_profile_crud(client: TestClient) -> None:
     payload = sample_profile_payload()
     r = client.put("/api/v1/profiles/p1", json={"payload": payload})
     assert r.status_code == 200
-    assert r.json()["basic"]["name"] == "张三"
+    # PUT 返回 {payload, updated_at}：updated_at 是乐观锁的新版本凭据
+    assert r.json()["payload"]["basic"]["name"] == "张三"
+    assert r.json()["updated_at"]
 
     summaries = client.get("/api/v1/profiles").json()
     assert len(summaries) == 1

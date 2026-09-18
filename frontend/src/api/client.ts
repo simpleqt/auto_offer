@@ -85,10 +85,12 @@ export const putRouting = (mapping: RoleRouting) =>
 
 export const listProfiles = () => request<ProfileSummary[]>('/profiles');
 export const getProfile = (id: string) => request<Profile>(`/profiles/${encodeURIComponent(id)}`);
-export const putProfile = (id: string, payload: Profile) =>
-  request<Profile>(`/profiles/${encodeURIComponent(id)}`, {
+export const getProfileVersion = (id: string) =>
+  request<{ updated_at: string }>(`/profiles/${encodeURIComponent(id)}/version`);
+export const putProfile = (id: string, payload: Profile, expectedUpdatedAt?: string) =>
+  request<{ payload: Profile; updated_at: string }>(`/profiles/${encodeURIComponent(id)}`, {
     method: 'PUT',
-    body: JSON.stringify({ payload }),
+    body: JSON.stringify({ payload, expected_updated_at: expectedUpdatedAt }),
   });
 export const deleteProfile = (id: string) =>
   request<{ deleted: boolean }>(`/profiles/${encodeURIComponent(id)}`, { method: 'DELETE' });

@@ -29,6 +29,12 @@ def _now() -> str:
     return datetime.datetime.now().isoformat(timespec="seconds")
 
 
+def _now_precise() -> str:
+    """微秒精度版本号：秒精度下同一秒内的两次保存 updated_at 相同，
+    乐观锁会漏检这 1 秒内的并发冲突。"""
+    return datetime.datetime.now().isoformat(timespec="microseconds")
+
+
 class Repo:
     """单机单用户仓储。"""
 
@@ -57,18 +63,45 @@ class Repo:
 
     # ---------- 档案 ----------
 
-    async def save_profile(self, profile_id: str, label: str, payload: dict[str, Any]) -> None:
-        def work(s: Session) -> None:
+    async def save_profile(
+        self,
+        profile_id: str,
+        label: str,
+        payload: dict[str, Any],
+        *,
+        expected_updated_at: str | None = None,
+    ) -> str | None:
+        """保存档案，返回新 updated_at；乐观锁冲突（expected_updated_at
+        与库中不一致）返回 None——并发保存此前是 last-write-wins 静默覆盖。"""
+
+        def work(s: Session) -> str | None:
             row = s.get(ProfileRow, profile_id)
+            if (
+                expected_updated_at is not None
+                and row is not None
+                and row.updated_at != expected_updated_at
+            ):
+                return None
             text = json.dumps(payload, ensure_ascii=False)
+            now = _now_precise()
             if row is None:
-                s.add(ProfileRow(id=profile_id, label=label, payload=text))
+                s.add(ProfileRow(id=profile_id, label=label, payload=text, updated_at=now))
             else:
                 row.label = label
                 row.payload = text
-                row.updated_at = _now()
+                row.updated_at = now
+            return now
 
-        await asyncio.to_thread(self._run, work)
+        return await asyncio.to_thread(self._run, work)
+
+    async def get_profile_version(self, profile_id: str) -> str | None:
+        """档案版本（updated_at）——乐观锁的客户端凭据。"""
+
+        def work(s: Session) -> str | None:
+            row = s.get(ProfileRow, profile_id)
+            return row.updated_at if row else None
+
+        return await asyncio.to_thread(self._run, work)
 
     async def list_profiles(self) -> list[dict[str, Any]]:
         def work(s: Session) -> list[dict[str, Any]]:
@@ -225,15 +258,31 @@ class Repo:
         result: dict[str, Any] | None = await asyncio.to_thread(self._run, work)
         return result
 
-    async def list_tasks(self, limit: int = 50) -> list[dict[str, Any]]:
+    async def list_tasks(
+        self, limit: int = 50, state: str | None = None
+    ) -> list[dict[str, Any]]:
         def work(s: Session) -> list[dict[str, Any]]:
-            rows = s.scalars(
-                select(TaskRow).order_by(TaskRow.created_at.desc()).limit(limit)
-            ).all()
+            stmt = select(TaskRow).order_by(TaskRow.created_at.desc())
+            if state:
+                stmt = stmt.where(TaskRow.state == state)
+            rows = s.scalars(stmt.limit(limit)).all()
             return [_task_dict(r) for r in rows]
 
         result: list[dict[str, Any]] = await asyncio.to_thread(self._run, work)
         return result
+
+    async def delete_task(self, task_id: str) -> bool:
+        """删除任务及其事件（活跃任务须先由调用方 cancel）。"""
+
+        def work(s: Session) -> bool:
+            row = s.get(TaskRow, task_id)
+            if row is None:
+                return False
+            s.execute(delete(AgentEventRow).where(AgentEventRow.task_id == task_id))
+            s.delete(row)
+            return True
+
+        return await asyncio.to_thread(self._run, work)
 
     async def cancel_stale_active_tasks(self, reason: str) -> int:
         """把遗留的活跃态任务（QUEUED/RUNNING/WAITING_HUMAN）批量置为 CANCELLED。

@@ -47,6 +47,10 @@ class ProfileIn(BaseModel):
     payload: dict[str, Any]
     """完整 Profile 的 JSON。"""
 
+    expected_updated_at: str | None = None
+    """乐观锁凭据（GET /profiles/{id}/version 取到的 updated_at）；
+    与库中不一致时 409，防止并发保存 last-write-wins 静默覆盖。"""
+
 
 class ProfileSummary(BaseModel):
     id: str
