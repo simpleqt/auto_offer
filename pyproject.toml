@@ -4,7 +4,9 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "autooffer"
-version = "0.1.0"
+# 版本从 autooffer_core.__version__ 派生（发版只改 core 一处；
+# 曾静态写死停在 0.1.0，与实际漂移 38 个小版本）
+dynamic = ["version"]
 description = "通用简历自动填写智能体（多智能体架构，OpenAI 兼容端点）"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -46,6 +48,9 @@ autooffer-app = "app.launcher:main"
 [tool.setuptools.packages.find]
 where = [".", "core", "server"]
 include = ["autooffer_core*", "autooffer_server*", "cli*", "app*"]
+
+[tool.setuptools.dynamic]
+version = { attr = "autooffer_core.__version__" }
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
