@@ -67,15 +67,15 @@ export default function TaskDetail({
     }
   }, [liveStateValue, taskId, qc]);
 
-  // 有活跃任务时周期性刷新任务列表
+  // 有活跃任务时周期性刷新任务列表（onChanged 由父层失效 ['tasks']——
+  // 此前这里同时直调 invalidate + onChanged，每次打双份请求）
   useEffect(() => {
     if (!task || !ACTIVE_TASK_STATES.has(task.state)) return;
     const timer = setInterval(() => {
-      qc.invalidateQueries({ queryKey: ['tasks'] });
       onChanged();
     }, 3000);
     return () => clearInterval(timer);
-  }, [task, qc, onChanged]);
+  }, [task, onChanged]);
 
   useEffect(() => {
     listRef.current?.scrollTo({ top: listRef.current.scrollHeight, behavior: 'smooth' });

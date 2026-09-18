@@ -18,7 +18,7 @@ import {
 import { PlayCircleOutlined, ReloadOutlined } from '@ant-design/icons';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { cancelTask, createTask, listProfiles, listTasks, resumeTask } from '../api/client';
-import { TASK_STATE_COLORS, TASK_STATE_LABELS } from '../constants';
+import { ACTIVE_TASK_STATES, TASK_STATE_COLORS, TASK_STATE_LABELS } from '../constants';
 import { fmtTime } from '../profile-utils';
 import TaskDetail from './TaskDetail';
 
@@ -27,7 +27,10 @@ export default function TasksPage() {
   const { data: tasks, isLoading } = useQuery({
     queryKey: ['tasks'],
     queryFn: () => listTasks(50),
-    refetchInterval: 3000,
+    // 只有存在活跃任务才轮询：空闲列表不再 3s 常打；任务转终态由
+    // TaskDetail 的 WS/轮询联动失效本列表
+    refetchInterval: (query) =>
+      (query.state.data ?? []).some((t) => ACTIVE_TASK_STATES.has(t.state)) ? 3000 : false,
   });
   const { data: profiles } = useQuery({ queryKey: ['profiles'], queryFn: listProfiles });
   const [selectedId, setSelectedId] = useState<string | null>(null);

@@ -64,7 +64,16 @@ export default function ModelsPage() {
   });
 
   const saveRouting = useMutation({
-    mutationFn: (mapping: RoleRouting) => putRouting(mapping),
+    // 以**当前缓存**为底合并：快速连改两个角色时，第二次 PUT 不再基于
+    // 渲染快照的旧 map（此前第一次修改可能被静默覆盖）
+    mutationFn: (changes: Partial<RoleRouting>) => {
+      const current = (qc.getQueryData(['routing']) as RoleRouting | undefined) ?? routing ?? {};
+      const merged: RoleRouting = { ...current };
+      for (const [k, v] of Object.entries(changes)) {
+        if (v !== undefined) merged[k] = v;
+      }
+      return putRouting(merged);
+    },
     onSuccess: () => {
       message.success('角色路由已更新');
       qc.invalidateQueries({ queryKey: ['routing'] });
@@ -208,7 +217,7 @@ export default function ModelsPage() {
                     placeholder="默认端点"
                     value={routingMap[role]}
                     options={(models ?? []).map((m) => ({ value: m.id, label: m.name || m.id }))}
-                    onChange={(v) => saveRouting.mutate({ ...routingMap, [role]: v ?? '' })}
+                    onChange={(v) => saveRouting.mutate({ [role]: v ?? '' })}
                   />
                 </Space>
               </Col>
