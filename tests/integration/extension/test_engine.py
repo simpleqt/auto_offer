@@ -805,3 +805,84 @@ async def test_only_fields_subset_mode(page: Page) -> None:
     # 邮箱不在子集内：不碰
     assert "电子邮箱" not in labels
     assert await page.input_value("#email") == ""
+
+
+async def test_only_fields_report_accounting(page: Page) -> None:
+    """子集趟报告记账：刚填上的子集字段不得再进 skipped/unmatched。
+
+    usedFields 存字段下标，子集过滤须映射回标签——曾拿数字下标对字符串
+    集合查恒 miss，子集趟把本趟刚填的字段重报「无匹配」，unmatched 与
+    填充率全失真。"""
+    await page.goto(fixture_url("zhiye_like.html"))
+    flat: dict[str, Any] = {
+        "schema": 1,
+        "profile": {"id": "demo", "label": "示例"},
+        "sections": [
+            {
+                "key": "basic",
+                "title": "基本信息",
+                "kind": "simple",
+                "values": {"姓名": "张三", "电子邮箱": "zhangsan@example.com"},
+            }
+        ],
+    }
+    report = await autofill(page, flat, {"onlyFields": ["姓名"]})
+    assert "姓名" in [r["label"] for r in report["filled"]]
+    unmatched = [u["label"] for u in report.get("unmatched", [])]
+    no_match = [
+        s["field"] for s in report.get("skipped", []) if "无匹配" in s["reason"]
+    ]
+    # 本趟刚填上的子集字段：不算无匹配
+    assert "姓名" not in unmatched, unmatched
+    assert "姓名" not in no_match, no_match
+    # 子集外的空字段仍如实上报（供下一轮 AI 映射）
+    assert "电子邮箱" in unmatched, unmatched
+
+
+async def test_hukou_domain_veto(page: Page) -> None:
+    """户籍域双向硬否决：户口≠籍贯，宁可空着不猜错。
+
+    曾以 return 0 实现否决（假值），硬否决从未生效，仅靠评分碰巧兜底。"""
+    await page.goto(fixture_url("zhiye_like.html"))
+    await page.add_script_tag(path=str(CONTENT_JS))
+    result = await page.evaluate(
+        """() => {
+          const d = window.__AUTOOFFER_CONTENT__.domainConflict;
+          const f = (label) => ({ label, nearbyText: "", section: "", optionText: "" });
+          const e = (label) => ({ label, category: "basic", value: "示例值" });
+          return {
+            hukouFieldVsOriginEntry: d(f("户口所在地"), e("籍贯")),
+            originFieldVsHukouEntry: d(f("籍贯"), e("户籍所在地")),
+            hukouFieldVsHukouEntry: d(f("户口所在地"), e("户籍所在地")),
+            nameFieldVsNameEntry: d(f("姓名"), e("姓名")),
+          };
+        }"""
+    )
+    assert result["hukouFieldVsOriginEntry"] is True, result
+    assert result["originFieldVsHukouEntry"] is True, result
+    assert result["hukouFieldVsHukouEntry"] is False, result
+    assert result["nameFieldVsNameEntry"] is False, result
+
+
+async def test_fill_cancel_semantics(page: Page) -> None:
+    """取消语义：置位后引擎在循环边界立即收尾，不继续操作 DOM。
+
+    取代此前「无取消原语，内容脚本失联即永挂、互斥锁锁死标签页」的
+    协议缺陷；直调方（测试/控制台）用 resetFillCancel 复位后可正常再填。"""
+    await page.goto(fixture_url("zhiye_like.html"))
+    await page.add_script_tag(path=str(CONTENT_JS))
+    await page.evaluate("() => window.__AUTOOFFER_CONTENT__.requestFillCancel()")
+    report = await page.evaluate(
+        "(p) => window.__AUTOOFFER_CONTENT__.autofill(p, {})", ZHIYE_PROFILE
+    )
+    assert report.get("cancelled") is True, report
+    assert report["counts"] == {"filled": 0, "failed": 0, "skipped": 0}
+    assert await page.input_value("#name") == ""
+
+    # 复位后正常填写，报告不带取消标记
+    await page.evaluate("() => window.__AUTOOFFER_CONTENT__.resetFillCancel()")
+    report2 = await page.evaluate(
+        "(p) => window.__AUTOOFFER_CONTENT__.autofill(p, {})", ZHIYE_PROFILE
+    )
+    assert not report2.get("cancelled"), report2
+    assert await page.input_value("#name") == "张三"

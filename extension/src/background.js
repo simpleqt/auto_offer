@@ -160,17 +160,55 @@ async function handleStatus() {
   }
 }
 
+/** 单趟（单帧）填报看门狗：重页面全量一轮实测 1-3 分钟，留足余量。
+ *  超时说明内容脚本已失联（SPA 路由切换后卡死等）——请引擎尽力中止，
+ *  编排层不再等待，互斥锁得以释放（此前永挂会锁死该标签页后续填写）。 */
+const FILL_PASS_TIMEOUT_MS = 180000;
+
+function sendVersioned(tabId, message, frameId) {
+  return chrome.tabs.sendMessage(
+    tabId,
+    { version: chrome.runtime.getManifest().version, ...message },
+    frameId === undefined ? {} : { frameId }
+  );
+}
+
+function tabMessageWithTimeout(tabId, message, frameId, timeoutMs, label) {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      sendVersioned(tabId, { type: "autooffer:cancel" }, frameId).catch(() => {});
+      reject(
+        new Error(
+          `${label}超时（${Math.round(timeoutMs / 1000)}s）内容脚本未响应，` +
+            "已请求引擎中止；请刷新页面后重试"
+        )
+      );
+    }, timeoutMs);
+    sendVersioned(tabId, message, frameId).then(
+      (resp) => {
+        clearTimeout(timer);
+        resolve(resp);
+      },
+      (err) => {
+        clearTimeout(timer);
+        reject(err);
+      }
+    );
+  });
+}
+
 async function runFillPass(tabId, flat, options, frameIds) {
   // 逐帧派发：iframe 渲染的表单（整页或分区）各自填报后合并报告。
   // 单帧（绝大多数站点）时行为与原先一致。
   const targets = frameIds && frameIds.length ? frameIds : [0];
-  const version = chrome.runtime.getManifest().version;
   let primary = null;
   for (const frameId of targets) {
-    const report = await chrome.tabs.sendMessage(
+    const report = await tabMessageWithTimeout(
       tabId,
-      { type: "autooffer:fill", version, profile: flat, ...options },
-      { frameId }
+      { type: "autooffer:fill", profile: flat, ...options },
+      frameId,
+      FILL_PASS_TIMEOUT_MS,
+      "填写"
     );
     if (!report || report.error) {
       throw new Error((report && report.error) || "内容脚本未返回报告");
@@ -192,14 +230,17 @@ async function fillableFrames(tabId) {
   } catch {
     /* 无 webNavigation 权限时退回顶层 */
   }
-  const version = chrome.runtime.getManifest().version;
   const out = [];
   for (const { frameId } of frames) {
     try {
-      const probe = await chrome.tabs.sendMessage(
+      // 探测也带看门狗：帧监听器存在但不回话（返回 true 后卡死）时
+      // 不至于把整个编排挂在探测阶段
+      const probe = await tabMessageWithTimeout(
         tabId,
-        { type: "autooffer:probe", version },
-        { frameId }
+        { type: "autooffer:probe" },
+        frameId,
+        10000,
+        "帧探测"
       );
       if (probe && probe.fields > 0) {
         out.push(frameId);
@@ -262,6 +303,8 @@ function mergeReports(primary, secondary, opts) {
           ? secondary.formErrors
           : primary.formErrors) || [],
     uploadCount: ((primary.uploadCount || 0) + (secondary.uploadCount || 0)) || undefined,
+    // 任一段被取消则合并结果整体标记取消（编排层据此停掉后续 AI 轮）
+    ...(primary.cancelled || secondary.cancelled ? { cancelled: true } : {}),
   };
 }
 
@@ -350,6 +393,36 @@ function restrictedValueSet(flat, values) {
  *  操作同一 DOM（各自开面板/点添加按钮），结果不可预测。 */
 const inflightTabs = new Set();
 
+/** 用户取消填写：向目标标签页所有帧派发 autooffer:cancel（尽力而为——
+ *  对未在填写的帧无副作用）。引擎在循环边界收尾，编排层的下一趟
+ *  sendMessage 随之 resolve，互斥锁正常释放。 */
+async function handleCancelFill(msg) {
+  const tabId = msg && msg.tabId;
+  if (!tabId) {
+    return { ok: false, error: "缺少目标标签页" };
+  }
+  let frames = [{ frameId: 0 }];
+  try {
+    const all = await chrome.webNavigation.getAllFrames({ tabId });
+    if (Array.isArray(all) && all.length > 0) {
+      frames = all.map((f) => ({ frameId: f.frameId }));
+    }
+  } catch {
+    /* 无 webNavigation 权限时只通知顶层 */
+  }
+  let delivered = 0;
+  for (const { frameId } of frames) {
+    try {
+      await sendVersioned(tabId, { type: "autooffer:cancel" }, frameId);
+      delivered += 1;
+    } catch {
+      /* 该帧无内容脚本 */
+    }
+  }
+  await aoLog("info", "fill.cancel_requested", { tabId, delivered });
+  return { ok: true, delivered };
+}
+
 async function handleAutofill(msg) {
   if (inflightTabs.has(msg.tabId)) {
     throw new Error("该页面正在填写中，请等本次完成后再触发");
@@ -413,6 +486,9 @@ async function runAutofill(msg) {
 
   const values = flatValueMap(flat);
   const restrictedValues = restrictedValueSet(flat, values);
+  // 第一段就被取消（用户取消/看门狗超时）时跳过整个 AI 阶段：继续跑
+  // 既白烧 LLM token，更会在用户已放弃后继续操作页面 DOM
+  if (!report.cancelled)
   try {
     // 二段-1：AI 标签映射（仅标签，不含任何值）
     const unmatched = report.unmatched || [];
@@ -480,6 +556,9 @@ async function runAutofill(msg) {
     // 每轮：失败字段收割选项 → AI 挑选项 → override 补填 → 级联展开出新选项再下一轮。
     if (msg.aiMapping !== false) {
       for (let round = 0; round < 3; round += 1) {
+        if (report.cancelled) {
+          break; // 上一轮补填途中被取消：不再发起下一轮
+        }
         const picks = buildOptionPicks(report, round === 0 ? mapping : {}, values, restrictedValues);
         if (picks.length === 0) {
           break;
@@ -550,6 +629,7 @@ async function runAutofill(msg) {
     filled: report.counts ? report.counts.filled : 0,
     failed: report.counts ? report.counts.failed : 0,
     skipped: report.counts ? report.counts.skipped : 0,
+    ...(report.cancelled ? { cancelled: true } : {}),
   });
 
   // 上报投递记录到本地应用（服务端同 URL 的 filled 记录去重更新；失败不影响填写）
@@ -592,6 +672,8 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
         sendResponse(await handleStatus());
       } else if (msg.type === "ao:autofill") {
         sendResponse(await handleAutofill(msg));
+      } else if (msg.type === "ao:cancel") {
+        sendResponse(await handleCancelFill(msg));
       } else if (msg.type === "ao:log.clear") {
         await chrome.storage.local.set({ aoLog: [] });
         sendResponse({ cleared: true });

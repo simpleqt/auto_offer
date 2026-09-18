@@ -37,6 +37,29 @@
     return; // 已注入（scripting.executeScript 重复调用幂等）
   }
 
+  // ---------- 填写取消 ----------
+  // background 派发 autooffer:cancel（用户取消/编排层超时）后置位；
+  // 引擎在填写循环边界检查并尽快收尾返回部分报告，不再继续操作 DOM。
+  // 标志在收到新的 autooffer:fill 消息时复位——autofill 自身不复位，
+  // 保证「先取消后填写」竞态下取消不丢。
+  let fillCancelled = false;
+
+  function requestFillCancel() {
+    fillCancelled = true;
+  }
+
+  function resetFillCancel() {
+    fillCancelled = false;
+  }
+
+  function throwIfCancelled() {
+    if (fillCancelled) {
+      const err = new Error("填写已取消");
+      err.cancelled = true;
+      throw err;
+    }
+  }
+
   // ---------- 常量 ----------
 
   const CONTROL_SELECTOR = [
@@ -1139,7 +1162,7 @@
     const fieldOrigin = /^(籍贯|生源地|祖籍|家乡)/.test(field.label || "");
     const entryOrigin = /^(籍贯|生源地)$/.test(entry.label || "");
     if ((fieldHukou && entryOrigin) || (fieldOrigin && entryHukou)) {
-      return 0;
+      return true;
     }
     // 教育域硬约束：入学/毕业/学校等教育专属标签只能配教育条目。
     // 档案里 教育/实习/项目/科研 五类条目都带 开始/结束时间，星网真站实测
@@ -3176,26 +3199,44 @@
   async function autofill(flatProfile, options) {
     const frags = [];
     const maxPages = 5; // 有界：防「下一步」误识别导致一路翻穿站点
-    for (let page = 0; page < maxPages; page += 1) {
-      frags.push(await fillOnePage(flatProfile, options));
-      if (options && options.noAdvance) {
-        break;
+    try {
+      for (let page = 0; page < maxPages; page += 1) {
+        frags.push(await fillOnePage(flatProfile, options));
+        if (options && options.noAdvance) {
+          break;
+        }
+        throwIfCancelled();
+        const next = findWizardNextButton();
+        if (!next) {
+          break;
+        }
+        const sigBefore = pageSignature();
+        clickActionElement(next);
+        await sleep(700);
+        if (pageSignature() === sigBefore) {
+          break;
+        }
       }
-      const next = findWizardNextButton();
-      if (!next) {
-        break;
+    } catch (err) {
+      if (!err || !err.cancelled) {
+        throw err;
       }
-      const sigBefore = pageSignature();
-      clickActionElement(next);
-      await sleep(700);
-      if (pageSignature() === sigBefore) {
-        break;
+      // 取消：已完成的页照常汇报（部分结果），标记 cancelled 收尾
+      if (frags.length === 0) {
+        return {
+          counts: { filled: 0, failed: 0, skipped: 0 },
+          filled: [], failed: [], skipped: [], unmatched: [], formErrors: [],
+          cancelled: true,
+        };
       }
+      return { ...mergeFragments(frags), cancelled: true };
     }
-    return mergeFragments(frags);
+    const merged = mergeFragments(frags);
+    return fillCancelled ? { ...merged, cancelled: true } : merged;
   }
 
   async function fillOnePage(flatProfile, options) {
+    throwIfCancelled();
     const adapter = detectSiteAdapter();
     await ensureRepeatBlocks(flatProfile, options);
     const { fields, uploads } = scanFields(adapter);
@@ -3212,8 +3253,16 @@
           onlySet.has(it.field.label) ||
           onlySet.has(`${it.field.label}#${it.field.occurrenceIndex || 0}`)
       );
+      // usedFields 存的是 fields 下标，须映射回标签再对 onlySet 过滤
+      // （曾拿数字下标对字符串集合查恒 miss，子集趟把刚填上的字段
+      // 重新报成「无匹配/已有值」，填充率与 unmatched 全失真）
       usedFields = new Set(
-        [...usedFields].filter((label) => onlySet.has(label))
+        [...usedFields].filter(
+          (i) =>
+            fields[i].label &&
+            (onlySet.has(fields[i].label) ||
+              onlySet.has(`${fields[i].label}#${fields[i].occurrenceIndex || 0}`))
+        )
       );
     }
     // AI 选选项覆盖：字段标签（或 标签#occurrence）→ 选中的选项值。
@@ -3304,6 +3353,7 @@
       return { result, verified, wasPrefilled };
     };
     for (const item of plan) {
+      throwIfCancelled();
       const { result, verified, wasPrefilled } = await execAndVerify(item);
       const label = item.field.label || item.field.nearbyText || "(无标签)";
       // occurrence 随行携带：background 合并报告/AI 选选项按 label#occurrence
@@ -3392,6 +3442,7 @@
       }
       const healedLabels = new Set();
       for (const item of freshPlan) {
+        throwIfCancelled();
         const key = `${item.field.label}#${item.field.occurrenceIndex || 0}`;
         if (!retryKeys.has(key)) {
           continue;
@@ -3458,6 +3509,7 @@
         skipped.push({ field: norm(row.textContent, 60) || "附件", reason: "附件需手动上传" });
       }
     } else {
+      throwIfCancelled();
       const uploadRows = await fillUploads(uploads, options.attachments, adapter);
       for (const r of uploadRows) {
         if (r.ok) {
@@ -3547,6 +3599,9 @@
     buildEntries,
     buildPlan,
     scoreField,
+    domainConflict,
+    requestFillCancel,
+    resetFillCancel,
     tryFillDatePicker,
     harvestFieldOptions,
   };
@@ -3569,7 +3624,15 @@
         }
         return undefined;
       }
+      if (msg && msg.type === "autooffer:cancel") {
+        // 用户取消/编排层超时：置位后引擎在最近的循环边界收尾返回。
+        // 无副作用——对未在填写的帧调用也只是空置位（下趟 fill 复位）。
+        requestFillCancel();
+        sendResponse({ ok: true });
+        return undefined;
+      }
       if (msg && msg.type === "autooffer:fill") {
+        resetFillCancel();
         autofill(msg.profile || {}, {
           mapping: msg.mapping || null,
           overrides: msg.overrides || null,

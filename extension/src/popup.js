@@ -128,7 +128,18 @@ async function startFill() {
 
   $("btn-fill").disabled = true;
   $("btn-fill").textContent = "填写中…";
+  $("btn-cancel").classList.remove("hidden");
   $("report").classList.add("hidden");
+  const requestCancel = async () => {
+    $("btn-cancel").disabled = true;
+    $("btn-fill").textContent = "已请求取消，等待引擎收尾…";
+    try {
+      await chrome.runtime.sendMessage({ type: "ao:cancel", tabId: activeTab.id });
+    } catch {
+      /* 后台不可达时由 6 分钟兜底超时处理 */
+    }
+  };
+  $("btn-cancel").onclick = requestCancel;
   // 阶段进度：后台把当前阶段写进 aoProgress，这里轮询显示（AI 映射较慢时不至于像卡死）
   let ticks = 0;
   const FILL_TIMEOUT_TICKS = 600; // 600ms × 600 = 6 分钟兜底
@@ -138,10 +149,17 @@ async function startFill() {
     if (ticks >= FILL_TIMEOUT_TICKS) {
       timedOut = true;
       clearInterval(progressTimer);
+      // 超时不再干等：主动请求引擎中止并释放互斥（此前只提示，
+      // 填写可能永挂后台且该标签页后续填写被锁死）
+      try {
+        await chrome.runtime.sendMessage({ type: "ao:cancel", tabId: activeTab.id });
+      } catch {
+        /* 忽略 */
+      }
       $("btn-fill").disabled = false;
       $("btn-fill").textContent = "开始填写";
       renderError(
-        "等待超时（6 分钟）：填写可能仍在后台进行（本地模型较慢），" +
+        "等待超时（6 分钟）：已请求后台中止填写，" +
           "请稍后刷新页面重试，或查看运行日志排查。"
       );
       return;
@@ -178,6 +196,9 @@ async function startFill() {
     clearInterval(progressTimer);
     $("btn-fill").disabled = false;
     $("btn-fill").textContent = "开始填写";
+    $("btn-cancel").disabled = false;
+    $("btn-cancel").classList.add("hidden");
+    $("btn-cancel").onclick = null;
   }
 }
 
@@ -209,6 +230,7 @@ function renderReport(report) {
     `<span class="badge ok">已填 ${counts.filled || 0}</span>` +
     `<span class="badge bad">失败 ${counts.failed || 0}</span>` +
     `<span class="badge skip">跳过 ${counts.skipped || 0}</span>` +
+    (report.cancelled ? `<span class="badge skip">已取消（部分填写）</span>` : "") +
     (site ? `<span class="badge site">${site}</span>` : "");
   const errBox = $("form-errors");
   const formErrors = report.formErrors || [];
