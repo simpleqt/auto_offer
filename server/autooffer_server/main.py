@@ -35,6 +35,31 @@ _LOCAL_ORIGINS = [
 # 攻击者域名解析到 127.0.0.1 后，浏览器视为同源绕过 SOP 直读本地服务
 _ALLOWED_HOSTS = {"127.0.0.1", "localhost", "[::1]", "testserver"}
 
+# 允许的 Origin（变更类请求与 WebSocket）：本机回环（桌面 UI 同源 /
+# Vite 开发代理）与浏览器插件。恶意网页对本地服务发起跨站 POST
+# （resume/cancel/multipart 上传等简单请求，无需 CORS 预检）时浏览器
+# 必带真实 Origin 且不可伪造——据此拒绝。本机进程（curl 等）不发送
+# Origin，不受影响。`null`（沙箱 iframe 可伪造）一律拒绝。
+_ALLOWED_ORIGIN_PREFIXES = ("chrome-extension://", "moz-extension://")
+_ALLOWED_ORIGIN_EXACT = set(_LOCAL_ORIGINS)
+
+
+def _origin_allowed(origin: str) -> bool:
+    o = origin.strip().lower().rstrip("/")
+    if not o or o == "null":
+        return False
+    if o in _ALLOWED_ORIGIN_EXACT:
+        return True
+    if o.startswith(_ALLOWED_ORIGIN_PREFIXES):
+        return True
+    try:
+        from urllib.parse import urlparse
+
+        host = urlparse(o).hostname or ""
+        return host in ("127.0.0.1", "localhost", "::1", "[::1]")
+    except ValueError:
+        return False
+
 
 def _host_allowed(host: str) -> bool:
     if not host:
@@ -45,29 +70,51 @@ def _host_allowed(host: str) -> bool:
     return hostpart in _ALLOWED_HOSTS
 
 
+_MUTATING_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
+
+
+def _header(scope: Any, name: bytes) -> str:
+    return next(
+        (v.decode("latin-1") for k, v in scope.get("headers", []) if k == name),
+        "",
+    )
+
+
 class _HostGuardMiddleware:
-    """Host 头不在本机回环名单时直接 403（DNS rebinding 防御）。"""
+    """本机回环防线：Host 与 Origin 双校验（DNS rebinding / 跨站写防御）。
+
+    - Host 头不在回环名单 → 拒绝（HTTP 403；WS 拒绝握手）。
+    - 变更类请求（POST/PUT/PATCH/DELETE）与 WebSocket 携带恶意 Origin
+      → 拒绝：浏览器对跨站简单请求必带真实 Origin 且不可伪造，恶意网页
+      无法再触发 resume/cancel/上传等副作用。本机进程不发 Origin，不受影响。
+    """
 
     def __init__(self, app: Any) -> None:
         self.app = app
 
     async def __call__(self, scope: Any, receive: Any, send: Any) -> None:
-        if scope["type"] == "http":
-            host = next(
-                (
-                    v.decode("latin-1")
-                    for k, v in scope.get("headers", [])
-                    if k == b"host"
-                ),
-                "",
+        if scope["type"] in ("http", "websocket"):
+            if not _host_allowed(_header(scope, b"host")):
+                await self._reject(scope, receive, send)
+                return
+            origin = _header(scope, b"origin")
+            needs_origin_check = scope["type"] == "websocket" or (
+                scope.get("method") in _MUTATING_METHODS
             )
-            if not _host_allowed(host):
-                from starlette.responses import JSONResponse
-
-                resp = JSONResponse({"detail": "invalid Host header"}, status_code=403)
-                await resp(scope, receive, send)
+            if origin and needs_origin_check and not _origin_allowed(origin):
+                await self._reject(scope, receive, send)
                 return
         await self.app(scope, receive, send)
+
+    async def _reject(self, scope: Any, receive: Any, send: Any) -> None:
+        if scope["type"] == "http":
+            from starlette.responses import JSONResponse
+
+            resp = JSONResponse({"detail": "invalid Host/Origin header"}, status_code=403)
+            await resp(scope, receive, send)
+        else:
+            # 握手前关闭：uvicorn 对未 accept 的 close 以 403 拒绝升级
+            await send({"type": "websocket.close", "code": 1008})
 
 
 def create_app(
@@ -90,6 +137,9 @@ def create_app(
             data_dir=str(context.config.data_dir),
             host=context.config.host,
         )
+        # 上次进程遗留的活跃态任务是僵尸（队列/gate 在内存里已丢失），
+        # 启动即清理，避免任务列表永久悬挂
+        await context.recover_stale_tasks()
         yield
         await context.shutdown()
         log.info("server.stopped")

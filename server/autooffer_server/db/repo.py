@@ -11,7 +11,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-from sqlalchemy import create_engine, delete, select
+from sqlalchemy import create_engine, delete, select, update
 from sqlalchemy.orm import Session, sessionmaker
 
 from autooffer_server.db.models import (
@@ -235,6 +235,23 @@ class Repo:
         result: list[dict[str, Any]] = await asyncio.to_thread(self._run, work)
         return result
 
+    async def cancel_stale_active_tasks(self, reason: str) -> int:
+        """把遗留的活跃态任务（QUEUED/RUNNING/WAITING_HUMAN）批量置为 CANCELLED。
+
+        队列、resume gate 与 asyncio 任务都在内存里，服务重启即丢失——
+        这些任务既不会被执行也无法 resume，不清理就会永远以活跃态悬挂
+        在任务列表里（僵尸任务）。返回清理条数。"""
+
+        def work(s: Session) -> int:
+            result = s.execute(
+                update(TaskRow)
+                .where(TaskRow.state.in_(["QUEUED", "RUNNING", "WAITING_HUMAN"]))
+                .values(state="CANCELLED", wait_reason=reason, updated_at=_now())
+            )
+            return int(result.rowcount or 0)
+
+        return await asyncio.to_thread(self._run, work)
+
     # ---------- 审计事件 ----------
 
     async def add_event(
@@ -252,13 +269,20 @@ class Repo:
         await asyncio.to_thread(self._run, work)
 
     async def list_events(self, task_id: str, limit: int = 500) -> list[dict[str, Any]]:
+        """按时间升序返回；超过 limit 时保留**最新** limit 条。
+
+        曾按升序直接 limit，超限截掉的是最新事件：>500 条的任务对中途
+        接入的 WS/REST 回放既看不到被截掉的新事件，也不在订阅队列里，
+        形成中段黑洞——改为降序取尾再反转，保证回放与实时流无缝衔接。"""
+
         def work(s: Session) -> list[dict[str, Any]]:
             rows = s.scalars(
                 select(AgentEventRow)
                 .where(AgentEventRow.task_id == task_id)
-                .order_by(AgentEventRow.seq_id)
+                .order_by(AgentEventRow.seq_id.desc())
                 .limit(limit)
             ).all()
+            rows.reverse()
             return [
                 {
                     "seq": r.seq, "kind": r.kind, "agent": r.agent,

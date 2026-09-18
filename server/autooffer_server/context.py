@@ -99,6 +99,17 @@ class AppContext:
                     log.warning("context.routing_endpoint_missing", role=role, id=endpoint_id)
         return ModelRouterImpl(default_ep, overrides, usage_sink=usage_sink)
 
+    async def recover_stale_tasks(self) -> int:
+        """启动时清理上次进程遗留的活跃态任务（僵尸任务）。
+
+        重启后内存态的队列与 resume gate 已丢失，QUEUED/RUNNING/
+        WAITING_HUMAN 的任务既不会执行也无法 resume，置为 CANCELLED
+        并注明原因，用户可重新发起。"""
+        count = await self.repo.cancel_stale_active_tasks("服务重启，任务中断")
+        if count:
+            log.info("context.recovered_stale_tasks", count=count)
+        return count
+
     async def shutdown(self) -> None:
         await self.scheduler.shutdown()
         if self.shared_browser is not None:
