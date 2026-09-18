@@ -42,7 +42,7 @@ export default function TaskDetail({
   onChanged: () => void;
 }) {
   const qc = useQueryClient();
-  const { events, connState, liveState } = useTaskStream(taskId);
+  const { events, connState, liveState, hasGap } = useTaskStream(taskId);
   const listRef = useRef<HTMLDivElement>(null);
 
   // 从实时流推断当前状态，用于决定是否继续轮询详情。
@@ -118,11 +118,11 @@ export default function TaskDetail({
               status={
                 connState === 'open'
                   ? 'processing'
-                  : connState === 'connecting'
+                  : connState === 'connecting' || connState === 'reconnecting'
                     ? 'default'
                     : 'error'
               }
-              text={connState === 'open' ? '实时' : connState}
+              text={connState === 'open' ? '实时' : connState === 'reconnecting' ? '重连中' : connState}
             />
           </Space>
         }
@@ -171,6 +171,11 @@ export default function TaskDetail({
             styles={{ body: { height: 360, overflow: 'auto' } }}
           >
             <div ref={listRef}>
+              {hasGap && (
+                <Typography.Paragraph type="warning" style={{ fontSize: 12 }}>
+                  事件流存在缺口（断线重连或超出服务端保留上限），时间线可能不完整
+                </Typography.Paragraph>
+              )}
               <Timeline
                 items={stepEvents.map((e) => ({
                   color:
