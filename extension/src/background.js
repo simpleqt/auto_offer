@@ -386,13 +386,25 @@ function buildOptionPicks(first, mapping, values, restrictedValues) {
 }
 
 /** 受限敏感字段的值集合（flat.restrictedLabels 标记的字段取值）：
- *  这些值不进 option-match 请求（LLM prompt）——「值不出本机」契约。 */
+ *  这些值不进 option-match 请求（LLM prompt）——「值不出本机」契约。
+ *  repeat 段遍历全部条目：flatValueMap 只取首条，第二个家庭成员的
+ *  家庭电话等受限值此前不在集合里，仍可能进 LLM 提示词。 */
 function restrictedValueSet(flat, values) {
   const set = new Set();
-  for (const label of (flat && flat.restrictedLabels) || []) {
-    const v = values[label];
-    if (v) {
+  const add = (v) => {
+    if (v != null && String(v)) {
       set.add(String(v).trim());
+    }
+  };
+  for (const label of (flat && flat.restrictedLabels) || []) {
+    add(values[label]);
+    for (const s of (flat && flat.sections) || []) {
+      if (s.kind !== "repeat") {
+        continue;
+      }
+      for (const item of s.items || []) {
+        add(item ? item[label] : undefined);
+      }
     }
   }
   return set;
