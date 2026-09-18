@@ -44,7 +44,10 @@ async def task_events_ws(websocket: WebSocket, task_id: str) -> None:
             except TimeoutError:
                 await websocket.send_json({"type": "ping"})
                 continue
-            if int(event.get("seq") or 0) in replayed_seqs:
+            # 回放去重只针对 seq>0 的有序事件：state 事件固定 seq=0，
+            # 若历史里恰有 seq=0 的入库事件，实时 state 会被误判已回放而丢弃
+            seq = int(event.get("seq") or 0)
+            if seq > 0 and seq in replayed_seqs:
                 continue
             await websocket.send_json({"type": event.get("kind", "step"), **event})
     except WebSocketDisconnect:

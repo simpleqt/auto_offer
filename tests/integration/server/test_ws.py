@@ -83,3 +83,48 @@ def test_ws_waiting_human_state_pushed(ctx_factory: Any) -> None:
                     found = True
                     break
             assert found, "应推送 WAITING_HUMAN 状态与原因"
+
+
+def test_live_state_events_not_swallowed_by_zero_seq_history(
+    ctx_factory: Any, fake_runner: Any
+) -> None:
+    """seq=0 碰撞防护：历史里存在 seq=0 的入库事件时，实时 state 事件
+    （固定 seq=0）不得被回放去重误吞——否则 resume 后界面收不到 RUNNING。"""
+    import asyncio
+    import time
+
+    from autooffer_server.main import create_app
+    from tests.integration.server.conftest import FakeRunner, sample_profile_payload, ws_connect
+
+    ctx = ctx_factory(FakeRunner(pause_reason="请登录"))
+    app = create_app(ctx=ctx)
+    with TestClient(app, base_url="http://127.0.0.1") as c:
+        c.put("/api/v1/profiles/p1", json={"payload": sample_profile_payload()})
+        task_id = c.post(
+            "/api/v1/tasks", json={"url": "https://x.com", "profile_id": "p1"}
+        ).json()["id"]
+
+        deadline = time.time() + 8
+        while time.time() < deadline:
+            if c.get(f"/api/v1/tasks/{task_id}").json()["state"] == "WAITING_HUMAN":
+                break
+            time.sleep(0.05)
+        # 历史里埋一条 seq=0 的入库事件（碰撞源）
+        asyncio.run(ctx.repo.add_event(task_id, 0, "step", "actor", "历史0号"))
+
+        with ws_connect(c, f"/ws/tasks/{task_id}") as ws:
+            # 回放阶段读到当前状态（WAITING_HUMAN）即止：collect 的终态断言
+            # 不适用于挂起中的任务（会等 ping 凑满次数，一条要 3 分钟）
+            replayed: list[dict[str, Any]] = []
+            for _ in range(12):
+                msg = ws.receive_json()
+                if msg.get("type") == "ping":
+                    continue
+                replayed.append(msg)
+                if msg.get("type") == "state":
+                    break
+            assert any(e.get("summary") == "历史0号" for e in replayed)
+            c.post(f"/api/v1/tasks/{task_id}/resume")
+            live = collect(ws)
+            states = [e.get("value") for e in live if e.get("type") == "state"]
+            assert "RUNNING" in states, live
