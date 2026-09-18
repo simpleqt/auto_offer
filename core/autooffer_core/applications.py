@@ -87,10 +87,11 @@ class ApplicationStore:
 
     def __init__(self, path: str | Path | None = None) -> None:
         if path is None:
-            import os
+            # 与服务层同一数据目录（此前默认 ~/AutoOffer 无点号，非 Windows
+            # 平台上 CLI 登记的投递与桌面台账分裂成两份文件）
+            from autooffer_core.paths import default_data_dir
 
-            base = Path(os.environ.get("APPDATA", str(Path.home()))) / "AutoOffer"
-            path = base / "applications.json"
+            path = default_data_dir() / "applications.json"
         self._path = Path(path)
 
     # ---------- 读写 ----------

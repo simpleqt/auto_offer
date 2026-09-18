@@ -128,6 +128,14 @@ class AgentRunner:
                                 prefill_threshold=self._config.prefill_threshold)
         self._actor = Actor(router.get("actor"))
         self._validator = Validator(router.get("validator"))
+        # token 预算统计直接持有客户端（client.total_usage 是公开属性）——
+        # 此前经 getattr(self, "_"+role) → agent._llm 两层私有属性穿透，
+        # 任一层改名即静默失去统计、护栏永久失效且无告警
+        self._usage_clients = [
+            router.get("planner"),
+            router.get("actor"),
+            router.get("validator"),
+        ]
         self._checklist = Checklist()
         self._history = HistoryLog()
         self._catalog = self._resolver.catalog(profile)
@@ -1064,9 +1072,8 @@ class AgentRunner:
     def _used_tokens(self) -> int:
         """三个智能体累计 token 用量（预算护栏与报告共用）。"""
         total = 0
-        for role in ("planner", "actor", "validator"):
-            client = getattr(self, "_" + role, None)
-            usage = getattr(getattr(client, "_llm", None), "total_usage", None)
+        for client in self._usage_clients:
+            usage = getattr(client, "total_usage", None)
             if usage is not None:
                 total += usage.total_tokens
         return total
