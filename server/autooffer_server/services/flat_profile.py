@@ -15,6 +15,11 @@ from typing import Any
 
 from pydantic import BaseModel
 
+from autooffer_core.profile.catalog import (
+    RESTRICTED_EMERGENCY_PHONE,
+    RESTRICTED_FAMILY_PHONE,
+    RESTRICTED_IDCARD,
+)
 from autooffer_core.profile.schema import (
     BasicInfo,
     DateRange,
@@ -133,8 +138,8 @@ class _Flattener:
             "入党时间": _fmt_month(ext.party_join_date) if ext and ext.party_join_date else None,
         }
         if self.include_sensitive and "id_number" in _SENSITIVE_BASIC:
-            values["身份证号"] = basic.id_number
-            self.restricted_labels.add("身份证号")
+            values[RESTRICTED_IDCARD] = basic.id_number
+            self.restricted_labels.add(RESTRICTED_IDCARD)
         self.add_simple("basic", "基本信息", values)
 
     def _intention(self, p: Profile, ext: ExtendedInfo | None) -> None:
@@ -258,14 +263,14 @@ class _Flattener:
                         "工作单位": m.workplace,
                         "职务": m.title,
                         # FamilyMember.phone 为 restricted，单独门控
-                        "电话": m.phone,
+                        RESTRICTED_FAMILY_PHONE: m.phone,
                     }
                     for m in ext.family_members
                 ],
             )
             # 家庭电话是 restricted 值：标记给插件，禁止进 LLM 选选项提示词
             if ext.family_members:
-                self.restricted_labels.add("电话")
+                self.restricted_labels.add(RESTRICTED_FAMILY_PHONE)
             if ext.emergency_contact:
                 ec = ext.emergency_contact
                 self.add_simple(
@@ -273,12 +278,12 @@ class _Flattener:
                     "紧急联系人",
                     {
                         "紧急联系人": ec.name,
-                        "紧急联系人电话": ec.phone,
+                        RESTRICTED_EMERGENCY_PHONE: ec.phone,
                         "与紧急联系人关系": ec.relation,
                     },
                 )
                 if ec.phone:
-                    self.restricted_labels.add("紧急联系人电话")
+                    self.restricted_labels.add(RESTRICTED_EMERGENCY_PHONE)
 
     def _other(self, p: Profile, ext: ExtendedInfo | None) -> None:
         values: dict[str, Any] = {
