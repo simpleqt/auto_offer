@@ -7,6 +7,7 @@
  * 窗口关闭前 beforeunload 提醒；保存栏吸底，长表单无需滚到最底。
  */
 import { useEffect, useState } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import {
   Button,
   Card,
@@ -29,6 +30,7 @@ import { Attachments, ExtendedFields, QABank } from './ProfileExtendedSections';
 
 export default function ProfileEditor({ profile }: { profile: Profile }) {
   const [form] = Form.useForm();
+  const qc = useQueryClient();
   const [saving, setSaving] = useState(false);
   const [dirty, setDirty] = useState(false);
   const [completeness, setCompleteness] = useState(() => profileCompleteness(profile));
@@ -69,6 +71,10 @@ export default function ProfileEditor({ profile }: { profile: Profile }) {
       await putProfile(profile.id, payload);
       setUnsaved(false);
       setDirty(false);
+      // 失效列表与实体缓存：完整度圆环/updated_at 否则保持旧值，
+      // 下次进编辑器也会先渲染旧数据
+      qc.invalidateQueries({ queryKey: ['profiles'] });
+      qc.invalidateQueries({ queryKey: ['profile', profile.id] });
       message.success('档案已保存');
     } catch (e) {
       message.error((e as Error).message);

@@ -58,7 +58,13 @@ export default function TaskDetail({
 
   // 实时流状态变化时同步刷新任务详情（如任务转 AWAITING_REVIEW 后取回报告）。
   useEffect(() => {
-    if (liveStateValue) qc.invalidateQueries({ queryKey: ['task', taskId] });
+    if (liveStateValue) {
+      qc.invalidateQueries({ queryKey: ['task', taskId] });
+      // 任务到达终态时联动刷新投递台账（完成即自动登记，无需切页才可见）
+      if (!ACTIVE_TASK_STATES.has(liveStateValue)) {
+        qc.invalidateQueries({ queryKey: ['applications'] });
+      }
+    }
   }, [liveStateValue, taskId, qc]);
 
   // 有活跃任务时周期性刷新任务列表
